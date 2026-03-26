@@ -1,0 +1,269 @@
+# ====================================================================
+# WarpTalk — Full Stack Docker Compose (Base)
+# Override with docker-compose.dev.yml or docker-compose.prod.yml
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# ====================================================================
+
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: warptalk-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-warptalk}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - warptalk-net
+
+  # ── PgBouncer — Connection Pooling ────────────────────────────────
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: warptalk-pgbouncer
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-warptalk}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 20
+      MIN_POOL_SIZE: 5
+      RESERVE_POOL_SIZE: 5
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - warptalk-net
+
+  # ── Redis — Cache + Streams ───────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: warptalk-redis
+    command: >
+      redis-server
+        --requirepass ${REDIS_PASSWORD}
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
+        --save 900 1
+        --save 300 10
+        --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - warptalk-net
+
+  # ── Auth Service ──────────────────────────────────────────────────
+  auth-service:
+    build:
+      context: ../warptalk-backend
+      dockerfile: auth/Dockerfile
+    container_name: warptalk-auth
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      ConnectionStrings__AuthDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=auth,public"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
+      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - warptalk-net
+
+  # ── Meeting Service ───────────────────────────────────────────────
+  meeting-service:
+    build:
+      context: ../warptalk-backend
+      dockerfile: meeting/Dockerfile
+    container_name: warptalk-meeting
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      ConnectionStrings__MeetingDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=meeting,public"
+      GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
+      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    networks:
+      - warptalk-net
+
+  # ── Transcript Service ────────────────────────────────────────────
+  transcript-service:
+    build:
+      context: ../warptalk-backend
+      dockerfile: transcript/Dockerfile
+    container_name: warptalk-transcript
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      ConnectionStrings__TranscriptDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=transcript,public"
+      GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
+      GrpcUrls__MeetingServiceUrl: "http://meeting-service:50052"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
+      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      meeting-service:
+        condition: service_started
+    networks:
+      - warptalk-net
+
+  # ── Notification Service ──────────────────────────────────────────
+  notification-service:
+    build:
+      context: ../warptalk-backend
+      dockerfile: notification/Dockerfile
+    container_name: warptalk-notification
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      ConnectionStrings__DefaultConnection: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=notification,public"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
+      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Kestrel__Endpoints__Http__Url: "http://0.0.0.0:5104"
+      Kestrel__Endpoints__Http__Protocols: "Http1"
+      Kestrel__Endpoints__gRPC__Url: "http://0.0.0.0:50054"
+      Kestrel__Endpoints__gRPC__Protocols: "Http2"
+      Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - warptalk-net
+
+  # ── API Gateway (YARP + SignalR) ──────────────────────────────────
+  gateway:
+    build:
+      context: ../warptalk-backend
+      dockerfile: gateway/src/WarpTalk.Gateway/Dockerfile
+    container_name: warptalk-gateway
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      ASPNETCORE_URLS: "http://0.0.0.0:5200"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
+      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      ReverseProxy__Clusters__auth-cluster__Destinations__auth-service__Address: "http://auth-service:5101"
+      ReverseProxy__Clusters__meeting-cluster__Destinations__meeting-service__Address: "http://meeting-service:5102"
+      ReverseProxy__Clusters__transcript-cluster__Destinations__transcript-service__Address: "http://transcript-service:5103"
+      ReverseProxy__Clusters__notification-cluster__Destinations__notification-service__Address: "http://notification-service:5104"
+      AllowedOrigins__0: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+    depends_on:
+      auth-service:
+        condition: service_started
+      meeting-service:
+        condition: service_started
+      transcript-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+    networks:
+      - warptalk-net
+
+  # ── COTURN Primary — TURN/STUN for WebRTC ─────────────────────────
+  coturn-primary:
+    image: coturn/coturn:latest
+    container_name: warptalk-coturn-primary
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    environment:
+      TURN_SECRET: ${TURN_SECRET}
+      TURN_REALM: ${TURN_REALM:-warptalk.vn}
+    networks:
+      - warptalk-net
+
+  # ── COTURN Backup — Failover ──────────────────────────────────────
+  coturn-backup:
+    image: coturn/coturn:latest
+    container_name: warptalk-coturn-backup
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    environment:
+      TURN_SECRET: ${TURN_SECRET}
+      TURN_REALM: ${TURN_REALM:-warptalk.vn}
+    networks:
+      - warptalk-net
+
+  # ── Seq — Centralized Logging ─────────────────────────────────────
+  seq:
+    image: datalust/seq:latest
+    container_name: warptalk-seq
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_API_KEY: ${SEQ_API_KEY:-}
+    volumes:
+      - seq-data:/data
+    networks:
+      - warptalk-net
+
+  # ── Prometheus — Metrics ──────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: warptalk-prometheus
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - warptalk-net
+
+  # ── Grafana — Dashboards ──────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: warptalk-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - warptalk-net
+
+volumes:
+  pgdata:
+  redis-data:
+  seq-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  warptalk-net:
+    driver: bridge

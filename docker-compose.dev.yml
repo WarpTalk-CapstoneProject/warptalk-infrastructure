@@ -1,0 +1,73 @@
+# ====================================================================
+# WarpTalk — Dev Overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# ====================================================================
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  pgbouncer:
+    ports:
+      - "6432:6432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  auth-service:
+    ports:
+      - "5101:5101"
+      - "50051:50051"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
+  meeting-service:
+    ports:
+      - "5102:5102"
+      - "50052:50052"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
+  transcript-service:
+    ports:
+      - "5103:5103"
+      - "50053:50053"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
+  notification-service:
+    ports:
+      - "5104:5104"
+      - "50054:50054"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
+  gateway:
+    ports:
+      - "5200:5200"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
+  coturn-primary:
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+
+  coturn-backup:
+    ports:
+      - "3479:3478/udp"
+      - "3479:3478/tcp"
+
+  seq:
+    ports:
+      - "5341:80"
+
+  prometheus:
+    ports:
+      - "9090:9090"
+
+  grafana:
+    ports:
+      - "3001:3000"   # 3001 to avoid conflict with NextJS on 3000

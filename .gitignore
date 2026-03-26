@@ -1,0 +1,25 @@
+# Environment
+.env
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Data volumes
+data/
+pgdata/
+redis-data/
+qdrant-data/
+
+# Logs
+logs/
+*.log
+
+# Backup outputs
+backups/
