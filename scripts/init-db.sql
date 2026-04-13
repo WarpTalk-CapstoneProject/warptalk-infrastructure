@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ── Create Schemas ──────────────────────────────────────────────────
 CREATE SCHEMA IF NOT EXISTS auth;
-CREATE SCHEMA IF NOT EXISTS meeting;
+CREATE SCHEMA IF NOT EXISTS translation_room;
 CREATE SCHEMA IF NOT EXISTS transcript;
 CREATE SCHEMA IF NOT EXISTS subscription;
 CREATE SCHEMA IF NOT EXISTS notification;
@@ -29,13 +29,13 @@ BEGIN
     ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON SEQUENCES TO auth_svc;
 
     -- Meeting service user
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'meeting_svc') THEN
-        CREATE USER meeting_svc WITH PASSWORD :'MEETING_DB_PASSWORD';
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'translation_room_svc') THEN
+        CREATE USER translation_room_svc WITH PASSWORD :'TRANSLATION_ROOM_DB_PASSWORD';
     END IF;
-    GRANT USAGE ON SCHEMA meeting TO meeting_svc;
-    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA meeting TO meeting_svc;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA meeting GRANT ALL ON TABLES TO meeting_svc;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA meeting GRANT ALL ON SEQUENCES TO meeting_svc;
+    GRANT USAGE ON SCHEMA translation_room TO translation_room_svc;
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA translation_room TO translation_room_svc;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA translation_room GRANT ALL ON TABLES TO translation_room_svc;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA translation_room GRANT ALL ON SEQUENCES TO translation_room_svc;
 
     -- Transcript service user
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'transcript_svc') THEN
@@ -67,6 +67,6 @@ END
 $$;
 
 -- ── Grant the main postgres user access to all schemas ──────────────
-GRANT ALL ON SCHEMA auth, meeting, transcript, subscription, notification TO postgres;
+GRANT ALL ON SCHEMA auth, translation_room, transcript, subscription, notification TO postgres;
 
 RAISE NOTICE '✅ WarpTalk database initialized: 5 schemas, 5 service users';

@@ -50,6 +50,30 @@ done
 echo -e "${CYAN}Starting services...${NC}"
 docker compose $COMPOSE_FILES up $BUILD_FLAG -d
 
+# Wait for DB to be healthy
+echo -e "${CYAN}Waiting for PostgreSQL to be ready...${NC}"
+for i in $(seq 1 30); do
+    if docker exec warptalk-postgres pg_isready -U postgres -q 2>/dev/null; then
+        echo -e " ${GREEN}✅ DB Ready${NC}"
+        break
+    fi
+    echo -n "."
+    sleep 1
+done
+
+# Run migrations
+echo -e "${CYAN}🐘 Running PostgreSQL migrations...${NC}"
+MIGRATIONS_DIR="$SCRIPT_DIR/migrations"
+if [[ -d "$MIGRATIONS_DIR" ]]; then
+    for file in "$MIGRATIONS_DIR"/*.sql; do
+        if [[ -f "$file" ]]; then
+            echo -e "   Executing $(basename "$file")..."
+            docker exec -i warptalk-postgres psql -U postgres -d warptalk < "$file" || echo -e "   ${YELLOW}⚠ Failed or already executed${NC}"
+        fi
+    done
+    echo -e "   ${GREEN}✅ Migrations completed${NC}"
+fi
+
 echo ""
 echo -e "${GREEN}✅ All services started!${NC}"
 echo ""
