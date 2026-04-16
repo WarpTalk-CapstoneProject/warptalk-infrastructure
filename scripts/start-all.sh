@@ -13,6 +13,7 @@ INFRA_DIR="$(dirname "$SCRIPT_DIR")"
 
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
 NC='\033[0m'
 
 echo -e "${CYAN}"
@@ -65,10 +66,30 @@ done
 echo -e "${CYAN}🐘 Running PostgreSQL migrations...${NC}"
 MIGRATIONS_DIR="$SCRIPT_DIR/migrations"
 if [[ -d "$MIGRATIONS_DIR" ]]; then
+    # Prepare migration tracking table and ensure it's executed first safely
+    if [[ -f "$MIGRATIONS_DIR/000-init-migrations.sql" ]]; then
+        docker exec -i warptalk-postgres psql -U postgres -d warptalk < "$MIGRATIONS_DIR/000-init-migrations.sql" >/dev/null 2>&1
+    fi
+
     for file in "$MIGRATIONS_DIR"/*.sql; do
         if [[ -f "$file" ]]; then
-            echo -e "   Executing $(basename "$file")..."
-            docker exec -i warptalk-postgres psql -U postgres -d warptalk < "$file" || echo -e "   ${YELLOW}⚠ Failed or already executed${NC}"
+            filename=$(basename "$file")
+            
+            # Skip the tracking table initialization script in the display loop
+            if [[ "$filename" == "000-init-migrations.sql" ]]; then
+                continue
+            fi
+            # Check if this migration has already been applied
+            is_applied=$(docker exec -i warptalk-postgres psql -U postgres -d warptalk -tAc "SELECT 1 FROM public.schema_migrations WHERE version='$filename';" 2>/dev/null)
+            
+            if [[ "$is_applied" != "1" ]]; then
+                echo -e "   Executing $filename..."
+                docker exec -i warptalk-postgres psql -U postgres -d warptalk < "$file" && \
+                docker exec -i warptalk-postgres psql -U postgres -d warptalk -c "INSERT INTO public.schema_migrations(version) VALUES ('$filename');" -q || \
+                echo -e "   ${YELLOW}⚠ Failed to execute $filename${NC}"
+            else
+                echo -e "   Skipping $filename (already applied)"
+            fi
         fi
     done
     echo -e "   ${GREEN}✅ Migrations completed${NC}"

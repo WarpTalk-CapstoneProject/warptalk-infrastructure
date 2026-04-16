@@ -15,6 +15,12 @@ CREATE SCHEMA IF NOT EXISTS transcript;
 CREATE SCHEMA IF NOT EXISTS subscription;
 CREATE SCHEMA IF NOT EXISTS notification;
 
+-- ── Create Migration Tracking Table ─────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.schema_migrations (
+    version varchar(255) PRIMARY KEY,
+    applied_at timestamp default current_timestamp
+);
+
 -- ── Per-Service Users (least privilege) ─────────────────────────────
 DO $$
 BEGIN
