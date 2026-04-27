@@ -1,0 +1,11 @@
+services:
+  auth-service:
+    platform: linux/amd64
+  translation-room-service:
+    platform: linux/amd64
+  transcript-service:
+    platform: linux/amd64
+  notification-service:
+    platform: linux/amd64
+  gateway:
+    platform: linux/amd64

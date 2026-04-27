@@ -23,7 +23,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
 
-  meeting-service:
+  translation-room-service:
     ports:
       - "5102:5102"
       - "50052:50052"

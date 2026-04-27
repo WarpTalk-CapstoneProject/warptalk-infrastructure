@@ -150,10 +150,6 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Kestrel__Endpoints__Http__Url: "http://0.0.0.0:5104"
-      Kestrel__Endpoints__Http__Protocols: "Http1"
-      Kestrel__Endpoints__gRPC__Url: "http://0.0.0.0:50054"
-      Kestrel__Endpoints__gRPC__Protocols: "Http2"
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
       pgbouncer:
@@ -224,6 +220,7 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       SEQ_API_KEY: ${SEQ_API_KEY:-}
+      SEQ_FIRSTRUN_ADMINPASSWORD: ${SEQ_ADMIN_PASSWORD:-admin12345}
     volumes:
       - seq-data:/data
     networks:
