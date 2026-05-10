@@ -1,6 +1,8 @@
 -- Migration: 004-01-05-2026-add-notification-message-table
 -- Description: Create the notification_messages table with partitions, composite indexes and grants
 
+CREATE SCHEMA IF NOT EXISTS notification;
+
 CREATE TABLE IF NOT EXISTS notification.notification_messages (
     id uuid NOT NULL DEFAULT (uuid_generate_v7()),
     user_id uuid NOT NULL,
