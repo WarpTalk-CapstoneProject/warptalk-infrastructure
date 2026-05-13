@@ -4,7 +4,7 @@
 CREATE SCHEMA IF NOT EXISTS notification;
 
 CREATE TABLE notification.admin_notifications (
-    id uuid NOT NULL DEFAULT (uuid_generate_v7()),
+    id uuid NOT NULL DEFAULT (uuidv7()),
     title character varying(255) NOT NULL,
     content text NOT NULL,
     type character varying(50) NOT NULL,
