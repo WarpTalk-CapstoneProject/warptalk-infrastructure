@@ -285,7 +285,7 @@ CREATE TABLE translation_room.translation_room_participants (
   speak_language VARCHAR(15) NOT NULL,
   status participant_status NOT NULL DEFAULT 'INVITED',
   connection_type VARCHAR(20) NOT NULL DEFAULT 'webrtc',
-  is_muted BOOLEAN NOT NULL DEFAULT false,
+  is_translation_audio_enabled BOOLEAN NOT NULL DEFAULT true,
   is_using_voice_clone BOOLEAN NOT NULL DEFAULT false,
   joined_at TIMESTAMPTZ,
   left_at TIMESTAMPTZ,
