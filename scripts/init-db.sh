@@ -26,12 +26,11 @@ PG_PORT="${PG_PORT:-5432}"
 PG_USER="${PG_USER:-postgres}"
 PG_DB="${PG_DB:-warptalk}"
 
-# Default passwords (override via .env in production!)
-AUTH_DB_PASSWORD="${AUTH_DB_PASSWORD:-changeme_auth}"
-TRANSLATION_ROOM_DB_PASSWORD="${TRANSLATION_ROOM_DB_PASSWORD:-changeme_translation_room}"
-TRANSCRIPT_DB_PASSWORD="${TRANSCRIPT_DB_PASSWORD:-changeme_transcript}"
-SUBSCRIPTION_DB_PASSWORD="${SUBSCRIPTION_DB_PASSWORD:-changeme_subscription}"
-NOTIFICATION_DB_PASSWORD="${NOTIFICATION_DB_PASSWORD:-changeme_notification}"
+# Enforce secrets are provided (no fallbacks in production!)
+if [ -z "${AUTH_DB_PASSWORD:-}" ] || [ -z "${POSTGRES_PASSWORD:-}" ]; then
+    echo -e "\033[0;31m❌ ERROR: Database passwords are not set! Please generate a .env file using scripts/generate-prod-env.sh\033[0m"
+    exit 1
+fi
 
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
@@ -53,7 +52,7 @@ if [[ "${1:-}" == "--docker" ]]; then
         "${PSQL_VARS[@]}" < "$SQL_FILE"
 else
     echo "   Running against ${PG_HOST}:${PG_PORT}"
-    PGPASSWORD="${POSTGRES_PASSWORD:-postgres}" psql \
+    PGPASSWORD="${POSTGRES_PASSWORD}" psql \
         -h "$PG_HOST" \
         -p "$PG_PORT" \
         -U "$PG_USER" \

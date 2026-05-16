@@ -36,8 +36,9 @@ services:
       DEFAULT_POOL_SIZE: 20
       MIN_POOL_SIZE: 5
       RESERVE_POOL_SIZE: 5
-    volumes:
-      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits, search_path
+      AUTH_TYPE: scram-sha-256
+      LISTEN_PORT: 6432
     depends_on:
       postgres:
         condition: service_healthy
@@ -165,6 +166,8 @@ services:
       context: ../warptalk-backend
       dockerfile: gateway/src/WarpTalk.Gateway/Dockerfile
     container_name: warptalk-gateway
+    ports:
+      - "5200:5200"
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
       ASPNETCORE_URLS: "http://0.0.0.0:5200"
@@ -220,7 +223,7 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       SEQ_API_KEY: ${SEQ_API_KEY:-}
-      SEQ_FIRSTRUN_ADMINPASSWORD: ${SEQ_ADMIN_PASSWORD:-admin12345}
+      SEQ_FIRSTRUN_ADMINPASSWORD: ${SEQ_ADMIN_PASSWORD}
     volumes:
       - seq-data:/data
     networks:
@@ -244,7 +247,7 @@ services:
     image: grafana/grafana:latest
     container_name: warptalk-grafana
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana-data:/var/lib/grafana
