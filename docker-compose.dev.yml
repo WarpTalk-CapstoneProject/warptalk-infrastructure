@@ -44,6 +44,13 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
 
+  workspace-service:
+    ports:
+      - "5106:5106"
+      - "50056:50056"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
   gateway:
     ports:
       - "5200:5200"
