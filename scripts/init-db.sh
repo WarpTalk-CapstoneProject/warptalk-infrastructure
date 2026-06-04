@@ -27,7 +27,7 @@ PG_USER="${PG_USER:-postgres}"
 PG_DB="${PG_DB:-warptalk}"
 
 # Enforce secrets are provided (no fallbacks in production!)
-if [ -z "${AUTH_DB_PASSWORD:-}" ] || [ -z "${POSTGRES_PASSWORD:-}" ]; then
+if [ -z "${AUTH_DB_PASSWORD:-}" ] || [ -z "${POSTGRES_PASSWORD:-}" ] || [ -z "${WORKSPACE_DB_PASSWORD:-}" ]; then
     echo -e "\033[0;31m❌ ERROR: Database passwords are not set! Please generate a .env file using scripts/generate-prod-env.sh\033[0m"
     exit 1
 fi
@@ -44,6 +44,7 @@ PSQL_VARS=(
     -v "TRANSCRIPT_DB_PASSWORD=$TRANSCRIPT_DB_PASSWORD"
     -v "SUBSCRIPTION_DB_PASSWORD=$SUBSCRIPTION_DB_PASSWORD"
     -v "NOTIFICATION_DB_PASSWORD=$NOTIFICATION_DB_PASSWORD"
+    -v "WORKSPACE_DB_PASSWORD=$WORKSPACE_DB_PASSWORD"
 )
 
 if [[ "${1:-}" == "--docker" ]]; then
