@@ -633,6 +633,21 @@ Table translation_room.translation_room_feedback {
   }
 }
 
+Table translation_room.supported_languages {
+  code VARCHAR(15) [primary key]
+  name VARCHAR(100) [not null]
+  native_name VARCHAR(100)
+  is_active BOOLEAN [not null, default: true]
+  Note: 'View over platform.supported_languages for EF Core scaffolding'
+}
+
+Table translation_room.user_settings {
+  user_id UUID [primary key, unique, not null]
+  default_speak_language VARCHAR(15) [not null, default: 'vi-VN']
+  default_listen_language VARCHAR(15) [not null, default: 'en-US']
+  Note: 'View over auth.user_settings for EF Core scaffolding'
+}
+
 Table translation_room.schema_migrations {
   id UUID [primary key, default: `uuid_generate_v7()`]
   migration_key VARCHAR(150) [unique, not null]
