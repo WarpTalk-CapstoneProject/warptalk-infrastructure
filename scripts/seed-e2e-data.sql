@@ -1,7 +1,7 @@
 -- Comprehensive End-to-End Seed Data for WarpTalk
 \c warptalk
 DO $$
-DECLARE pwd_hash VARCHAR := '$2a$12$R.32uC8G/x.b.R6I6tO/3.JmS94YgY8Xk8GzWzE.U7lY0T5dG6bBq';
+DECLARE pwd_hash VARCHAR := 'v2$SHA512$100000$16$AKwiGnbhlfXmBCfSM8jlwA==$akecCim0bjsgJV6SGCb67BMeVQ+btn7CppmBdv+xeRc=';
 BEGIN
 
     INSERT INTO auth.roles (id, name, description, is_system) VALUES 
