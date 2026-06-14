@@ -178,6 +178,7 @@ services:
       ReverseProxy__Clusters__translation-room-cluster__Destinations__translation-room-service__Address: "http://translation-room-service:5102"
       ReverseProxy__Clusters__transcript-cluster__Destinations__transcript-service__Address: "http://transcript-service:5103"
       ReverseProxy__Clusters__notification-cluster__Destinations__notification-service__Address: "http://notification-service:5104"
+      ReverseProxy__Clusters__meeting-cluster__Destinations__meeting-service__Address: "http://host.docker.internal:5105"
       AllowedOrigins__0: ${ALLOWED_ORIGINS:-http://localhost:3000}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
