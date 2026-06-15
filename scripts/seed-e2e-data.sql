@@ -1,8 +1,8 @@
--- Comprehensive End-to-End Seed Data for WarpTalk
 \c warptalk
 DO $$
 DECLARE pwd_hash VARCHAR := 'v2$SHA512$100000$16$AKwiGnbhlfXmBCfSM8jlwA==$akecCim0bjsgJV6SGCb67BMeVQ+btn7CppmBdv+xeRc=';
 BEGIN
+    SET CONSTRAINTS ALL DEFERRED;
 
     INSERT INTO auth.roles (id, name, description, is_system) VALUES 
     ('99bf57ba-9d3c-471b-a5ae-94901a0c81b5', 'Owner', 'Workspace Owner', true),
