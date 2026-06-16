@@ -188,6 +188,7 @@ CREATE TABLE workspace.workspace_members (
   role_id UUID NOT NULL,
   membership_type VARCHAR(20) NOT NULL DEFAULT 'internal',
   status VARCHAR(20) NOT NULL DEFAULT 'active',
+  can_create_meetings BOOLEAN NOT NULL DEFAULT true,
   joined_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
   removed_at TIMESTAMPTZ,
   removed_by UUID,
@@ -257,6 +258,7 @@ CREATE TABLE workspace.workspace_documents (
   storage_provider VARCHAR(50) NOT NULL,
   storage_key VARCHAR(500) NOT NULL,
   source_type VARCHAR(50) NOT NULL,
+  source_id UUID,
   document_type VARCHAR(50) NOT NULL,
   source_language VARCHAR(20),
   detected_language VARCHAR(20),
@@ -291,7 +293,7 @@ CREATE TABLE workspace.workspace_document_access_policies (
   workspace_id UUID NOT NULL REFERENCES workspace.workspaces(id) ON DELETE RESTRICT,
   subject_type VARCHAR(30) NOT NULL,
   subject_id UUID,
-  role_key VARCHAR(30),
+  subject_key VARCHAR(150),
   permission VARCHAR(30) NOT NULL,
   effect VARCHAR(20) NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
@@ -1594,11 +1596,11 @@ CREATE TABLE admin.schema_migrations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW())
 );
 
-CREATE UNIQUE INDEX ON auth.user_roles (user_id, role_id, workspace_id);
+CREATE UNIQUE INDEX ON auth.user_roles (user_id, role_id);
 
-CREATE UNIQUE INDEX ON auth.workspace_members (workspace_id, user_id);
+CREATE UNIQUE INDEX ON workspace.workspace_members (workspace_id, user_id);
 
-CREATE INDEX ON auth.workspace_invitations (workspace_id, email);
+CREATE INDEX ON workspace.workspace_invitations (workspace_id, email);
 
 CREATE INDEX ON auth.schema_migrations (status);
 
@@ -1774,23 +1776,21 @@ COMMENT ON COLUMN auth.permissions.deleted_by IS 'Internal auth user reference.'
 
 COMMENT ON COLUMN auth.role_permissions.created_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.user_roles.workspace_id IS 'Internal AuthService workspace reference. Nullable for global roles.';
-
 COMMENT ON COLUMN auth.user_roles.assigned_by IS 'Internal auth user reference.';
 
 COMMENT ON COLUMN auth.user_roles.revoked_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspaces.owner_id IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspaces.owner_id IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspaces.created_by IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspaces.created_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspaces.updated_by IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspaces.updated_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspaces.deleted_by IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspaces.deleted_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspace_members.removed_by IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspace_members.removed_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspace_invitations.invited_by IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspace_invitations.invited_by IS 'Internal auth user reference.';
 
 COMMENT ON COLUMN auth.user_settings.updated_by IS 'Internal auth user reference.';
 
