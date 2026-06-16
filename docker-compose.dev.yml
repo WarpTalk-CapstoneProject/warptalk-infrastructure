@@ -71,3 +71,15 @@ services:
   grafana:
     ports:
       - "3001:3000"   # 3001 to avoid conflict with NextJS on 3000
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --dev --bind 0.0.0.0
+    environment:
+      - "LIVEKIT_KEYS=APIBVnfFo9PzzoQ: wbB6j98H2jfF5nLTZYhaiYXQM8hM6nB3KoVoXfMNTPA"
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    networks:
+      - warptalk-net

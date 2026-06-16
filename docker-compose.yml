@@ -102,6 +102,12 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      Smtp__Host: ${SMTP_HOST}
+      Smtp__Port: ${SMTP_PORT}
+      Smtp__Username: ${SMTP_USERNAME}
+      Smtp__Password: ${SMTP_PASSWORD}
+      Smtp__FromEmail: ${SMTP_FROM_EMAIL}
+      Smtp__FromName: ${SMTP_FROM_NAME}
     depends_on:
       pgbouncer:
         condition: service_started
@@ -176,6 +182,12 @@ services:
       LiveKit__ApiKey: "APIBVnfFo9PzzoQ"
       LiveKit__ApiSecret: "wbB6j98H2jfF5nLTZYhaiYXQM8hM6nB3KoVoXfMNTPA"
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      Smtp__Host: ${SMTP_HOST}
+      Smtp__Port: ${SMTP_PORT}
+      Smtp__Username: ${SMTP_USERNAME}
+      Smtp__Password: ${SMTP_PASSWORD}
+      Smtp__FromEmail: ${SMTP_FROM_EMAIL}
+      Smtp__FromName: ${SMTP_FROM_NAME}
     depends_on:
       pgbouncer:
         condition: service_started
