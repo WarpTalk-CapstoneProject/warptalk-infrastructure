@@ -6,7 +6,7 @@
 #   ./start-all.sh --prod   # Start in production mode
 #   ./start-all.sh --build  # Force rebuild images
 # ====================================================================
-set -euo pipefail
+set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_DIR="$(dirname "$SCRIPT_DIR")"
