@@ -1,0 +1,2113 @@
+Project WarpTalk {
+  database_type: 'PostgreSQL'
+  Note: '''
+  WarpTalk Microservices Data Model.
+
+  This is a logical, service-owned data model for a microservice architecture.
+  Each service owns its own schema and controls its data through APIs/events.
+  Physical foreign keys are only defined inside the same service-owned schema.
+
+  Cross-service identifiers such as user_id, workspace_id, translation_room_id,
+  transcript_id, subscription_id, and notification_id are stored as external
+  business references for traceability, not as runtime database foreign keys.
+
+  Cross-service consistency is handled through service APIs, domain events,
+  idempotency keys, outbox/inbox patterns, and eventual consistency.
+
+  PostgreSQL stores structured service data. Qdrant stores vector embeddings
+  for transcript semantic search, meeting memory retrieval, AI assistant Q&A,
+  and glossary matching. PostgreSQL keeps metadata and Qdrant point references.
+  '''
+}
+
+Enum room_status {
+  SCHEDULED
+  WAITING
+  IN_PROGRESS
+  PAUSED
+  ENDED
+  CANCELLED
+  EXPIRED
+  FAILED
+}
+
+Enum participant_status {
+  INVITED
+  WAITING
+  CONNECTED
+  DISCONNECTED
+  LEFT
+  KICKED
+  REJECTED
+}
+
+Enum job_status {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+Enum consent_status {
+  GRANTED
+  REVOKED
+  EXPIRED
+}
+
+Enum artifact_type {
+  TRANSCRIPT_EXPORT
+  SUMMARY_EXPORT
+  DEBUG_LOG
+  OPTIONAL_RECORDING
+  AUDIO_SAMPLE
+}
+
+Enum notification_status {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  READ
+}
+
+Enum ticket_status {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+Enum transcript_status {
+  RECORDING
+  FINALIZING
+  FINALIZED
+  ARCHIVED
+}
+
+Enum correction_status {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+Enum correction_type {
+  STT
+  TRANSLATION
+}
+
+Enum meeting_status {
+  CREATED
+  ACTIVE
+  FINISHED
+}
+
+Enum media_type {
+  AUDIO
+  VIDEO
+}
+
+TableGroup AuthService {
+  auth.users
+  auth.roles
+  auth.permissions
+  auth.role_permissions
+  auth.user_roles
+  auth.refresh_tokens
+  auth.user_settings
+  auth.workspaces
+  auth.workspace_members
+  auth.workspace_invitations
+  auth.schema_migrations
+}
+
+TableGroup MeetingService {
+  meeting.meeting_rooms
+  meeting.meeting_participants
+  meeting.meeting_tracks
+  meeting.schema_migrations
+}
+
+TableGroup TranslationRoomService {
+  translation_room.translation_rooms
+  translation_room.translation_room_participants
+  translation_room.translation_room_audio_routes
+  translation_room.translation_room_artifacts
+  translation_room.translation_room_feedback
+  translation_room.schema_migrations
+}
+
+TableGroup TranscriptService {
+  transcript.transcripts
+  transcript.transcript_segments
+  transcript.transcript_translations
+  transcript.transcript_corrections
+  transcript.transcript_exports
+  transcript.glossaries
+  transcript.glossary_terms
+  transcript.schema_migrations
+}
+
+TableGroup AIService {
+  ai.processing_jobs
+  ai.model_runs
+  ai.model_metrics
+  ai.prompt_templates
+  ai.ai_models
+  ai.model_capabilities
+  ai.vector_collections
+  ai.vector_documents
+  ai.vector_chunks
+  ai.evaluation_datasets
+  ai.evaluation_cases
+  ai.schema_migrations
+}
+
+TableGroup VoiceService {
+  voice.voice_profiles
+  voice.voice_consents
+  voice.voice_samples
+  voice.schema_migrations
+}
+
+TableGroup SubscriptionService {
+  subscription.plans
+  subscription.subscriptions
+  subscription.credit_transactions
+  subscription.credit_balance_snapshots
+  subscription.usage_records
+  subscription.payments
+  subscription.refunds
+  subscription.invoices
+  subscription.schema_migrations
+}
+
+TableGroup NotificationService {
+  notification.notification_templates
+  notification.notification_campaigns
+  notification.notifications
+  notification.notification_messages
+  notification.admin_notifications
+  notification.email_delivery_logs
+  notification.push_subscriptions
+  notification.push_delivery_logs
+  notification.notification_preferences
+  notification.schema_migrations
+}
+
+TableGroup IntegrationService {
+  integration.external_platform_accounts
+  integration.external_meeting_sessions
+  integration.webhook_endpoints
+  integration.webhook_events
+  integration.integration_logs
+  integration.schema_migrations
+}
+
+TableGroup PrivacyService {
+  privacy.consent_records
+  privacy.data_retention_policies
+  privacy.data_deletion_requests
+  privacy.data_access_logs
+  privacy.policy_versions
+  privacy.data_processing_records
+  privacy.schema_migrations
+}
+
+TableGroup PlatformService {
+  platform.supported_languages
+  platform.system_configurations
+  platform.feature_flags
+  platform.service_configurations
+  platform.config_change_logs
+  platform.audit_logs
+  platform.security_events
+  platform.activity_logs
+  platform.outbox_events
+  platform.inbox_events
+  platform.service_health_checks
+  platform.service_deployments
+  platform.schema_migrations
+}
+
+TableGroup AdminService {
+  admin.admin_actions
+  admin.support_tickets
+  admin.support_ticket_comments
+  admin.incident_reports
+  admin.maintenance_windows
+  admin.schema_migrations
+}
+
+/* =========================
+   AUTH SERVICE
+   Owns identity, workspace, role, permission, token, and user settings data.
+========================= */
+
+Table auth.users {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  email VARCHAR(320) [unique, not null]
+  password_hash VARCHAR(255)
+  full_name VARCHAR(150) [not null]
+  avatar_url VARCHAR(500)
+  phone VARCHAR(20)
+  preferred_language VARCHAR(15) [not null, default: 'vi-VN']
+  timezone VARCHAR(50) [not null, default: 'Asia/Ho_Chi_Minh']
+  is_active BOOLEAN [not null, default: true]
+  is_locked BOOLEAN [not null, default: false]
+  failed_login_attempts INT [not null, default: 0]
+  locked_until TIMESTAMPTZ
+  email_verified BOOLEAN [not null, default: false]
+  email_verified_at TIMESTAMPTZ
+  google_id VARCHAR(255) [unique]
+  last_login_at TIMESTAMPTZ
+  last_login_ip VARCHAR(45)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'Internal auth user reference. Nullable for system-created users.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'Internal auth user reference.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'Internal auth user reference.']
+}
+
+Table auth.roles {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  name VARCHAR(50) [unique, not null]
+  description VARCHAR(255)
+  is_system BOOLEAN [not null, default: false]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'Internal auth user reference.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'Internal auth user reference.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'Internal auth user reference.']
+}
+
+Table auth.permissions {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  code VARCHAR(100) [unique, not null]
+  description VARCHAR(255)
+  group_name VARCHAR(50) [not null]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'Internal auth user reference.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'Internal auth user reference.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'Internal auth user reference.']
+}
+
+Table auth.role_permissions {
+  role_id UUID [not null]
+  permission_id UUID [not null]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'Internal auth user reference.']
+
+  indexes {
+    (role_id, permission_id) [pk]
+  }
+}
+
+Table auth.user_roles {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null]
+  role_id UUID [not null]
+  workspace_id UUID [note: 'Internal AuthService workspace reference. Nullable for global roles.']
+  assigned_at TIMESTAMPTZ [not null, default: `NOW()`]
+  assigned_by UUID [note: 'Internal auth user reference.']
+  revoked_at TIMESTAMPTZ
+  revoked_by UUID [note: 'Internal auth user reference.']
+
+  indexes {
+    (user_id, role_id, workspace_id) [unique]
+  }
+}
+
+Table auth.workspaces {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  name VARCHAR(150) [not null]
+  slug VARCHAR(100) [unique, not null]
+  owner_id UUID [not null, note: 'Internal auth user reference.']
+  logo_url VARCHAR(500)
+  plan_tier VARCHAR(30) [not null, default: 'free']
+  settings JSONB [not null, default: '{}']
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'Internal auth user reference.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'Internal auth user reference.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'Internal auth user reference.']
+}
+
+Table auth.workspace_members {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [not null]
+  user_id UUID [not null]
+  role_id UUID [not null]
+  status VARCHAR(20) [not null, default: 'active']
+  joined_at TIMESTAMPTZ [not null, default: `NOW()`]
+  removed_at TIMESTAMPTZ
+  removed_by UUID [note: 'Internal auth user reference.']
+
+  indexes {
+    (workspace_id, user_id) [unique]
+  }
+}
+
+Table auth.workspace_invitations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [not null]
+  email VARCHAR(320) [not null]
+  role_id UUID [not null]
+  invited_by UUID [not null, note: 'Internal auth user reference.']
+  token_hash VARCHAR(255) [unique, not null]
+  status VARCHAR(20) [not null, default: 'pending']
+  expires_at TIMESTAMPTZ [not null]
+  accepted_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (workspace_id, email)
+  }
+}
+
+Table auth.refresh_tokens {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null]
+  token_hash VARCHAR(255) [unique, not null]
+  device_info VARCHAR(255)
+  ip_address VARCHAR(45)
+  expires_at TIMESTAMPTZ [not null]
+  revoked_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table auth.user_settings {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [unique, not null]
+  default_speak_language VARCHAR(15) [not null, default: 'vi-VN']
+  default_listen_language VARCHAR(15) [not null, default: 'en-US']
+  voice_clone_enabled BOOLEAN [not null, default: false]
+  mic_noise_suppression BOOLEAN [not null, default: true]
+  default_translation_room_type VARCHAR(20) [not null, default: 'group']
+  auto_record_translation_rooms BOOLEAN [not null, default: false]
+  auto_generate_summary BOOLEAN [not null, default: true]
+  default_max_participants INT [not null, default: 10]
+  theme VARCHAR(10) [not null, default: 'system']
+  transcript_font_size INT [not null, default: 14]
+  show_original_transcript BOOLEAN [not null, default: true]
+  show_translated_transcript BOOLEAN [not null, default: true]
+  high_contrast BOOLEAN [not null, default: false]
+  screen_reader_mode BOOLEAN [not null, default: false]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'Internal auth user reference.']
+}
+
+Table auth.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   MEETING SERVICE
+   Owns meeting rooms, participants (sync'd from LiveKit Webhooks).
+========================= */
+
+Table meeting.meeting_rooms {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  translation_room_id UUID [not null, note: 'External TranslationRoomService room id. No physical FK.']
+  provider_room_name VARCHAR(255) [not null]
+  status meeting_status [not null, default: 'CREATED']
+  
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+  
+  ended_at TIMESTAMPTZ
+
+  indexes {
+    translation_room_id
+  }
+}
+
+Table meeting.meeting_participants {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  meeting_room_id UUID [not null]
+  user_id UUID [note: 'External AuthService user id. Nullable for guests. No physical FK.']
+  provider_identity VARCHAR(255) [not null]
+  
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+  
+  joined_at TIMESTAMPTZ
+  left_at TIMESTAMPTZ
+
+  indexes {
+    meeting_room_id
+    user_id
+  }
+}
+
+Table meeting.meeting_tracks {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  meeting_participant_id UUID [not null]
+  provider_track_id VARCHAR(255) [not null]
+  media_type media_type [not null]
+  is_muted BOOLEAN [not null, default: false]
+  
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+  
+  published_at TIMESTAMPTZ
+  unpublished_at TIMESTAMPTZ
+
+  indexes {
+    meeting_participant_id
+  }
+}
+
+Table meeting.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+/* =========================
+   TRANSLATION ROOM SERVICE
+   Owns metadata, settings, and logical audio routes.
+========================= */
+
+Table translation_room.translation_rooms {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [not null, note: 'External AuthService workspace id. No physical FK.']
+  host_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  title VARCHAR(255) [not null]
+  description TEXT
+  translation_room_code VARCHAR(12) [unique, not null]
+  status room_status [not null, default: 'SCHEDULED']
+  translation_room_type VARCHAR(20) [not null, default: 'group']
+  max_participants INT [not null, default: 10]
+  source_language VARCHAR(15) [not null]
+  target_languages JSONB [not null, default: '[]']
+  settings JSONB [not null, default: '{}']
+  scheduled_at TIMESTAMPTZ
+  started_at TIMESTAMPTZ
+  ended_at TIMESTAMPTZ
+  duration_seconds INT
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (workspace_id, created_at)
+    (host_id, created_at)
+    (status, scheduled_at)
+  }
+}
+
+Table translation_room.translation_room_participants {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  translation_room_id UUID [not null]
+  user_id UUID [note: 'External AuthService user id. Nullable for guests. No physical FK.']
+  display_name VARCHAR(100) [not null]
+  role VARCHAR(20) [not null, default: 'participant']
+  listen_language VARCHAR(15) [not null]
+  speak_language VARCHAR(15) [not null]
+  status participant_status [not null, default: 'INVITED']
+  connection_type VARCHAR(20) [not null, default: 'webrtc']
+  is_translation_audio_enabled BOOLEAN [not null, default: true]
+  is_using_voice_clone BOOLEAN [not null, default: false]
+  joined_at TIMESTAMPTZ
+  left_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (translation_room_id, user_id)
+    (translation_room_id, status)
+  }
+}
+
+Table translation_room.translation_room_audio_routes {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  translation_room_id UUID [not null]
+  source_participant_id UUID [not null]
+  target_participant_id UUID [not null]
+  source_language VARCHAR(15) [not null]
+  target_language VARCHAR(15) [not null]
+  voice_clone_enabled BOOLEAN [not null, default: false]
+  stream_id VARCHAR(100)
+  status VARCHAR(20) [not null, default: 'active']
+  started_at TIMESTAMPTZ [not null, default: `NOW()`]
+  ended_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (translation_room_id, status)
+    (source_participant_id, target_participant_id)
+  }
+}
+
+Table translation_room.translation_room_artifacts {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  translation_room_id UUID [not null]
+  artifact_type artifact_type [not null]
+  file_url VARCHAR(500)
+  file_format VARCHAR(20)
+  file_size_bytes BIGINT
+  contains_raw_audio BOOLEAN [not null, default: false]
+  contains_raw_video BOOLEAN [not null, default: false]
+  consent_required BOOLEAN [not null, default: false]
+  retention_until TIMESTAMPTZ
+  status VARCHAR(20) [not null, default: 'active']
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (translation_room_id, artifact_type)
+    (retention_until)
+  }
+}
+
+Table translation_room.translation_room_feedback {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  translation_room_id UUID [not null]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  overall_rating INT [not null]
+  translation_quality INT
+  audio_quality INT
+  voice_clone_quality INT
+  ai_summary_quality INT
+  comments TEXT
+  communication_insights JSONB
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (translation_room_id, user_id) [unique]
+  }
+}
+
+Table translation_room.supported_languages {
+  code VARCHAR(15) [primary key]
+  name VARCHAR(100) [not null]
+  native_name VARCHAR(100)
+  is_active BOOLEAN [not null, default: true]
+  Note: 'View over platform.supported_languages for EF Core scaffolding'
+}
+
+Table translation_room.user_settings {
+  user_id UUID [primary key, unique, not null]
+  default_speak_language VARCHAR(15) [not null, default: 'vi-VN']
+  default_listen_language VARCHAR(15) [not null, default: 'en-US']
+  Note: 'View over auth.user_settings for EF Core scaffolding'
+}
+
+Table translation_room.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   TRANSCRIPT SERVICE
+========================= */
+
+Table transcript.transcripts {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [not null, note: 'External AuthService workspace id. No physical FK.']
+  translation_room_id UUID [not null, note: 'External TranslationRoomService room id. No physical FK.']
+  version INT [not null, default: 1]
+  status transcript_status [not null, default: 'RECORDING']
+  source_language VARCHAR(15) [not null]
+  total_segments INT [not null, default: 0]
+  total_duration_ms INT [not null, default: 0]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  finalized_at TIMESTAMPTZ
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (translation_room_id, version) [unique]
+    (workspace_id, created_at)
+  }
+}
+
+Table transcript.transcript_segments {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  transcript_id UUID [not null]
+  speaker_participant_id UUID [note: 'External TranslationRoomService participant id. No physical FK.']
+  speaker_name VARCHAR(100) [not null]
+  original_text TEXT [not null]
+  original_language VARCHAR(15) [not null]
+  start_time_ms INT [not null]
+  end_time_ms INT [not null]
+  confidence DECIMAL(5,4)
+  sequence_order INT [not null]
+  is_corrected BOOLEAN [not null, default: false]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (transcript_id, sequence_order) [unique]
+    (speaker_participant_id)
+  }
+}
+
+Table transcript.transcript_translations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  segment_id UUID [not null]
+  target_language VARCHAR(15) [not null]
+  translated_text TEXT [not null]
+  translator_model VARCHAR(100) [not null]
+  confidence DECIMAL(5,4)
+  is_retranslated BOOLEAN [not null, default: false]
+  latency_ms INT
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (segment_id, target_language) [unique]
+  }
+}
+
+Table transcript.transcript_corrections {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  segment_id UUID [not null]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  original_text TEXT [not null]
+  corrected_text TEXT [not null]
+  correction_type correction_type [not null]
+  status correction_status [not null, default: 'ACCEPTED']
+  triggered_retranslation BOOLEAN [not null, default: false]
+  reviewed_by UUID [note: 'External AuthService user id. No physical FK.']
+  reviewed_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table transcript.transcript_exports {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  transcript_id UUID [not null]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  format VARCHAR(10) [not null]
+  file_url VARCHAR(500) [not null]
+  included_languages JSONB [not null, default: '[]']
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table transcript.glossaries {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [not null, note: 'External AuthService workspace id. No physical FK.']
+  name VARCHAR(150) [not null]
+  description TEXT
+  source_language VARCHAR(15) [not null]
+  target_language VARCHAR(15) [not null]
+  term_count INT [not null, default: 0]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (workspace_id, name) [unique]
+  }
+}
+
+Table transcript.glossary_terms {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  glossary_id UUID [not null]
+  source_term VARCHAR(255) [not null]
+  target_term VARCHAR(255) [not null]
+  context TEXT
+  domain VARCHAR(50)
+  priority INT [not null, default: 5]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (glossary_id, source_term) [unique]
+  }
+}
+
+Table transcript.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   AI SERVICE
+========================= */
+
+Table ai.processing_jobs {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [not null, note: 'External AuthService workspace id. No physical FK.']
+  translation_room_id UUID [note: 'External TranslationRoomService room id. No physical FK.']
+  transcript_id UUID [note: 'External TranscriptService transcript id. No physical FK.']
+  job_type VARCHAR(30) [not null]
+  status job_status [not null, default: 'QUEUED']
+  priority INT [not null, default: 5]
+  input_ref JSONB
+  output_ref JSONB
+  error_code VARCHAR(100)
+  error_message TEXT
+  retry_count INT [not null, default: 0]
+  queued_at TIMESTAMPTZ [not null, default: `NOW()`]
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (workspace_id, created_at)
+    (translation_room_id, job_type)
+    (status, priority)
+  }
+}
+
+Table ai.model_runs {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  job_id UUID [not null]
+  model_provider VARCHAR(50) [not null]
+  model_name VARCHAR(100) [not null]
+  model_version VARCHAR(100)
+  input_tokens INT
+  output_tokens INT
+  latency_ms INT
+  cost_estimate DECIMAL(12,4)
+  success BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table ai.model_metrics {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  model_run_id UUID [not null]
+  metric_name VARCHAR(50) [not null]
+  metric_value DECIMAL(10,4) [not null]
+  language_pair VARCHAR(20)
+  notes TEXT
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table ai.prompt_templates {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  name VARCHAR(100) [not null]
+  task_type VARCHAR(30) [not null]
+  template TEXT [not null]
+  version INT [not null, default: 1]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table ai.ai_models {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  provider VARCHAR(50) [not null]
+  model_name VARCHAR(100) [not null]
+  model_version VARCHAR(100)
+  task_type VARCHAR(30) [not null]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (provider, model_name, model_version, task_type) [unique]
+  }
+}
+
+Table ai.model_capabilities {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  model_id UUID [not null]
+  source_language VARCHAR(15)
+  target_language VARCHAR(15)
+  supports_streaming BOOLEAN [not null, default: false]
+  supports_voice_clone BOOLEAN [not null, default: false]
+  max_latency_target_ms INT
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table ai.vector_collections {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [not null, note: 'External AuthService workspace id. No physical FK.']
+  collection_name VARCHAR(100) [unique, not null, note: 'Qdrant collection name.']
+  purpose VARCHAR(50) [not null]
+  vector_db_provider VARCHAR(30) [not null, default: 'qdrant']
+  embedding_model VARCHAR(100) [not null]
+  dimension INT [not null]
+  distance_metric VARCHAR(20) [not null, default: 'cosine']
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table ai.vector_documents {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [not null, note: 'External AuthService workspace id. No physical FK.']
+  collection_id UUID [not null]
+  source_type VARCHAR(50) [not null, note: 'transcript, transcript_segment, summary, action_item, glossary_term, etc.']
+  source_id UUID [not null, note: 'External source object id. No physical FK.']
+  title VARCHAR(255)
+  language VARCHAR(15)
+  metadata JSONB [not null, default: '{}']
+  indexing_status VARCHAR(20) [not null, default: 'pending']
+  indexed_at TIMESTAMPTZ
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (workspace_id, source_type, source_id)
+    (collection_id, indexing_status)
+  }
+}
+
+Table ai.vector_chunks {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  vector_document_id UUID [not null]
+  source_type VARCHAR(50) [not null]
+  source_id UUID [note: 'External source object id. No physical FK.']
+  chunk_order INT [not null]
+  text_preview TEXT
+  qdrant_point_id VARCHAR(100) [unique, not null]
+  token_count INT
+  language VARCHAR(15)
+  metadata JSONB [not null, default: '{}']
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  deleted_at TIMESTAMPTZ
+
+  indexes {
+    (vector_document_id, chunk_order) [unique]
+    (source_type, source_id)
+  }
+}
+
+Table ai.evaluation_datasets {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK. Null means global benchmark dataset.']
+  name VARCHAR(150) [not null]
+  task_type VARCHAR(30) [not null, note: 'stt, translation, tts, summary, action_items, qa']
+  description TEXT
+  source_language VARCHAR(15)
+  target_language VARCHAR(15)
+  sample_count INT [not null, default: 0]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (workspace_id, task_type)
+    (name, task_type) [unique]
+  }
+}
+
+Table ai.evaluation_cases {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  dataset_id UUID [not null]
+  case_order INT [not null]
+  input_text TEXT
+  expected_output TEXT
+  input_artifact_ref VARCHAR(500)
+  expected_metrics JSONB [not null, default: '{}']
+  language_pair VARCHAR(20)
+  difficulty VARCHAR(20) [not null, default: 'normal']
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (dataset_id, case_order) [unique]
+  }
+}
+
+Table ai.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   VOICE SERVICE
+========================= */
+
+Table voice.voice_profiles {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  display_name VARCHAR(100)
+  provider VARCHAR(50)
+  embedding_ref VARCHAR(500) [note: 'Reference to voice embedding/model storage, not raw audio.']
+  status VARCHAR(20) [not null, default: 'active']
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (user_id, status)
+    (workspace_id)
+  }
+}
+
+Table voice.voice_consents {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  voice_profile_id UUID
+  consent_type VARCHAR(50) [not null]
+  consent_status consent_status [not null]
+  consent_text_version VARCHAR(50) [not null]
+  granted_at TIMESTAMPTZ
+  revoked_at TIMESTAMPTZ
+  ip_address VARCHAR(45)
+  user_agent VARCHAR(500)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table voice.voice_samples {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  voice_profile_id UUID [not null]
+  sample_type VARCHAR(30) [not null]
+  file_url VARCHAR(500)
+  duration_seconds INT
+  language VARCHAR(15)
+  contains_raw_audio BOOLEAN [not null, default: true]
+  retention_until TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table voice.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   SUBSCRIPTION SERVICE
+========================= */
+
+Table subscription.plans {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  name VARCHAR(100) [not null]
+  slug VARCHAR(50) [unique, not null]
+  tier VARCHAR(20) [not null]
+  price DECIMAL(12,2) [not null]
+  currency CHAR(3) [not null, default: 'VND']
+  billing_cycle VARCHAR(20) [not null, default: 'monthly']
+  credits_per_cycle INT [not null]
+  max_participants INT [not null, default: 2]
+  max_languages INT [not null, default: 2]
+  voice_clone_enabled BOOLEAN [not null, default: false]
+  ai_assistant_enabled BOOLEAN [not null, default: false]
+  glossary_enabled BOOLEAN [not null, default: false]
+  dedicated_gpu BOOLEAN [not null, default: false]
+  features JSONB [not null, default: '{}']
+  sort_order INT [not null, default: 0]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table subscription.subscriptions {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  plan_id UUID [not null]
+  status VARCHAR(20) [not null, default: 'active']
+  credits_remaining INT [not null, default: 0]
+  credits_used_this_cycle INT [not null, default: 0]
+  current_period_start TIMESTAMPTZ [not null]
+  current_period_end TIMESTAMPTZ [not null]
+  auto_renew BOOLEAN [not null, default: true]
+  cancellation_reason TEXT
+  cancelled_at TIMESTAMPTZ
+  trial_ends_at TIMESTAMPTZ
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table subscription.credit_transactions {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  subscription_id UUID [not null]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  amount INT [not null]
+  type VARCHAR(20) [not null]
+  description VARCHAR(255)
+  reference_id UUID [note: 'External business object id such as room/job/payment. No physical FK.']
+  reference_type VARCHAR(30)
+  balance_after INT [not null]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (subscription_id, created_at)
+  }
+}
+
+Table subscription.credit_balance_snapshots {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  subscription_id UUID [not null]
+  credits_remaining INT [not null]
+  credits_used_this_cycle INT [not null]
+  snapshot_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table subscription.usage_records {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  subscription_id UUID [not null]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  translation_room_id UUID [note: 'External TranslationRoomService room id. No physical FK.']
+  usage_type VARCHAR(30) [not null]
+  unit VARCHAR(20) [not null, default: 'credit']
+  quantity DECIMAL(12,4) [not null, default: 1]
+  credits_consumed INT [not null]
+  duration_seconds INT
+  details JSONB
+  recorded_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (subscription_id, recorded_at)
+    (translation_room_id)
+  }
+}
+
+Table subscription.payments {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  subscription_id UUID [not null]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  amount DECIMAL(12,2) [not null]
+  tax_amount DECIMAL(12,2) [not null, default: 0]
+  total_amount DECIMAL(12,2) [not null]
+  currency CHAR(3) [not null, default: 'VND']
+  payment_method VARCHAR(30) [not null]
+  provider VARCHAR(30) [not null, default: 'payos']
+  provider_transaction_id VARCHAR(255) [unique]
+  provider_order_id VARCHAR(255)
+  status VARCHAR(20) [not null, default: 'pending']
+  failure_reason VARCHAR(500)
+  provider_metadata JSONB
+  paid_at TIMESTAMPTZ
+  refunded_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table subscription.refunds {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  payment_id UUID [not null]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  amount DECIMAL(12,2) [not null]
+  reason VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'pending']
+  provider_refund_id VARCHAR(255)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  completed_at TIMESTAMPTZ
+}
+
+Table subscription.invoices {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  payment_id UUID [not null]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  invoice_number VARCHAR(30) [unique, not null]
+  subtotal DECIMAL(12,2) [not null]
+  tax DECIMAL(12,2) [not null, default: 0]
+  total DECIMAL(12,2) [not null]
+  currency CHAR(3) [not null, default: 'VND']
+  status VARCHAR(20) [not null, default: 'issued']
+  pdf_url VARCHAR(500)
+  line_items JSONB [not null, default: '[]']
+  issued_at TIMESTAMPTZ [not null, default: `NOW()`]
+  due_at TIMESTAMPTZ
+  paid_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table subscription.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   NOTIFICATION SERVICE
+========================= */
+
+Table notification.notification_templates {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  type VARCHAR(50) [not null]
+  channel VARCHAR(20) [not null]
+  subject VARCHAR(255)
+  body_template TEXT [not null]
+  variables JSONB [not null, default: '[]']
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (type, channel) [unique]
+  }
+}
+
+Table notification.notification_campaigns {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  title VARCHAR(255) [not null]
+  body TEXT [not null]
+  type VARCHAR(50) [not null]
+  channel VARCHAR(20) [not null, note: 'in_app, email, push, all']
+  payload JSONB [not null, default: '{}']
+  target_audience_mode VARCHAR(50) [not null, note: 'all_users, workspace, plan_tier, role, custom_users, active_users']
+  target_audience_data JSONB [not null, default: '{}']
+  status VARCHAR(20) [not null, default: 'draft']
+  scheduled_at TIMESTAMPTZ
+  sent_at TIMESTAMPTZ
+  total_targets INT [not null, default: 0]
+  success_count INT [not null, default: 0]
+  failure_count INT [not null, default: 0]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [not null, note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (status, scheduled_at)
+    (type, created_at)
+    created_by
+  }
+}
+
+Table notification.notifications {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  campaign_id UUID
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  type VARCHAR(50) [not null]
+  channel VARCHAR(20) [not null]
+  title VARCHAR(255) [not null]
+  body TEXT [not null]
+  data JSONB
+  priority VARCHAR(10) [not null, default: 'normal']
+  status notification_status [not null, default: 'PENDING']
+  scheduled_at TIMESTAMPTZ
+  sent_at TIMESTAMPTZ
+  read_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    campaign_id
+    (user_id, created_at)
+    (status, scheduled_at)
+  }
+}
+
+Table notification.notification_messages {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  type VARCHAR(50) [not null]
+  title VARCHAR(255) [not null]
+  content TEXT [not null]
+  action_url VARCHAR(500)
+  payload_json JSONB [not null, default: '{}']
+  is_read BOOLEAN [not null, default: false]
+  read_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (user_id, created_at)
+  }
+}
+
+Table notification.admin_notifications {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  title VARCHAR(255) [not null]
+  content TEXT [not null]
+  type VARCHAR(50) [not null]
+  payload JSONB [not null, default: '{}']
+  target_audience_mode VARCHAR(50) [not null]
+  target_audience_data JSONB [not null, default: '{}']
+  status VARCHAR(50) [not null]
+  created_by UUID [not null, note: 'External AuthService user id. No physical FK.']
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table notification.email_delivery_logs {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  notification_id UUID [not null]
+  to_email VARCHAR(320) [not null]
+  subject VARCHAR(255) [not null]
+  provider VARCHAR(30) [not null]
+  provider_message_id VARCHAR(255)
+  status VARCHAR(20) [not null, default: 'queued']
+  failure_reason VARCHAR(500)
+  sent_at TIMESTAMPTZ
+  delivered_at TIMESTAMPTZ
+  opened_at TIMESTAMPTZ
+  bounced_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table notification.push_subscriptions {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  device_token VARCHAR(500) [unique, not null]
+  platform VARCHAR(20) [not null]
+  device_name VARCHAR(100)
+  is_active BOOLEAN [not null, default: true]
+  last_used_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table notification.push_delivery_logs {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  notification_id UUID [not null]
+  push_subscription_id UUID
+  provider VARCHAR(30) [not null]
+  status VARCHAR(20) [not null, default: 'queued']
+  failure_reason VARCHAR(500)
+  sent_at TIMESTAMPTZ
+  delivered_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table notification.notification_preferences {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  notification_type VARCHAR(50) [not null]
+  email_enabled BOOLEAN [not null, default: true]
+  push_enabled BOOLEAN [not null, default: true]
+  in_app_enabled BOOLEAN [not null, default: true]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (user_id, notification_type) [unique]
+  }
+}
+
+Table notification.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   INTEGRATION SERVICE
+========================= */
+
+Table integration.external_platform_accounts {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  provider VARCHAR(30) [not null]
+  provider_account_id VARCHAR(255)
+  access_token_ref VARCHAR(500)
+  refresh_token_ref VARCHAR(500)
+  token_expires_at TIMESTAMPTZ
+  status VARCHAR(20) [not null, default: 'active']
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (user_id, provider) [unique]
+  }
+}
+
+Table integration.external_meeting_sessions {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  translation_room_id UUID [not null, note: 'External TranslationRoomService room id. No physical FK.']
+  provider VARCHAR(30) [not null]
+  external_meeting_id VARCHAR(255)
+  meeting_url VARCHAR(500)
+  capture_mode VARCHAR(30) [not null]
+  connection_status VARCHAR(20) [not null, default: 'disconnected']
+  started_at TIMESTAMPTZ
+  ended_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table integration.webhook_endpoints {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [not null, note: 'External AuthService workspace id. No physical FK.']
+  name VARCHAR(100) [not null]
+  target_url VARCHAR(500) [not null]
+  secret_ref VARCHAR(500)
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table integration.webhook_events {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  endpoint_id UUID [not null]
+  event_type VARCHAR(50) [not null]
+  payload JSONB [not null]
+  status VARCHAR(20) [not null, default: 'pending']
+  retry_count INT [not null, default: 0]
+  last_error TEXT
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  delivered_at TIMESTAMPTZ
+}
+
+Table integration.integration_logs {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  provider VARCHAR(30) [not null]
+  user_id UUID [note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  action VARCHAR(100) [not null]
+  status VARCHAR(20) [not null]
+  request_id VARCHAR(100)
+  error_message TEXT
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table integration.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   PRIVACY SERVICE
+========================= */
+
+Table privacy.consent_records {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  consent_type VARCHAR(50) [not null]
+  consent_status consent_status [not null]
+  consent_text_version VARCHAR(50) [not null]
+  granted_at TIMESTAMPTZ
+  revoked_at TIMESTAMPTZ
+  ip_address VARCHAR(45)
+  user_agent VARCHAR(500)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (user_id, consent_type, created_at)
+  }
+}
+
+Table privacy.data_retention_policies {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK. Null means global policy.']
+  data_type VARCHAR(50) [not null]
+  retention_days INT [not null]
+  auto_delete_enabled BOOLEAN [not null, default: true]
+  requires_consent BOOLEAN [not null, default: false]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table privacy.data_deletion_requests {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  request_type VARCHAR(50) [not null]
+  status VARCHAR(20) [not null, default: 'pending']
+  requested_at TIMESTAMPTZ [not null, default: `NOW()`]
+  processed_at TIMESTAMPTZ
+  processed_by UUID [note: 'External AuthService user id. No physical FK.']
+  notes TEXT
+}
+
+Table privacy.data_access_logs {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [note: 'External AuthService user id whose data was accessed. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  accessed_by UUID [not null, note: 'External AuthService user id. No physical FK.']
+  entity_type VARCHAR(50) [not null]
+  entity_id UUID [not null, note: 'External business object id. No physical FK.']
+  access_reason VARCHAR(255)
+  ip_address VARCHAR(45)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (entity_type, entity_id)
+    (accessed_by, created_at)
+  }
+}
+
+Table privacy.policy_versions {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  policy_type VARCHAR(50) [not null, note: 'privacy_policy, terms_of_service, voice_consent, ai_processing_notice']
+  version VARCHAR(50) [not null]
+  title VARCHAR(255) [not null]
+  content TEXT [not null]
+  effective_at TIMESTAMPTZ [not null]
+  retired_at TIMESTAMPTZ
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (policy_type, version) [unique]
+    (policy_type, is_active)
+  }
+}
+
+Table privacy.data_processing_records {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  user_id UUID [note: 'External AuthService user id. No physical FK.']
+  processing_type VARCHAR(50) [not null, note: 'audio_processing, transcription, translation, voice_clone, summary, vector_indexing']
+  data_type VARCHAR(50) [not null]
+  legal_basis VARCHAR(100)
+  purpose VARCHAR(255) [not null]
+  processor_service VARCHAR(50) [not null]
+  source_entity_type VARCHAR(50)
+  source_entity_id UUID [note: 'External business object id. No physical FK.']
+  started_at TIMESTAMPTZ [not null, default: `NOW()`]
+  completed_at TIMESTAMPTZ
+  status VARCHAR(20) [not null, default: 'processing']
+  metadata JSONB [not null, default: '{}']
+
+  indexes {
+    (workspace_id, started_at)
+    (user_id, started_at)
+    (processing_type, status)
+  }
+}
+
+Table privacy.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   PLATFORM SERVICE
+========================= */
+
+Table platform.supported_languages {
+  code VARCHAR(15) [primary key]
+  name VARCHAR(100) [not null]
+  native_name VARCHAR(100)
+  stt_supported BOOLEAN [not null, default: false]
+  translation_supported BOOLEAN [not null, default: false]
+  tts_supported BOOLEAN [not null, default: false]
+  voice_clone_supported BOOLEAN [not null, default: false]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table platform.system_configurations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  key VARCHAR(100) [unique, not null]
+  value JSONB [not null]
+  description VARCHAR(500)
+  is_sensitive BOOLEAN [not null, default: false]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table platform.feature_flags {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  key VARCHAR(100) [unique, not null]
+  description VARCHAR(500)
+  is_enabled BOOLEAN [not null, default: false]
+  rollout_percentage INT [not null, default: 0]
+  conditions JSONB [not null, default: '{}']
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table platform.service_configurations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  service_name VARCHAR(50) [not null]
+  config_key VARCHAR(100) [not null]
+  config_value JSONB [not null]
+  is_sensitive BOOLEAN [not null, default: false]
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+
+  indexes {
+    (service_name, config_key) [unique]
+  }
+}
+
+Table platform.config_change_logs {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  config_scope VARCHAR(50) [not null]
+  config_key VARCHAR(100) [not null]
+  old_value JSONB
+  new_value JSONB
+  changed_by UUID [note: 'External AuthService user id. No physical FK.']
+  change_reason VARCHAR(500)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table platform.audit_logs {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  action VARCHAR(100) [not null]
+  entity_type VARCHAR(50) [not null]
+  entity_id UUID [note: 'External business object id. No physical FK.']
+  old_values JSONB
+  new_values JSONB
+  ip_address VARCHAR(45)
+  user_agent VARCHAR(500)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (entity_type, entity_id)
+    (user_id, created_at)
+  }
+}
+
+Table platform.security_events {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [note: 'External AuthService user id. No physical FK.']
+  event_type VARCHAR(50) [not null]
+  severity VARCHAR(20) [not null, default: 'medium']
+  ip_address VARCHAR(45)
+  user_agent VARCHAR(500)
+  details JSONB
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (user_id, created_at)
+    (event_type, created_at)
+  }
+}
+
+Table platform.activity_logs {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  activity_type VARCHAR(50) [not null]
+  description VARCHAR(500)
+  metadata JSONB
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (workspace_id, created_at)
+    (user_id, created_at)
+  }
+}
+
+Table platform.outbox_events {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  aggregate_type VARCHAR(50) [not null]
+  aggregate_id UUID [not null]
+  event_type VARCHAR(100) [not null]
+  payload JSONB [not null]
+  status VARCHAR(20) [not null, default: 'pending']
+  retry_count INT [not null, default: 0]
+  last_error TEXT
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  published_at TIMESTAMPTZ
+
+  indexes {
+    (status, created_at)
+    (aggregate_type, aggregate_id)
+  }
+}
+
+Table platform.inbox_events {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  source_service VARCHAR(50) [not null]
+  event_id UUID [not null]
+  event_type VARCHAR(100) [not null]
+  payload JSONB [not null]
+  status VARCHAR(20) [not null, default: 'received']
+  processed_at TIMESTAMPTZ
+  error_message TEXT
+  received_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    (source_service, event_id) [unique]
+    (status, received_at)
+  }
+}
+
+Table platform.service_health_checks {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  service_name VARCHAR(50) [not null]
+  status VARCHAR(20) [not null]
+  version VARCHAR(50)
+  latency_ms INT
+  checked_at TIMESTAMPTZ [not null, default: `NOW()`]
+  details JSONB [not null, default: '{}']
+
+  indexes {
+    (service_name, checked_at)
+    (status, checked_at)
+  }
+}
+
+Table platform.service_deployments {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  service_name VARCHAR(50) [not null]
+  version VARCHAR(50) [not null]
+  environment VARCHAR(30) [not null, default: 'production']
+  deployed_by UUID [note: 'External AuthService user id. No physical FK.']
+  deployed_at TIMESTAMPTZ [not null, default: `NOW()`]
+  status VARCHAR(20) [not null, default: 'deployed']
+  notes TEXT
+
+  indexes {
+    (service_name, deployed_at)
+    (environment, status)
+  }
+}
+
+Table platform.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   ADMIN SERVICE
+========================= */
+
+Table admin.admin_actions {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  admin_user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  target_user_id UUID [note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  action VARCHAR(100) [not null]
+  reason VARCHAR(500)
+  metadata JSONB
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+}
+
+Table admin.support_tickets {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  workspace_id UUID [note: 'External AuthService workspace id. No physical FK.']
+  subject VARCHAR(255) [not null]
+  description TEXT [not null]
+  status ticket_status [not null, default: 'OPEN']
+  priority VARCHAR(20) [not null, default: 'normal']
+  assigned_to UUID [note: 'External AuthService user id. No physical FK.']
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  resolved_at TIMESTAMPTZ
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table admin.support_ticket_comments {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  support_ticket_id UUID [not null]
+  author_user_id UUID [not null, note: 'External AuthService user id. No physical FK.']
+  comment TEXT [not null]
+  is_internal BOOLEAN [not null, default: false]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  deleted_at TIMESTAMPTZ
+
+  indexes {
+    (support_ticket_id, created_at)
+  }
+}
+
+Table admin.incident_reports {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  title VARCHAR(255) [not null]
+  severity VARCHAR(20) [not null]
+  status VARCHAR(20) [not null, default: 'open']
+  affected_service VARCHAR(50)
+  description TEXT
+  started_at TIMESTAMPTZ
+  resolved_at TIMESTAMPTZ
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table admin.maintenance_windows {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  title VARCHAR(255) [not null]
+  description TEXT
+  scheduled_start TIMESTAMPTZ [not null]
+  scheduled_end TIMESTAMPTZ [not null]
+  status VARCHAR(20) [not null, default: 'scheduled']
+  is_active BOOLEAN [not null, default: true]
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+  created_by UUID [note: 'External AuthService user id. No physical FK.']
+  updated_at TIMESTAMPTZ [not null, default: `NOW()`]
+  updated_by UUID [note: 'External AuthService user id. No physical FK.']
+  deleted_at TIMESTAMPTZ
+  deleted_by UUID [note: 'External AuthService user id. No physical FK.']
+}
+
+Table admin.schema_migrations {
+  id UUID [primary key, default: `uuid_generate_v7()`]
+  migration_key VARCHAR(150) [unique, not null]
+  migration_name VARCHAR(255) [not null]
+  checksum VARCHAR(128) [not null]
+  script_path VARCHAR(500)
+  status VARCHAR(20) [not null, default: 'success']
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  execution_time_ms INT
+  error_message TEXT
+  applied_by VARCHAR(100)
+  created_at TIMESTAMPTZ [not null, default: `NOW()`]
+
+  indexes {
+    status
+  }
+}
+
+/* =========================
+   INTERNAL PHYSICAL REFERENCES ONLY
+   These refs stay inside each service-owned schema.
+   Cross-service fields above are UUID references only and intentionally have no Ref.
+========================= */
+
+/* AuthService internal refs */
+Ref: auth.users.created_by > auth.users.id
+Ref: auth.users.updated_by > auth.users.id
+Ref: auth.users.deleted_by > auth.users.id
+Ref: auth.roles.created_by > auth.users.id
+Ref: auth.roles.updated_by > auth.users.id
+Ref: auth.roles.deleted_by > auth.users.id
+Ref: auth.permissions.created_by > auth.users.id
+Ref: auth.permissions.updated_by > auth.users.id
+Ref: auth.permissions.deleted_by > auth.users.id
+Ref: auth.role_permissions.role_id > auth.roles.id
+Ref: auth.role_permissions.permission_id > auth.permissions.id
+Ref: auth.role_permissions.created_by > auth.users.id
+Ref: auth.user_roles.user_id > auth.users.id
+Ref: auth.user_roles.role_id > auth.roles.id
+Ref: auth.user_roles.workspace_id > auth.workspaces.id
+Ref: auth.user_roles.assigned_by > auth.users.id
+Ref: auth.user_roles.revoked_by > auth.users.id
+Ref: auth.workspaces.owner_id > auth.users.id
+Ref: auth.workspaces.created_by > auth.users.id
+Ref: auth.workspaces.updated_by > auth.users.id
+Ref: auth.workspaces.deleted_by > auth.users.id
+Ref: auth.workspace_members.workspace_id > auth.workspaces.id
+Ref: auth.workspace_members.user_id > auth.users.id
+Ref: auth.workspace_members.role_id > auth.roles.id
+Ref: auth.workspace_members.removed_by > auth.users.id
+Ref: auth.workspace_invitations.workspace_id > auth.workspaces.id
+Ref: auth.workspace_invitations.role_id > auth.roles.id
+Ref: auth.workspace_invitations.invited_by > auth.users.id
+Ref: auth.refresh_tokens.user_id > auth.users.id
+Ref: auth.user_settings.user_id - auth.users.id
+Ref: auth.user_settings.updated_by > auth.users.id
+
+/* MeetingService internal refs */
+Ref: meeting.meeting_participants.meeting_room_id > meeting.meeting_rooms.id [delete: cascade]
+Ref: meeting.meeting_tracks.meeting_participant_id > meeting.meeting_participants.id [delete: cascade]
+
+/* TranslationRoomService internal refs */
+Ref: translation_room.translation_room_participants.translation_room_id > translation_room.translation_rooms.id
+Ref: translation_room.translation_room_audio_routes.translation_room_id > translation_room.translation_rooms.id
+Ref: translation_room.translation_room_audio_routes.source_participant_id > translation_room.translation_room_participants.id
+Ref: translation_room.translation_room_audio_routes.target_participant_id > translation_room.translation_room_participants.id
+Ref: translation_room.translation_room_artifacts.translation_room_id > translation_room.translation_rooms.id
+Ref: translation_room.translation_room_feedback.translation_room_id > translation_room.translation_rooms.id
+
+/* TranscriptService internal refs */
+Ref: transcript.transcript_segments.transcript_id > transcript.transcripts.id
+Ref: transcript.transcript_translations.segment_id > transcript.transcript_segments.id
+Ref: transcript.transcript_corrections.segment_id > transcript.transcript_segments.id
+Ref: transcript.transcript_exports.transcript_id > transcript.transcripts.id
+Ref: transcript.glossary_terms.glossary_id > transcript.glossaries.id
+
+/* AIService internal refs */
+Ref: ai.model_runs.job_id > ai.processing_jobs.id
+Ref: ai.model_metrics.model_run_id > ai.model_runs.id
+Ref: ai.model_capabilities.model_id > ai.ai_models.id
+Ref: ai.vector_documents.collection_id > ai.vector_collections.id
+Ref: ai.vector_chunks.vector_document_id > ai.vector_documents.id
+Ref: ai.evaluation_cases.dataset_id > ai.evaluation_datasets.id
+
+/* VoiceService internal refs */
+Ref: voice.voice_consents.voice_profile_id > voice.voice_profiles.id
+Ref: voice.voice_samples.voice_profile_id > voice.voice_profiles.id
+
+/* SubscriptionService internal refs */
+Ref: subscription.subscriptions.plan_id > subscription.plans.id
+Ref: subscription.credit_transactions.subscription_id > subscription.subscriptions.id
+Ref: subscription.credit_balance_snapshots.subscription_id > subscription.subscriptions.id
+Ref: subscription.usage_records.subscription_id > subscription.subscriptions.id
+Ref: subscription.payments.subscription_id > subscription.subscriptions.id
+Ref: subscription.refunds.payment_id > subscription.payments.id
+Ref: subscription.invoices.payment_id > subscription.payments.id
+
+/* NotificationService internal refs */
+Ref: notification.notifications.campaign_id > notification.notification_campaigns.id
+Ref: notification.email_delivery_logs.notification_id > notification.notifications.id
+Ref: notification.push_delivery_logs.notification_id > notification.notifications.id
+Ref: notification.push_delivery_logs.push_subscription_id > notification.push_subscriptions.id
+
+/* IntegrationService internal refs */
+Ref: integration.webhook_events.endpoint_id > integration.webhook_endpoints.id
+
+/* AdminService internal refs */
+Ref: admin.support_ticket_comments.support_ticket_id > admin.support_tickets.id

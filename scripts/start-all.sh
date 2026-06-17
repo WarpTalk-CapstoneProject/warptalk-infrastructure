@@ -33,7 +33,7 @@ if [[ ! -f .env ]]; then
 fi
 
 BUILD_FLAG=""
-COMPOSE_FILES="-f docker-compose.yml -f docker-compose.dev.yml"
+COMPOSE_FILES="-f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.mac.yml"
 
 for arg in "$@"; do
     case "$arg" in

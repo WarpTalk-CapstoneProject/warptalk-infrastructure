@@ -36,10 +36,18 @@ VALUES
     (gen_random_uuid(), 'moderator', 'Content moderator', NOW())
 ON CONFLICT DO NOTHING;
 
--- ── Seed Subscription Plans ─────────────────────────────────────────
--- (add when subscription schema is ready)
+-- ── Seed Supported Languages ────────────────────────────────────────
+INSERT INTO platform.supported_languages (code, name, native_name, stt_supported, translation_supported, tts_supported, voice_clone_supported, is_active, created_at)
+VALUES
+    ('vi', 'Vietnamese', 'Tiếng Việt', true, true, true, true, true, NOW()),
+    ('en', 'English', 'English', true, true, true, true, true, NOW()),
+    ('ja', 'Japanese', '日本語', true, true, true, false, true, NOW()),
+    ('ko', 'Korean', '한국어', true, true, true, false, true, NOW()),
+    ('zh', 'Chinese', '中文', true, true, true, false, true, NOW()),
+    ('fr', 'French', 'Français', true, true, true, false, true, NOW()),
+    ('es', 'Spanish', 'Español', true, true, true, false, true, NOW())
+ON CONFLICT (code) DO UPDATE SET is_active = EXCLUDED.is_active;
 
-RAISE NOTICE '✅ Seed data inserted';
 SQL
 
 echo -e "${GREEN}✅ Database seeded successfully!${NC}"
