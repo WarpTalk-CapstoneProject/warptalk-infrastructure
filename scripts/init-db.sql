@@ -183,7 +183,9 @@ CREATE TABLE auth.workspace_members (
   workspace_id UUID NOT NULL,
   user_id UUID NOT NULL,
   role_id UUID NOT NULL,
+  membership_type VARCHAR(20) NOT NULL DEFAULT 'Internal',
   status VARCHAR(20) NOT NULL DEFAULT 'active',
+  can_create_meetings BOOLEAN NOT NULL DEFAULT true,
   joined_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
   removed_at TIMESTAMPTZ,
   removed_by UUID
