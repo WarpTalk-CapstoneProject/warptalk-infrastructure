@@ -1,6 +1,6 @@
 \c warptalk
 DO $$
-DECLARE pwd_hash VARCHAR := 'v2$SHA512$100000$16$AKwiGnbhlfXmBCfSM8jlwA==$akecCim0bjsgJV6SGCb67BMeVQ+btn7CppmBdv+xeRc=';
+DECLARE pwd_hash VARCHAR := 'v2$SHA512$100000$16$AKwiGnbhlfXmBCfSM8jlwA==$tQUEhTX3GnRgVDZhlIUOMNdAKrZw5xdjaLKd/Zuao3c=';
 BEGIN
     SET CONSTRAINTS ALL DEFERRED;
 
@@ -125,6 +125,7 @@ INSERT INTO auth.workspaces (id, name, slug, owner_id, plan_tier) VALUES
 ON CONFLICT DO NOTHING;
 INSERT INTO auth.workspace_members (workspace_id, user_id, role_id, status) VALUES
 ('019ec641-97a7-78c9-8f18-000000000000', '019ec641-9776-7d50-b2b9-9edb93a46d22', '99bf57ba-9d3c-471b-a5ae-94901a0c81b5', 'active'),
+('019ec641-97a7-78c9-8f18-000000000000', '019ea677-6c84-7d7b-9f48-738b3cde41a9', '99bf57ba-9d3c-471b-a5ae-94901a0c81b4', 'active'),
 ('019ec641-97a7-78c9-8f18-000000000000', '46f79eee-5616-45a1-b67b-f1d3b14c693d', '95beb6bb-a255-4958-891f-68fa540ebe3d', 'active'),
 ('019ec641-97a7-78c9-8f18-000000000000', 'e1bc958a-871d-4a3e-8448-95f62096ee15', '95beb6bb-a255-4958-891f-68fa540ebe3d', 'active'),
 ('019ec641-97a7-78c9-8f18-000000000000', '521d1e16-c66a-4e1b-92cb-b52035658c45', '95beb6bb-a255-4958-891f-68fa540ebe3d', 'active'),
