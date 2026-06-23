@@ -118,12 +118,12 @@ INSERT INTO auth.user_settings (user_id, default_speak_language, default_listen_
 ('54b135c0-d958-477a-b534-0456fc77f6ab', 'es-ES', 'es-ES', 'system'),
 ('f9a12c93-94ed-4f77-94d4-592f9bffc050', 'it-IT', 'it-IT', 'system')
 ON CONFLICT DO NOTHING;
-INSERT INTO auth.workspaces (id, name, slug, owner_id, plan_tier) VALUES
-('019ec641-97a7-78c9-8f18-000000000000', 'WarpTalk Global', 'warptalk-global', '019ec641-9776-7d50-b2b9-9edb93a46d22', 'enterprise'),
-('ff3b618e-325a-4466-8fcd-a15c24fbd8e0', 'Acme Corp', 'acme-corp', '4ddec186-4be4-479b-804d-ec1d14c1800d', 'pro'),
-('90d53dab-bb88-4f58-8198-5c0ccd643068', 'StartupX', 'startupx', '13e28459-1f97-4c85-abbf-bbee36b5f2eb', 'free')
+INSERT INTO workspace.workspaces (id, name, slug, owner_id) VALUES
+('019ec641-97a7-78c9-8f18-000000000000', 'WarpTalk Global', 'warptalk-global', '019ec641-9776-7d50-b2b9-9edb93a46d22'),
+('ff3b618e-325a-4466-8fcd-a15c24fbd8e0', 'Acme Corp', 'acme-corp', '4ddec186-4be4-479b-804d-ec1d14c1800d'),
+('90d53dab-bb88-4f58-8198-5c0ccd643068', 'StartupX', 'startupx', '13e28459-1f97-4c85-abbf-bbee36b5f2eb')
 ON CONFLICT DO NOTHING;
-INSERT INTO auth.workspace_members (workspace_id, user_id, role_id, status) VALUES
+INSERT INTO workspace.workspace_members (workspace_id, user_id, role_id, status) VALUES
 ('019ec641-97a7-78c9-8f18-000000000000', '019ec641-9776-7d50-b2b9-9edb93a46d22', '99bf57ba-9d3c-471b-a5ae-94901a0c81b5', 'active'),
 ('019ec641-97a7-78c9-8f18-000000000000', '019ea677-6c84-7d7b-9f48-738b3cde41a9', '99bf57ba-9d3c-471b-a5ae-94901a0c81b4', 'active'),
 ('019ec641-97a7-78c9-8f18-000000000000', '46f79eee-5616-45a1-b67b-f1d3b14c693d', '95beb6bb-a255-4958-891f-68fa540ebe3d', 'active'),
