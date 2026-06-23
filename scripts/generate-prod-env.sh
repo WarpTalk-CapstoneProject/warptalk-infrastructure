@@ -62,6 +62,10 @@ SEQ_API_KEY=$(generate_secret)
 SEQ_ADMIN_PASSWORD=$(generate_secret)
 GRAFANA_ADMIN_PASSWORD=$(generate_secret)
 
+# ── LiveKit (get from LiveKit Cloud dashboard or self-hosted server) ─
+LIVEKIT_API_KEY=<your-livekit-api-key>
+LIVEKIT_API_SECRET=<your-livekit-api-secret>
+
 # ── Backup (S3/MinIO) ───────────────────────────────────────────────
 BACKUP_S3_BUCKET=warptalk-backups
 BACKUP_S3_ENDPOINT=http://minio:9000
