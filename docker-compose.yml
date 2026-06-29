@@ -88,6 +88,30 @@ services:
     networks:
       - warptalk-net
 
+  # ── Workspace Service ─────────────────────────────────────────────
+  workspace-service:
+    build:
+      context: ../warptalk-backend
+      dockerfile: workspace/Dockerfile
+    container_name: warptalk-workspace
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      ConnectionStrings__WorkspaceDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=workspace,public"
+      GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
+      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    networks:
+      - warptalk-net
+
   # ── TranslationRoom Service ───────────────────────────────────────────────
   translation-room-service:
     build:
@@ -198,29 +222,6 @@ services:
     networks:
       - warptalk-net
 
-  # ── Workspace Service ─────────────────────────────────────────────
-  workspace-service:
-    build:
-      context: ../warptalk-backend
-      dockerfile: workspace/Dockerfile
-    container_name: warptalk-workspace
-    environment:
-      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__WorkspaceDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=workspace,public"
-      GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
-      Jwt__Secret: ${JWT_SECRET}
-      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
-      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
-    depends_on:
-      pgbouncer:
-        condition: service_started
-      redis:
-        condition: service_healthy
-      auth-service:
-        condition: service_started
-    networks:
-      - warptalk-net
 
   # ── API Gateway (YARP + SignalR) ──────────────────────────────────
   gateway:
@@ -247,6 +248,8 @@ services:
     depends_on:
       auth-service:
         condition: service_started
+      workspace-service:
+        condition: service_started
       translation-room-service:
         condition: service_started
       transcript-service:
@@ -254,8 +257,6 @@ services:
       notification-service:
         condition: service_started
       meeting-service:
-        condition: service_started
-      workspace-service:
         condition: service_started
     networks:
       - warptalk-net

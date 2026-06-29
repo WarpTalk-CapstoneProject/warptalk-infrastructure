@@ -10,6 +10,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE SCHEMA auth;
 
+CREATE SCHEMA workspace;
+
 CREATE SCHEMA translation_room;
 
 CREATE SCHEMA transcript;
@@ -154,20 +156,21 @@ CREATE TABLE auth.user_roles (
   id UUID PRIMARY KEY DEFAULT (uuidv7()),
   user_id UUID NOT NULL,
   role_id UUID NOT NULL,
-  workspace_id UUID,
   assigned_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
   assigned_by UUID,
   revoked_at TIMESTAMPTZ,
   revoked_by UUID
 );
 
-CREATE TABLE auth.workspaces (
+CREATE TABLE workspace.workspaces (
   id UUID PRIMARY KEY DEFAULT (uuidv7()),
   name VARCHAR(150) NOT NULL,
   slug VARCHAR(100) UNIQUE NOT NULL,
   owner_id UUID NOT NULL,
   logo_url VARCHAR(500),
-  plan_tier VARCHAR(30) NOT NULL DEFAULT 'free',
+  allow_external_collaboration BOOLEAN NOT NULL DEFAULT false,
+  require_verified_domain_for_internal BOOLEAN NOT NULL DEFAULT true,
+  allow_subdomains BOOLEAN NOT NULL DEFAULT false,
   settings JSONB NOT NULL DEFAULT '{}',
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
@@ -178,24 +181,27 @@ CREATE TABLE auth.workspaces (
   deleted_by UUID
 );
 
-CREATE TABLE auth.workspace_members (
+CREATE TABLE workspace.workspace_members (
   id UUID PRIMARY KEY DEFAULT (uuidv7()),
   workspace_id UUID NOT NULL,
   user_id UUID NOT NULL,
   role_id UUID NOT NULL,
-  membership_type VARCHAR(20) NOT NULL DEFAULT 'Internal',
+  membership_type VARCHAR(20) NOT NULL DEFAULT 'internal',
   status VARCHAR(20) NOT NULL DEFAULT 'active',
   can_create_meetings BOOLEAN NOT NULL DEFAULT true,
   joined_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
   removed_at TIMESTAMPTZ,
-  removed_by UUID
+  removed_by UUID,
+  UNIQUE (workspace_id, user_id)
 );
 
-CREATE TABLE auth.workspace_invitations (
+CREATE TABLE workspace.workspace_invitations (
   id UUID PRIMARY KEY DEFAULT (uuidv7()),
   workspace_id UUID NOT NULL,
   email VARCHAR(320) NOT NULL,
   role_id UUID NOT NULL,
+  membership_type VARCHAR(20) NOT NULL DEFAULT 'internal',
+  matched_domain_id UUID,
   invited_by UUID NOT NULL,
   token_hash VARCHAR(255) UNIQUE NOT NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -203,6 +209,140 @@ CREATE TABLE auth.workspace_invitations (
   accepted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW())
 );
+
+CREATE TABLE workspace.workspace_verified_domains (
+  id UUID PRIMARY KEY DEFAULT (uuidv7()),
+  workspace_id UUID NOT NULL,
+  domain VARCHAR(255) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  verification_method VARCHAR(50) NOT NULL,
+  verification_token VARCHAR(255) NOT NULL,
+  verified_at TIMESTAMPTZ,
+  verified_by UUID,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
+  created_by UUID,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
+  updated_by UUID
+);
+
+CREATE TABLE workspace.schema_migrations (
+  id UUID PRIMARY KEY DEFAULT (uuidv7()),
+  migration_key VARCHAR(150) UNIQUE NOT NULL,
+  migration_name VARCHAR(255) NOT NULL,
+  checksum VARCHAR(128) NOT NULL,
+  script_path VARCHAR(500),
+  status VARCHAR(20) NOT NULL DEFAULT 'success',
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  execution_time_ms INT,
+  error_message TEXT,
+  applied_by VARCHAR(100),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW())
+);
+
+CREATE UNIQUE INDEX idx_workspace_verified_domains_unique_verified 
+ON workspace.workspace_verified_domains (domain) 
+WHERE status = 'verified';
+
+CREATE TABLE workspace.workspace_documents (
+  id UUID PRIMARY KEY DEFAULT (uuidv7()),
+  workspace_id UUID NOT NULL REFERENCES workspace.workspaces(id) ON DELETE RESTRICT,
+  uploaded_by UUID,
+  owner_id UUID,
+  name VARCHAR(255) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  file_extension VARCHAR(20) NOT NULL,
+  mime_type VARCHAR(100) NOT NULL,
+  size_bytes BIGINT NOT NULL,
+  storage_provider VARCHAR(50) NOT NULL,
+  storage_key VARCHAR(500) NOT NULL,
+  source_type VARCHAR(50) NOT NULL,
+  source_id UUID,
+  document_type VARCHAR(50) NOT NULL,
+  source_language VARCHAR(20),
+  detected_language VARCHAR(20),
+  business_domain VARCHAR(100),
+  summary TEXT,
+  keywords JSONB,
+  ai_eligible BOOLEAN NOT NULL DEFAULT true,
+  ai_usage_policy JSONB,
+  ingestion_status VARCHAR(30) NOT NULL DEFAULT 'pending',
+  last_indexed_at TIMESTAMPTZ,
+  index_version VARCHAR(50),
+  is_sensitive BOOLEAN NOT NULL DEFAULT false,
+  confidentiality_level VARCHAR(30) NOT NULL DEFAULT 'public_internal',
+  retention_state VARCHAR(30) NOT NULL DEFAULT 'active',
+  status VARCHAR(30) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
+  deleted_at TIMESTAMPTZ,
+  deleted_by UUID
+);
+
+CREATE INDEX idx_workspace_documents_workspace_id ON workspace.workspace_documents (workspace_id);
+CREATE INDEX idx_workspace_documents_workspace_status ON workspace.workspace_documents (workspace_id, status);
+CREATE INDEX idx_workspace_documents_workspace_retention ON workspace.workspace_documents (workspace_id, retention_state);
+CREATE INDEX idx_workspace_documents_workspace_ai ON workspace.workspace_documents (workspace_id, ai_eligible);
+CREATE INDEX idx_workspace_documents_workspace_confidentiality ON workspace.workspace_documents (workspace_id, confidentiality_level);
+CREATE INDEX idx_workspace_documents_workspace_lang ON workspace.workspace_documents (workspace_id, source_language);
+
+CREATE TABLE workspace.workspace_document_access_policies (
+  id UUID PRIMARY KEY DEFAULT (uuidv7()),
+  document_id UUID NOT NULL REFERENCES workspace.workspace_documents(id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspace.workspaces(id) ON DELETE RESTRICT,
+  subject_type VARCHAR(30) NOT NULL,
+  subject_id UUID,
+  subject_key VARCHAR(150),
+  permission VARCHAR(30) NOT NULL,
+  effect VARCHAR(20) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
+  created_by UUID,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
+  updated_by UUID
+);
+
+CREATE INDEX idx_doc_access_policies_doc_id ON workspace.workspace_document_access_policies (document_id);
+CREATE INDEX idx_doc_access_policies_lookup ON workspace.workspace_document_access_policies (document_id, subject_type, subject_id);
+
+CREATE TABLE workspace.workspace_document_audits (
+  id UUID PRIMARY KEY DEFAULT (uuidv7()),
+  document_id UUID NOT NULL REFERENCES workspace.workspace_documents(id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspace.workspaces(id) ON DELETE RESTRICT,
+  actor_id UUID,
+  action VARCHAR(50) NOT NULL,
+  action_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
+  metadata JSONB,
+  ip_address VARCHAR(64),
+  user_agent VARCHAR(500)
+);
+
+CREATE INDEX idx_workspace_doc_audits_doc_id ON workspace.workspace_document_audits (document_id);
+CREATE INDEX idx_workspace_doc_audits_workspace_action ON workspace.workspace_document_audits (workspace_id, action_at);
+CREATE INDEX idx_workspace_doc_audits_actor_action ON workspace.workspace_document_audits (actor_id, action_at);
+
+CREATE TABLE workspace.workspace_knowledge_glossaries (
+  id UUID PRIMARY KEY DEFAULT (uuidv7()),
+  workspace_id UUID NOT NULL REFERENCES workspace.workspaces(id) ON DELETE RESTRICT,
+  name VARCHAR(255) NOT NULL,
+  business_domain VARCHAR(100),
+  source_language VARCHAR(20) NOT NULL,
+  target_language VARCHAR(20) NOT NULL,
+  term VARCHAR(255) NOT NULL,
+  preferred_translation VARCHAR(255) NOT NULL,
+  part_of_speech VARCHAR(50),
+  definition TEXT,
+  usage_note TEXT,
+  status VARCHAR(30) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
+  created_by UUID,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
+  updated_by UUID,
+  UNIQUE (workspace_id, business_domain, source_language, target_language, term)
+);
+
+CREATE INDEX idx_workspace_glossaries_lookup ON workspace.workspace_knowledge_glossaries (workspace_id, business_domain, source_language);
+
 
 CREATE TABLE auth.refresh_tokens (
   id UUID PRIMARY KEY DEFAULT (uuidv7()),
@@ -1456,11 +1596,11 @@ CREATE TABLE admin.schema_migrations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW())
 );
 
-CREATE UNIQUE INDEX ON auth.user_roles (user_id, role_id, workspace_id);
+CREATE UNIQUE INDEX ON auth.user_roles (user_id, role_id);
 
-CREATE UNIQUE INDEX ON auth.workspace_members (workspace_id, user_id);
+CREATE UNIQUE INDEX ON workspace.workspace_members (workspace_id, user_id);
 
-CREATE INDEX ON auth.workspace_invitations (workspace_id, email);
+CREATE INDEX ON workspace.workspace_invitations (workspace_id, email);
 
 CREATE INDEX ON auth.schema_migrations (status);
 
@@ -1636,23 +1776,21 @@ COMMENT ON COLUMN auth.permissions.deleted_by IS 'Internal auth user reference.'
 
 COMMENT ON COLUMN auth.role_permissions.created_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.user_roles.workspace_id IS 'Internal AuthService workspace reference. Nullable for global roles.';
-
 COMMENT ON COLUMN auth.user_roles.assigned_by IS 'Internal auth user reference.';
 
 COMMENT ON COLUMN auth.user_roles.revoked_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspaces.owner_id IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspaces.owner_id IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspaces.created_by IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspaces.created_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspaces.updated_by IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspaces.updated_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspaces.deleted_by IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspaces.deleted_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspace_members.removed_by IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspace_members.removed_by IS 'Internal auth user reference.';
 
-COMMENT ON COLUMN auth.workspace_invitations.invited_by IS 'Internal auth user reference.';
+COMMENT ON COLUMN workspace.workspace_invitations.invited_by IS 'Internal auth user reference.';
 
 COMMENT ON COLUMN auth.user_settings.updated_by IS 'Internal auth user reference.';
 
@@ -2033,33 +2171,39 @@ ALTER TABLE auth.user_roles ADD FOREIGN KEY (user_id) REFERENCES auth.users (id)
 
 ALTER TABLE auth.user_roles ADD FOREIGN KEY (role_id) REFERENCES auth.roles (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.user_roles ADD FOREIGN KEY (workspace_id) REFERENCES auth.workspaces (id) DEFERRABLE INITIALLY IMMEDIATE;
-
 ALTER TABLE auth.user_roles ADD FOREIGN KEY (assigned_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE auth.user_roles ADD FOREIGN KEY (revoked_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspaces ADD FOREIGN KEY (owner_id) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspaces ADD FOREIGN KEY (owner_id) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspaces ADD FOREIGN KEY (created_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspaces ADD FOREIGN KEY (created_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspaces ADD FOREIGN KEY (updated_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspaces ADD FOREIGN KEY (updated_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspaces ADD FOREIGN KEY (deleted_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspaces ADD FOREIGN KEY (deleted_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspace_members ADD FOREIGN KEY (workspace_id) REFERENCES auth.workspaces (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspace_members ADD FOREIGN KEY (workspace_id) REFERENCES workspace.workspaces (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspace_members ADD FOREIGN KEY (user_id) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspace_members ADD FOREIGN KEY (user_id) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspace_members ADD FOREIGN KEY (role_id) REFERENCES auth.roles (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspace_members ADD FOREIGN KEY (role_id) REFERENCES auth.roles (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspace_members ADD FOREIGN KEY (removed_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspace_members ADD FOREIGN KEY (removed_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspace_invitations ADD FOREIGN KEY (workspace_id) REFERENCES auth.workspaces (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspace_invitations ADD FOREIGN KEY (workspace_id) REFERENCES workspace.workspaces (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspace_invitations ADD FOREIGN KEY (role_id) REFERENCES auth.roles (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspace_invitations ADD FOREIGN KEY (role_id) REFERENCES auth.roles (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.workspace_invitations ADD FOREIGN KEY (invited_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE workspace.workspace_invitations ADD FOREIGN KEY (invited_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE workspace.workspace_verified_domains ADD FOREIGN KEY (workspace_id) REFERENCES workspace.workspaces (id) DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE workspace.workspace_verified_domains ADD FOREIGN KEY (verified_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE workspace.workspace_verified_domains ADD FOREIGN KEY (created_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE workspace.workspace_verified_domains ADD FOREIGN KEY (updated_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE auth.refresh_tokens ADD FOREIGN KEY (user_id) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
