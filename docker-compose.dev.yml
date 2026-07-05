@@ -57,9 +57,16 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
 
+  billing-service:
+    ports:
+      - "5107:5107"
+      - "50057:50057"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
   payment-service:
     ports:
-      - "5107:8080"
+      - "5047:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
 
