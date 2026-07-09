@@ -275,7 +275,7 @@ services:
     container_name: warptalk-billing
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__BillingDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=subscription,public"
+      ConnectionStrings__BillingDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=subscription,workspace,public"
       ConnectionStrings__Redis: "redis:6379,password=${REDIS_PASSWORD}"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
