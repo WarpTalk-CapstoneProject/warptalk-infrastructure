@@ -1,0 +1,15 @@
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\bin\Debug\net8.0\HashGen.exe
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\bin\Debug\net8.0\HashGen.deps.json
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\bin\Debug\net8.0\HashGen.runtimeconfig.json
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\bin\Debug\net8.0\HashGen.dll
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\bin\Debug\net8.0\HashGen.pdb
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\obj\Debug\net8.0\HashGen.GeneratedMSBuildEditorConfig.editorconfig
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\obj\Debug\net8.0\HashGen.AssemblyInfoInputs.cache
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\obj\Debug\net8.0\HashGen.AssemblyInfo.cs
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\obj\Debug\net8.0\HashGen.csproj.CoreCompileInputs.cache
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\obj\Debug\net8.0\HashGen.sourcelink.json
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\obj\Debug\net8.0\HashGen.dll
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\obj\Debug\net8.0\refint\HashGen.dll
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\obj\Debug\net8.0\HashGen.pdb
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\obj\Debug\net8.0\HashGen.genruntimeconfig.cache
+E:\KhoiDongDuAn\SEP\warptalk-infrastructure\HashGen\obj\Debug\net8.0\ref\HashGen.dll
