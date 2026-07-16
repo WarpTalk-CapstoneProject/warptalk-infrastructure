@@ -16,6 +16,11 @@ services:
     ports:
       - "6379:6379"
 
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
   auth-service:
     ports:
       - "5101:5101"

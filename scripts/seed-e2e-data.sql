@@ -118,10 +118,14 @@ INSERT INTO auth.user_settings (user_id, default_speak_language, default_listen_
 ('54b135c0-d958-477a-b534-0456fc77f6ab', 'es-ES', 'es-ES', 'system'),
 ('f9a12c93-94ed-4f77-94d4-592f9bffc050', 'it-IT', 'it-IT', 'system')
 ON CONFLICT DO NOTHING;
-INSERT INTO workspace.workspaces (id, name, slug, owner_id) VALUES
-('019ec641-97a7-78c9-8f18-000000000000', 'WarpTalk Global', 'warptalk-global', '019ec641-9776-7d50-b2b9-9edb93a46d22'),
-('ff3b618e-325a-4466-8fcd-a15c24fbd8e0', 'Acme Corp', 'acme-corp', '4ddec186-4be4-479b-804d-ec1d14c1800d'),
-('90d53dab-bb88-4f58-8198-5c0ccd643068', 'StartupX', 'startupx', '13e28459-1f97-4c85-abbf-bbee36b5f2eb')
+-- FIX 2026-07-16: allow_external_collaboration and allow_subdomains are NOT NULL with no
+-- default (added in a later migration after this seed script was written) — the original
+-- 4-column INSERT no longer satisfies the schema. Defaulting both to false (restrictive)
+-- for seed data since no test scenario here depends on either being true.
+INSERT INTO workspace.workspaces (id, name, slug, owner_id, allow_external_collaboration, allow_subdomains) VALUES
+('019ec641-97a7-78c9-8f18-000000000000', 'WarpTalk Global', 'warptalk-global', '019ec641-9776-7d50-b2b9-9edb93a46d22', false, false),
+('ff3b618e-325a-4466-8fcd-a15c24fbd8e0', 'Acme Corp', 'acme-corp', '4ddec186-4be4-479b-804d-ec1d14c1800d', false, false),
+('90d53dab-bb88-4f58-8198-5c0ccd643068', 'StartupX', 'startupx', '13e28459-1f97-4c85-abbf-bbee36b5f2eb', false, false)
 ON CONFLICT DO NOTHING;
 INSERT INTO workspace.workspace_members (workspace_id, user_id, role_id, status) VALUES
 ('019ec641-97a7-78c9-8f18-000000000000', '019ec641-9776-7d50-b2b9-9edb93a46d22', '99bf57ba-9d3c-471b-a5ae-94901a0c81b5', 'active'),
@@ -271,7 +275,8 @@ INSERT INTO translation_room.translation_rooms (id, workspace_id, host_id, title
 ('103868e1-39e8-432c-aaa4-cbf055d3e2e8', '90d53dab-bb88-4f58-8198-5c0ccd643068', '656b92e2-1fcd-47b4-8502-ee4b634fb00d', 'Board Meeting 27', 'Description for Board Meeting 27', 'ROOM-sta-26', 'IN_PROGRESS', 'en', '["vi", "ja", "ko"]'),
 ('e31db8bc-8ef1-4e09-885f-8d6f92edec58', '90d53dab-bb88-4f58-8198-5c0ccd643068', '9f9bbe1b-a69d-4663-96d9-67aca17a892f', 'Product Review 28', 'Description for Product Review 28', 'ROOM-sta-27', 'CANCELLED', 'en', '["vi", "ja", "ko"]'),
 ('fd326d1b-f428-4d4b-8913-02f740e67c59', '90d53dab-bb88-4f58-8198-5c0ccd643068', '2aa3e4d6-68dc-4351-8b9f-393639073c7c', 'Weekly Sync 29', 'Description for Weekly Sync 29', 'ROOM-sta-28', 'CANCELLED', 'en', '["vi", "ja", "ko"]'),
-('193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', '90d53dab-bb88-4f58-8198-5c0ccd643068', 'f9a12c93-94ed-4f77-94d4-592f9bffc050', 'Weekly Sync 30', 'Description for Weekly Sync 30', 'ROOM-sta-29', 'ENDED', 'en', '["vi", "ja", "ko"]');
+('193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', '90d53dab-bb88-4f58-8198-5c0ccd643068', 'f9a12c93-94ed-4f77-94d4-592f9bffc050', 'Weekly Sync 30', 'Description for Weekly Sync 30', 'ROOM-sta-29', 'ENDED', 'en', '["vi", "ja", "ko"]')
+ON CONFLICT (id) DO NOTHING;
 INSERT INTO translation_room.translation_room_participants (id, translation_room_id, user_id, display_name, role, listen_language, speak_language, status) VALUES
 ('348d52f0-2505-490f-87f2-9ce928f76411', 'da1f45e0-eae9-4f1a-885a-79ab90e402e4', '3d87ccd5-771d-428f-ad87-61cbdf51eaa7', 'Takashi Davis', 'participant', 'ko', 'ko', 'LEFT'),
 ('a056f695-9a49-43ac-961d-abd76ac36529', 'da1f45e0-eae9-4f1a-885a-79ab90e402e4', '10e599ef-4914-4d93-9827-691603be9835', 'Jiwoo Davis', 'participant', 'ja', 'ja', 'LEFT'),
@@ -734,7 +739,8 @@ INSERT INTO translation_room.translation_room_participants (id, translation_room
 ('bf6de850-a776-41c0-8ab4-a78a66e7fb97', '193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', '9f9bbe1b-a69d-4663-96d9-67aca17a892f', 'Lucas Hernandez', 'participant', 'it', 'it', 'LEFT'),
 ('3c968496-0cb3-4d43-84f4-947bb69fd3ba', '193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', '9d1b3750-d0b7-421d-ba01-a1a90ebf4f0d', 'Sarah Tran', 'participant', 'de', 'de', 'LEFT'),
 ('34c18707-5a79-408b-8480-ed1a4b175235', '193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', '2aa3e4d6-68dc-4351-8b9f-393639073c7c', 'James Rodriguez', 'participant', 'ja', 'ja', 'LEFT'),
-('0e43c721-b260-4d7d-89b9-191a7eb50fb1', '193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', 'aea00fd0-b56e-45ec-8590-b788b91e1e89', 'Emma Johnson', 'participant', 'de', 'de', 'LEFT');
+('0e43c721-b260-4d7d-89b9-191a7eb50fb1', '193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', 'aea00fd0-b56e-45ec-8590-b788b91e1e89', 'Emma Johnson', 'participant', 'de', 'de', 'LEFT')
+ON CONFLICT (id) DO NOTHING;
 INSERT INTO meeting.meeting_rooms (id, translation_room_id, provider_room_name, status) VALUES
 ('f5091973-cbc8-468e-9ff7-108922585f5a', 'da1f45e0-eae9-4f1a-885a-79ab90e402e4', 'livekit-da1f45e0-eae9-4f1a-885a-79ab90e402e4', 'FINISHED'),
 ('b8c96222-9eb0-43a2-ac94-b7fbc0d13d43', 'aa295c40-77ea-4d74-842c-46229db591ed', 'livekit-aa295c40-77ea-4d74-842c-46229db591ed', 'FINISHED'),
@@ -786,7 +792,8 @@ INSERT INTO meeting.meeting_rooms (id, translation_room_id, provider_room_name, 
 ('54d23563-67b5-46ee-a0b9-42ec2a4a043a', '7f69cd66-ae3f-41cb-b48d-f029196ad665', 'livekit-7f69cd66-ae3f-41cb-b48d-f029196ad665', 'ACTIVE'),
 ('c997533a-be93-4600-b7e0-0449d53da129', '148e8915-ba96-49cb-ae0a-cc9b6c7bd0df', 'livekit-148e8915-ba96-49cb-ae0a-cc9b6c7bd0df', 'ACTIVE'),
 ('7ce0409d-5aae-4ff6-9ba9-e505027db2f8', '103868e1-39e8-432c-aaa4-cbf055d3e2e8', 'livekit-103868e1-39e8-432c-aaa4-cbf055d3e2e8', 'ACTIVE'),
-('8645775c-d755-47a9-b267-e37dbbd21d6e', '193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', 'livekit-193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', 'FINISHED');
+('8645775c-d755-47a9-b267-e37dbbd21d6e', '193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', 'livekit-193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', 'FINISHED')
+ON CONFLICT (id) DO NOTHING;
 INSERT INTO meeting.meeting_participants (id, meeting_room_id, user_id, provider_identity, is_active) VALUES
 ('348d52f0-2505-490f-87f2-9ce928f76411', 'f5091973-cbc8-468e-9ff7-108922585f5a', '3d87ccd5-771d-428f-ad87-61cbdf51eaa7', '3d87ccd5-771d-428f-ad87-61cbdf51eaa7', true),
 ('a056f695-9a49-43ac-961d-abd76ac36529', 'f5091973-cbc8-468e-9ff7-108922585f5a', '10e599ef-4914-4d93-9827-691603be9835', '10e599ef-4914-4d93-9827-691603be9835', true),
@@ -1051,7 +1058,8 @@ INSERT INTO meeting.meeting_participants (id, meeting_room_id, user_id, provider
 ('bf6de850-a776-41c0-8ab4-a78a66e7fb97', '8645775c-d755-47a9-b267-e37dbbd21d6e', '9f9bbe1b-a69d-4663-96d9-67aca17a892f', '9f9bbe1b-a69d-4663-96d9-67aca17a892f', true),
 ('3c968496-0cb3-4d43-84f4-947bb69fd3ba', '8645775c-d755-47a9-b267-e37dbbd21d6e', '9d1b3750-d0b7-421d-ba01-a1a90ebf4f0d', '9d1b3750-d0b7-421d-ba01-a1a90ebf4f0d', true),
 ('34c18707-5a79-408b-8480-ed1a4b175235', '8645775c-d755-47a9-b267-e37dbbd21d6e', '2aa3e4d6-68dc-4351-8b9f-393639073c7c', '2aa3e4d6-68dc-4351-8b9f-393639073c7c', true),
-('0e43c721-b260-4d7d-89b9-191a7eb50fb1', '8645775c-d755-47a9-b267-e37dbbd21d6e', 'aea00fd0-b56e-45ec-8590-b788b91e1e89', 'aea00fd0-b56e-45ec-8590-b788b91e1e89', true);
+('0e43c721-b260-4d7d-89b9-191a7eb50fb1', '8645775c-d755-47a9-b267-e37dbbd21d6e', 'aea00fd0-b56e-45ec-8590-b788b91e1e89', 'aea00fd0-b56e-45ec-8590-b788b91e1e89', true)
+ON CONFLICT (id) DO NOTHING;
 INSERT INTO transcript.transcripts (id, workspace_id, translation_room_id, status, source_language, total_segments, total_duration_ms) VALUES
 ('7bb54816-b6d9-472f-8c02-a7026c8dd3fd', '019ec641-97a7-78c9-8f18-000000000000', 'da1f45e0-eae9-4f1a-885a-79ab90e402e4', 'FINALIZED', 'en', 10, 600000),
 ('af6822b0-1cd3-4f11-bb4c-026b9a3ce7d4', '019ec641-97a7-78c9-8f18-000000000000', 'aa295c40-77ea-4d74-842c-46229db591ed', 'FINALIZED', 'en', 10, 600000),
@@ -1075,7 +1083,8 @@ INSERT INTO transcript.transcripts (id, workspace_id, translation_room_id, statu
 ('e4662cb6-d436-4b82-b5cd-47610ed33e57', '90d53dab-bb88-4f58-8198-5c0ccd643068', '62ecdda7-fb26-4c4f-967c-8cee8674a565', 'FINALIZED', 'en', 10, 600000),
 ('8f6f0448-b235-4849-a0e6-83ea3c159f2d', '90d53dab-bb88-4f58-8198-5c0ccd643068', 'f1d9884b-2e61-4c8a-84ad-9f402371746f', 'FINALIZED', 'en', 10, 600000),
 ('d01a5af7-3852-42e9-ac77-edc1bf86b208', '90d53dab-bb88-4f58-8198-5c0ccd643068', 'bfec4413-adeb-478e-ab8e-f8f7528990d6', 'FINALIZED', 'en', 10, 600000),
-('4af884b3-12a3-4c32-9592-2ff5bc9dd024', '90d53dab-bb88-4f58-8198-5c0ccd643068', '193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', 'FINALIZED', 'en', 10, 600000);
+('4af884b3-12a3-4c32-9592-2ff5bc9dd024', '90d53dab-bb88-4f58-8198-5c0ccd643068', '193428ad-b3a6-48cb-a3fd-0b0d4e4a04dc', 'FINALIZED', 'en', 10, 600000)
+ON CONFLICT (id) DO NOTHING;
 INSERT INTO transcript.transcript_segments (id, transcript_id, speaker_participant_id, speaker_name, original_text, original_language, start_time_ms, end_time_ms, confidence, sequence_order) VALUES
 ('5baefa8d-bae6-4a27-a0bf-460a7f762997', '7bb54816-b6d9-472f-8c02-a7026c8dd3fd', 'a056f695-9a49-43ac-961d-abd76ac36529', 'Jiwoo Davis', 'Sample transcript sentence 1 from Jiwoo Davis.', 'en', 0, 3451, 0.95, 1),
 ('22972ec6-2c5b-430b-807b-1ce8f716204e', '7bb54816-b6d9-472f-8c02-a7026c8dd3fd', '348d52f0-2505-490f-87f2-9ce928f76411', 'Takashi Davis', 'Sample transcript sentence 2 from Takashi Davis.', 'en', 5116, 14134, 0.95, 2),
@@ -1306,7 +1315,8 @@ INSERT INTO transcript.transcript_segments (id, transcript_id, speaker_participa
 ('cdbdb794-7416-4fd6-add4-a617b6229dbd', '4af884b3-12a3-4c32-9592-2ff5bc9dd024', '3c968496-0cb3-4d43-84f4-947bb69fd3ba', 'Sarah Tran', 'Sample transcript sentence 7 from Sarah Tran.', 'en', 35440, 44101, 0.95, 7),
 ('aceb489f-94d3-4701-8489-3286f225c3f4', '4af884b3-12a3-4c32-9592-2ff5bc9dd024', '34c18707-5a79-408b-8480-ed1a4b175235', 'James Rodriguez', 'Sample transcript sentence 8 from James Rodriguez.', 'en', 45310, 50363, 0.95, 8),
 ('27dfd3bb-8e32-4b28-82a6-bfe5b53377ac', '4af884b3-12a3-4c32-9592-2ff5bc9dd024', '34c18707-5a79-408b-8480-ed1a4b175235', 'James Rodriguez', 'Sample transcript sentence 9 from James Rodriguez.', 'en', 52055, 61102, 0.95, 9),
-('01189046-4981-4784-9d56-2151efc6da1f', '4af884b3-12a3-4c32-9592-2ff5bc9dd024', '0e43c721-b260-4d7d-89b9-191a7eb50fb1', 'Emma Johnson', 'Sample transcript sentence 10 from Emma Johnson.', 'en', 61991, 66391, 0.95, 10);
+('01189046-4981-4784-9d56-2151efc6da1f', '4af884b3-12a3-4c32-9592-2ff5bc9dd024', '0e43c721-b260-4d7d-89b9-191a7eb50fb1', 'Emma Johnson', 'Sample transcript sentence 10 from Emma Johnson.', 'en', 61991, 66391, 0.95, 10)
+ON CONFLICT (id) DO NOTHING;
 INSERT INTO transcript.transcript_translations (segment_id, target_language, translated_text, translator_model, confidence) VALUES
 ('5baefa8d-bae6-4a27-a0bf-460a7f762997', 'vi', 'Translated Sample transcript sentence 1 from Jiwoo Davis. into vi', 'azure', 0.95),
 ('5baefa8d-bae6-4a27-a0bf-460a7f762997', 'ja', 'Translated Sample transcript sentence 1 from Jiwoo Davis. into ja', 'azure', 0.95),
@@ -1997,7 +2007,8 @@ INSERT INTO transcript.transcript_translations (segment_id, target_language, tra
 ('27dfd3bb-8e32-4b28-82a6-bfe5b53377ac', 'ko', 'Translated Sample transcript sentence 9 from James Rodriguez. into ko', 'azure', 0.95),
 ('01189046-4981-4784-9d56-2151efc6da1f', 'vi', 'Translated Sample transcript sentence 10 from Emma Johnson. into vi', 'azure', 0.95),
 ('01189046-4981-4784-9d56-2151efc6da1f', 'ja', 'Translated Sample transcript sentence 10 from Emma Johnson. into ja', 'azure', 0.95),
-('01189046-4981-4784-9d56-2151efc6da1f', 'ko', 'Translated Sample transcript sentence 10 from Emma Johnson. into ko', 'azure', 0.95);
+('01189046-4981-4784-9d56-2151efc6da1f', 'ko', 'Translated Sample transcript sentence 10 from Emma Johnson. into ko', 'azure', 0.95)
+ON CONFLICT (segment_id, target_language) DO NOTHING;
 
     INSERT INTO ai.ai_models (id, provider, model_name, task_type) VALUES
     (gen_random_uuid(), 'openai', 'gpt-4o', 'summarization'),

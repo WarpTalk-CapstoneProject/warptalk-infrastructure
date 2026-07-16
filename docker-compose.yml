@@ -67,6 +67,24 @@ services:
     networks:
       - warptalk-net
 
+  # ── RabbitMQ — Durable domain events ─────────────────────────────
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: warptalk-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-warptalk}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-warptalk-dev-rabbitmq}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - warptalk-net
+
   # ── Auth Service ──────────────────────────────────────────────────
   auth-service:
     build:
@@ -102,10 +120,16 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      RabbitMQ__Host: "rabbitmq"
+      RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
+      RabbitMQ__Username: ${RABBITMQ_USERNAME:-warptalk}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD:-warptalk-dev-rabbitmq}
     depends_on:
       pgbouncer:
         condition: service_started
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
       auth-service:
         condition: service_started
@@ -329,6 +353,7 @@ services:
 volumes:
   pgdata:
   redis-data:
+  rabbitmq-data:
   seq-data:
   prometheus-data:
   grafana-data:
