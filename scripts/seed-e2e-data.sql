@@ -1,6 +1,6 @@
 \c warptalk
 DO $$
-DECLARE pwd_hash VARCHAR := 'v2$SHA512$100000$16$AKwiGnbhlfXmBCfSM8jlwA==$tQUEhTX3GnRgVDZhlIUOMNdAKrZw5xdjaLKd/Zuao3c=';
+DECLARE pwd_hash VARCHAR := 'v2$SHA512$100000$16$AKwiGnbhlfXmBCfSM8jlwA==$akecCim0bjsgJV6SGCb67BMeVQ+btn7CppmBdv+xeRc=';
 BEGIN
     SET CONSTRAINTS ALL DEFERRED;
 
@@ -2014,6 +2014,93 @@ ON CONFLICT (segment_id, target_language) DO NOTHING;
     (gen_random_uuid(), 'openai', 'gpt-4o', 'summarization'),
     (gen_random_uuid(), 'openai', 'whisper-1', 'transcription'),
     (gen_random_uuid(), 'azure', 'translator', 'translation')
+    ON CONFLICT DO NOTHING;
+
+    -- Seed billing plans
+    INSERT INTO subscription.plans (
+        id, name, slug, tier, price, currency, billing_cycle, credits_per_cycle, 
+        max_participants, max_languages, voice_clone_enabled, ai_assistant_enabled, 
+        glossary_enabled, dedicated_gpu, features, sort_order, is_active, created_at, updated_at
+    ) VALUES 
+    (
+        '019ec641-9776-7d50-b2b9-9edb93a46d23', 
+        'Startup', 
+        'startup', 
+        'Startup', 
+        190000, 
+        'VND', 
+        'monthly', 
+        30000, 
+        15, 
+        2, 
+        true, 
+        true, 
+        false, 
+        false, 
+        '{"voice_clone_limit_mins": 120}'::jsonb, 
+        1, 
+        true, 
+        NOW(), 
+        NOW()
+    ),
+    (
+        '019ec641-9776-7d50-b2b9-9edb93a46d24', 
+        'Enterprise', 
+        'enterprise', 
+        'Enterprise', 
+        490000, 
+        'VND', 
+        'monthly', 
+        100000, 
+        100, 
+        10, 
+        true, 
+        true, 
+        true, 
+        true, 
+        '{"voice_clone_limit_mins": -1}'::jsonb, 
+        2, 
+        true, 
+        NOW(), 
+        NOW()
+    )
+    ON CONFLICT (slug) DO NOTHING;
+
+    -- Seed active subscriptions for workspaces
+    INSERT INTO subscription.subscriptions (
+        id, user_id, workspace_id, plan_id, status, credits_remaining, credits_used_this_cycle, 
+        current_period_start, current_period_end, auto_renew, is_active, created_at, updated_at
+    ) VALUES 
+    (
+        '019ec641-9776-7d50-b2b9-9edb93a46d25', 
+        '019ec641-9776-7d50-b2b9-9edb93a46d22', 
+        '019ec641-97a7-78c9-8f18-000000000000', 
+        '019ec641-9776-7d50-b2b9-9edb93a46d24', 
+        'active', 
+        100000, 
+        0, 
+        NOW() - INTERVAL '10 days', 
+        NOW() + INTERVAL '20 days', 
+        true, 
+        true, 
+        NOW(), 
+        NOW()
+    ),
+    (
+        '019ec641-9776-7d50-b2b9-9edb93a46d26', 
+        '4ddec186-4be4-479b-804d-ec1d14c1800d', 
+        'ff3b618e-325a-4466-8fcd-a15c24fbd8e0', 
+        '019ec641-9776-7d50-b2b9-9edb93a46d23', 
+        'active', 
+        30000, 
+        0, 
+        NOW() - INTERVAL '5 days', 
+        NOW() + INTERVAL '25 days', 
+        true, 
+        true, 
+        NOW(), 
+        NOW()
+    )
     ON CONFLICT DO NOTHING;
 
 RAISE NOTICE 'Massive E2E Data Seeding Completed Successfully!';

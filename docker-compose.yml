@@ -293,6 +293,8 @@ services:
       ReverseProxy__Clusters__notification-cluster__Destinations__notification-service__Address: "http://notification-service:5104"
       ReverseProxy__Clusters__meeting-cluster__Destinations__meeting-service__Address: "http://meeting-service:5105"
       ReverseProxy__Clusters__workspace-cluster__Destinations__workspace-service__Address: "http://workspace-service:5106"
+      ReverseProxy__Clusters__billing-cluster__Destinations__billing-service__Address: "http://billing-service:5107"
+      ReverseProxy__Clusters__payment-cluster__Destinations__payment-service__Address: "http://payment-service:8080"
       AllowedOrigins__0: ${ALLOWED_ORIGINS:-http://localhost:3000}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
@@ -308,6 +310,47 @@ services:
         condition: service_started
       meeting-service:
         condition: service_started
+      billing-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+    networks:
+      - warptalk-net
+
+  # ── Billing Service ───────────────────────────────────────────────
+  billing-service:
+    build:
+      context: ../warptalk-backend
+      dockerfile: billing/Dockerfile
+    container_name: warptalk-billing
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      ConnectionStrings__BillingDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=subscription,workspace,public"
+      ConnectionStrings__Redis: "redis:6379,password=${REDIS_PASSWORD}"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
+      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
+      PaymentServiceGrpcUrl: "http://payment-service:50058"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    networks:
+      - warptalk-net
+
+  # ── Payment Service (Stripe integration) ──────────────────────────
+  payment-service:
+    build:
+      context: ../warptalk-backend
+      dockerfile: payment/Dockerfile
+    container_name: warptalk-payment
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
     networks:
       - warptalk-net
 
