@@ -24,34 +24,9 @@ BEGIN
     -- Retrieve system 'user' role ID
     SELECT id INTO v_system_user_role_id FROM auth.roles WHERE name = 'user';
 
-    -- 2. Seed User Settings first to satisfy the FK constraint in auth.users
-    -- Demo User
-    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
-    VALUES (gen_random_uuid(), v_user_id, 'vi-VN', 'en-US', NOW())
-    ON CONFLICT (user_id) DO NOTHING;
-
-    -- Alice Smith settings (Admin)
-    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
-    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ab', 'en-US', 'vi-VN', NOW())
-    ON CONFLICT (user_id) DO NOTHING;
-
-    -- Bob Johnson settings (Member)
-    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
-    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ac', 'vi-VN', 'en-US', NOW())
-    ON CONFLICT (user_id) DO NOTHING;
-
-    -- Charlie Brown settings (Member, FPT)
-    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
-    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ad', 'en-US', 'vi-VN', NOW())
-    ON CONFLICT (user_id) DO NOTHING;
-
-    -- Diana Prince settings (Member, FPT)
-    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
-    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ae', 'vi-VN', 'en-US', NOW())
-    ON CONFLICT (user_id) DO NOTHING;
-
-
-    -- 3. Seed Users in auth.users
+    -- 2. Seed Users in auth.users first — migration 018 made user_settings the
+    -- dependent side of the FK (user_settings.user_id -> users.id), so users
+    -- must exist before their settings row can reference them.
     -- Demo User
     INSERT INTO auth.users (id, email, password_hash, full_name, preferred_language, timezone, is_active, email_verified, email_verified_at, created_at)
     VALUES (
@@ -131,6 +106,33 @@ BEGIN
         NOW()
     )
     ON CONFLICT (email) DO NOTHING;
+
+
+    -- 3. Seed User Settings, now that all referenced users exist
+    -- Demo User
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), v_user_id, 'vi-VN', 'en-US', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
+
+    -- Alice Smith settings (Admin)
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ab', 'en-US', 'vi-VN', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
+
+    -- Bob Johnson settings (Member)
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ac', 'vi-VN', 'en-US', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
+
+    -- Charlie Brown settings (Member, FPT)
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ad', 'en-US', 'vi-VN', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
+
+    -- Diana Prince settings (Member, FPT)
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ae', 'vi-VN', 'en-US', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
 
 
     -- 4. Assign system role 'user' to all seeded users

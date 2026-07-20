@@ -311,6 +311,26 @@ services:
     networks:
       - warptalk-net
 
+  # ── Frontend — Next.js Web App ─────────────────────────────────────
+  frontend:
+    build:
+      context: ../warptalk-web
+      args:
+        NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:5200/api/v1}
+        NEXT_PUBLIC_SIGNALR_URL: ${FRONTEND_SIGNALR_URL:-http://localhost:5200}
+        NEXT_PUBLIC_LIVEKIT_URL: ${FRONTEND_LIVEKIT_URL:-ws://localhost:7880}
+    container_name: warptalk-frontend
+    environment:
+      # Server-side (Server Components/Actions) calls run inside this container,
+      # so they must hit the gateway by its service name, not the browser-facing
+      # localhost URLs baked into the client bundle above.
+      API_GATEWAY_URL: "http://gateway:5200"
+    depends_on:
+      gateway:
+        condition: service_started
+    networks:
+      - warptalk-net
+
   # ── COTURN Primary — TURN/STUN for WebRTC ─────────────────────────
   coturn-primary:
     image: coturn/coturn:latest
