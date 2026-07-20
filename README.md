@@ -22,7 +22,10 @@ cp .env.example .env
 #    against each file's own header date; note 010-*-add-chat-mentions.sql
 #    and 010-*-add-can-create-meetings-*.sql share the same filename date
 #    (2026-06-12) with no other ordering signal — verify against git log
-#    if that pair's relative order ever matters for your change.
+#    if that pair's relative order ever matters for your change. Also note
+#    016-16-07-2026-add-segment-id-to-usage-records.sql: a second file sharing the
+#    016 prefix, added 2026-07-17 (after 016-03-07-2026 and 017-15-07-2026), and
+#    listed below in that git add-order — do not confuse it with the other 016 file.
 MIGRATIONS_DIR="scripts/migrations"
 for f in \
   000-init-migrations.sql \
@@ -48,9 +51,14 @@ for f in \
   015-16-06-2026-add-translation-room-invitations.sql \
   016-03-07-2026-enforce-single-active-subscription.sql \
   017-15-07-2026-translation-cluster-finalize.sql \
+  016-16-07-2026-add-segment-id-to-usage-records.sql \
   018-16-07-2026-fix-users-user-settings-fk-direction.sql \
   019-16-07-2026-billing-schema-mismatch-and-idempotency.sql \
   020-17-07-2026-refresh-token-family-reuse-detection.sql \
+  021-20-07-2026-add-translation-room-sessions.sql \
+  022-20-07-2026-add-transcript-segment-id-to-billing.sql \
+  023-20-07-2026-switch-payment-provider-to-stripe.sql \
+  024-20-07-2026-drop-transcript-translations.sql \
 ; do
   psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" -f "$MIGRATIONS_DIR/$f"
 done

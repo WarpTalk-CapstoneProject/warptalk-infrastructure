@@ -320,9 +320,7 @@ services:
 
   # ── Payment Service (Stripe integration) ──────────────────────────
   payment-service:
-    build:
-      context: ../warptalk-backend
-      dockerfile: payment/Dockerfile
+    image: alpine:latest
     container_name: warptalk-payment
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
