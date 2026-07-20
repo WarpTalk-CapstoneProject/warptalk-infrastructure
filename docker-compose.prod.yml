@@ -79,6 +79,7 @@ services:
           cpus: "1.0"
 
   gateway:
+    image: warptalk-gateway:latest
     restart: always
     ports:
       - "5200:5200"
@@ -110,6 +111,19 @@ services:
 
   prometheus:
     restart: always
+
+  billing-service:
+    restart: always
+    ports:
+      - "5107:5107"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
 
   grafana:
     restart: always
