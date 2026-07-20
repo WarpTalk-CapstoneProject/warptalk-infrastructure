@@ -194,30 +194,6 @@ services:
     networks:
       - warptalk-net
 
-  # ── Billing Service ────────────────────────────────────────────────
-  # Was never wired into this compose file at all — combined with BillingDbContext.cs
-  # mapping to a "billing" schema that never existed in this database, the whole billing
-  # subsystem has been silently dead since before this session. Both are fixed together:
-  # schema mapping now targets the real "subscription" schema (see migration
-  # 019-16-07-2026-billing-schema-mismatch-and-idempotency.sql), and this block makes the
-  # service actually deployable so that fix is verifiable.
-  billing-service:
-    build:
-      context: ../warptalk-backend
-      dockerfile: billing/Dockerfile
-    container_name: warptalk-billing
-    environment:
-      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__BillingDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=subscription,public"
-      Jwt__Secret: ${JWT_SECRET}
-      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
-      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-    depends_on:
-      pgbouncer:
-        condition: service_started
-    networks:
-      - warptalk-net
-
   # ── Notification Service ──────────────────────────────────────────
   notification-service:
     build:
@@ -293,6 +269,8 @@ services:
       ReverseProxy__Clusters__notification-cluster__Destinations__notification-service__Address: "http://notification-service:5104"
       ReverseProxy__Clusters__meeting-cluster__Destinations__meeting-service__Address: "http://meeting-service:5105"
       ReverseProxy__Clusters__workspace-cluster__Destinations__workspace-service__Address: "http://workspace-service:5106"
+      ReverseProxy__Clusters__billing-cluster__Destinations__billing-service__Address: "http://billing-service:5107"
+      ReverseProxy__Clusters__payment-cluster__Destinations__payment-service__Address: "http://payment-service:8080"
       AllowedOrigins__0: ${ALLOWED_ORIGINS:-http://localhost:3000}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
@@ -307,6 +285,65 @@ services:
       notification-service:
         condition: service_started
       meeting-service:
+        condition: service_started
+      billing-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+    networks:
+      - warptalk-net
+
+  # ── Billing Service ───────────────────────────────────────────────
+  billing-service:
+    build:
+      context: ../warptalk-backend
+      dockerfile: billing/Dockerfile
+    container_name: warptalk-billing
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      ConnectionStrings__BillingDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=subscription,workspace,public"
+      ConnectionStrings__Redis: "redis:6379,password=${REDIS_PASSWORD}"
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
+      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
+      PaymentServiceGrpcUrl: "http://payment-service:50058"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    networks:
+      - warptalk-net
+
+  # ── Payment Service (Stripe integration) ──────────────────────────
+  payment-service:
+    image: alpine:latest
+    container_name: warptalk-payment
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
+    networks:
+      - warptalk-net
+
+  # ── Frontend — Next.js Web App ─────────────────────────────────────
+  frontend:
+    build:
+      context: ../warptalk-web
+      args:
+        NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:5200/api/v1}
+        NEXT_PUBLIC_SIGNALR_URL: ${FRONTEND_SIGNALR_URL:-http://localhost:5200}
+        NEXT_PUBLIC_LIVEKIT_URL: ${FRONTEND_LIVEKIT_URL:-ws://localhost:7880}
+    container_name: warptalk-frontend
+    environment:
+      # Server-side (Server Components/Actions) calls run inside this container,
+      # so they must hit the gateway by its service name, not the browser-facing
+      # localhost URLs baked into the client bundle above.
+      API_GATEWAY_URL: "http://gateway:5200"
+    depends_on:
+      gateway:
         condition: service_started
     networks:
       - warptalk-net
