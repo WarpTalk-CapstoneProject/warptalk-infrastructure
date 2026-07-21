@@ -25,6 +25,28 @@ services:
     networks:
       - warptalk-net
 
+  # ── Migrator — applies scripts/migrations/*.sql, in chronological order,
+  #    before any service that needs the DB starts. One-shot: runs to
+  #    completion and exits; see scripts/run-migrations.sh for the ordering
+  #    logic and why plain alphabetical sort of the filenames is unsafe.
+  migrator:
+    image: postgres:18-alpine
+    container_name: warptalk-migrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-warptalk}
+    volumes:
+      - ./scripts:/scripts:ro
+    entrypoint: ["sh", "/scripts/run-migrations.sh"]
+    networks:
+      - warptalk-net
+
   # ── PgBouncer — Connection Pooling ────────────────────────────────
   pgbouncer:
     image: edoburu/pgbouncer:latest
@@ -99,6 +121,8 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
+      migrator:
+        condition: service_completed_successfully
       pgbouncer:
         condition: service_started
       redis:
@@ -125,6 +149,8 @@ services:
       RabbitMQ__Username: ${RABBITMQ_USERNAME:-warptalk}
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:-warptalk-dev-rabbitmq}
     depends_on:
+      migrator:
+        condition: service_completed_successfully
       pgbouncer:
         condition: service_started
       redis:
@@ -157,6 +183,8 @@ services:
       Smtp__FromEmail: ${SMTP_FROM_EMAIL}
       Smtp__FromName: ${SMTP_FROM_NAME}
     depends_on:
+      migrator:
+        condition: service_completed_successfully
       pgbouncer:
         condition: service_started
       redis:
@@ -183,6 +211,8 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
+      migrator:
+        condition: service_completed_successfully
       pgbouncer:
         condition: service_started
       redis:
@@ -208,6 +238,8 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
+      migrator:
+        condition: service_completed_successfully
       pgbouncer:
         condition: service_started
       redis:
@@ -238,7 +270,11 @@ services:
       Smtp__Password: ${SMTP_PASSWORD}
       Smtp__FromEmail: ${SMTP_FROM_EMAIL}
       Smtp__FromName: ${SMTP_FROM_NAME}
+      OpenAI__ApiKey: ${OPENAI_API_KEY}
+      OpenAI__ChatTranslationModel: ${OPENAI_CHAT_TRANSLATION_MODEL:-gpt-4o-mini}
     depends_on:
+      migrator:
+        condition: service_completed_successfully
       pgbouncer:
         condition: service_started
       redis:
@@ -309,6 +345,8 @@ services:
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
       PaymentServiceGrpcUrl: "http://payment-service:50058"
     depends_on:
+      migrator:
+        condition: service_completed_successfully
       pgbouncer:
         condition: service_started
       redis:
