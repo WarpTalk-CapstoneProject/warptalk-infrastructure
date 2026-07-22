@@ -69,6 +69,12 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
 
+  assistant-service:
+    ports:
+      - "5108:5108"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
   payment-service:
     ports:
       - "5047:8080"
@@ -101,14 +107,10 @@ services:
     ports:
       - "3001:3000"   # 3001 to avoid conflict with NextJS on 3000
 
+  # Service defined in base compose; dev only exposes ports to the host so
+  # the browser can reach the SFU at ws://localhost:7880.
   livekit:
-    image: livekit/livekit-server:latest
-    command: --dev --bind 0.0.0.0
-    environment:
-      - "LIVEKIT_KEYS=APIBVnfFo9PzzoQ: wbB6j98H2jfF5nLTZYhaiYXQM8hM6nB3KoVoXfMNTPA"
     ports:
       - "7880:7880"
       - "7881:7881"
       - "7882:7882/udp"
-    networks:
-      - warptalk-net
