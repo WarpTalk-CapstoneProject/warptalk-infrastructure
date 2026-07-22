@@ -298,8 +298,6 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
-      OpenAI__ApiKey: ${OPENAI_API_KEY}
-      OpenAI__AssistantModel: ${OPENAI_ASSISTANT_MODEL:-gpt-4o-mini}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -333,6 +331,9 @@ services:
       ReverseProxy__Clusters__billing-cluster__Destinations__billing-service__Address: "http://billing-service:5107"
       ReverseProxy__Clusters__payment-cluster__Destinations__payment-service__Address: "http://payment-service:8080"
       ReverseProxy__Clusters__assistant-cluster__Destinations__assistant-service__Address: "http://assistant-service:5108"
+      GrpcUrls__NotificationServiceUrl: "http://notification-service:50054"
+      GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
+      GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
       AllowedOrigins__0: ${ALLOWED_ORIGINS:-http://localhost:3000}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
