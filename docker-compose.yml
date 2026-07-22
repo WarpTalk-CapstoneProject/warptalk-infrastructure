@@ -25,6 +25,28 @@ services:
     networks:
       - warptalk-net
 
+  # ── Migrator — applies scripts/migrations/*.sql, in chronological order,
+  #    before any service that needs the DB starts. One-shot: runs to
+  #    completion and exits; see scripts/run-migrations.sh for the ordering
+  #    logic and why plain alphabetical sort of the filenames is unsafe.
+  migrator:
+    image: postgres:18-alpine
+    container_name: warptalk-migrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-warptalk}
+    volumes:
+      - ./scripts:/scripts:ro
+    entrypoint: ["sh", "/scripts/run-migrations.sh"]
+    networks:
+      - warptalk-net
+
   # ── PgBouncer — Connection Pooling ────────────────────────────────
   pgbouncer:
     image: edoburu/pgbouncer:latest
@@ -90,6 +112,7 @@ services:
     build:
       context: ../warptalk-backend
       dockerfile: auth/Dockerfile
+      network: host
     container_name: warptalk-auth
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
@@ -99,6 +122,8 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
+      migrator:
+        condition: service_started
       pgbouncer:
         condition: service_started
       redis:
@@ -111,6 +136,7 @@ services:
     build:
       context: ../warptalk-backend
       dockerfile: workspace/Dockerfile
+      network: host
     container_name: warptalk-workspace
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
@@ -125,6 +151,8 @@ services:
       RabbitMQ__Username: ${RABBITMQ_USERNAME:-warptalk}
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:-warptalk-dev-rabbitmq}
     depends_on:
+      migrator:
+        condition: service_started
       pgbouncer:
         condition: service_started
       redis:
@@ -141,6 +169,7 @@ services:
     build:
       context: ../warptalk-backend
       dockerfile: translation-room/Dockerfile
+      network: host
     container_name: warptalk-translation-room
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
@@ -157,6 +186,8 @@ services:
       Smtp__FromEmail: ${SMTP_FROM_EMAIL}
       Smtp__FromName: ${SMTP_FROM_NAME}
     depends_on:
+      migrator:
+        condition: service_started
       pgbouncer:
         condition: service_started
       redis:
@@ -171,18 +202,21 @@ services:
     build:
       context: ../warptalk-backend
       dockerfile: transcript/Dockerfile
+      network: host
     container_name: warptalk-transcript
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
       ConnectionStrings__TranscriptDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=transcript,public"
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
       GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
-      GrpcUrls__BillingServiceUrl: "http://billing-service:50056"
+      GrpcUrls__BillingServiceUrl: "http://billing-service:50057"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
+      migrator:
+        condition: service_started
       pgbouncer:
         condition: service_started
       redis:
@@ -199,6 +233,7 @@ services:
     build:
       context: ../warptalk-backend
       dockerfile: notification/Dockerfile
+      network: host
     container_name: warptalk-notification
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
@@ -208,6 +243,8 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
+      migrator:
+        condition: service_started
       pgbouncer:
         condition: service_started
       redis:
@@ -220,12 +257,13 @@ services:
     build:
       context: ../warptalk-backend
       dockerfile: meeting/Dockerfile
+      network: host
     container_name: warptalk-meeting
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
       ConnectionStrings__DefaultConnection: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=meeting,public"
       GrpcUrls__TranslationRoomService: "http://translation-room-service:50052"
-      GrpcUrls__BillingService: "http://billing-service:50056"
+      GrpcUrls__BillingService: "http://billing-service:50057"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
@@ -238,7 +276,11 @@ services:
       Smtp__Password: ${SMTP_PASSWORD}
       Smtp__FromEmail: ${SMTP_FROM_EMAIL}
       Smtp__FromName: ${SMTP_FROM_NAME}
+      OpenAI__ApiKey: ${OPENAI_API_KEY}
+      OpenAI__ChatTranslationModel: ${OPENAI_CHAT_TRANSLATION_MODEL:-gpt-4o-mini}
     depends_on:
+      migrator:
+        condition: service_started
       pgbouncer:
         condition: service_started
       redis:
@@ -249,11 +291,38 @@ services:
       - warptalk-net
 
 
+  # ── Assistant Service ─────────────────────────────────────────────
+  assistant-service:
+    build:
+      context: ../warptalk-backend
+      dockerfile: assistant/Dockerfile
+      network: host
+    container_name: warptalk-assistant
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      ConnectionStrings__AssistantDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=assistant,public"
+      Jwt__SecretKey: ${JWT_SECRET}
+      Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
+      Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      OpenAI__ApiKey: ${OPENAI_API_KEY}
+      OpenAI__AssistantModel: ${OPENAI_ASSISTANT_MODEL:-gpt-4o-mini}
+    depends_on:
+      migrator:
+        condition: service_started
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - warptalk-net
+
   # ── API Gateway (YARP + SignalR) ──────────────────────────────────
   gateway:
     build:
       context: ../warptalk-backend
       dockerfile: gateway/src/WarpTalk.Gateway/Dockerfile
+      network: host
     container_name: warptalk-gateway
     ports:
       - "5200:5200"
@@ -271,6 +340,7 @@ services:
       ReverseProxy__Clusters__workspace-cluster__Destinations__workspace-service__Address: "http://workspace-service:5106"
       ReverseProxy__Clusters__billing-cluster__Destinations__billing-service__Address: "http://billing-service:5107"
       ReverseProxy__Clusters__payment-cluster__Destinations__payment-service__Address: "http://payment-service:8080"
+      ReverseProxy__Clusters__assistant-cluster__Destinations__assistant-service__Address: "http://assistant-service:5108"
       AllowedOrigins__0: ${ALLOWED_ORIGINS:-http://localhost:3000}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
@@ -290,6 +360,8 @@ services:
         condition: service_started
       payment-service:
         condition: service_started
+      assistant-service:
+        condition: service_started
     networks:
       - warptalk-net
 
@@ -298,6 +370,7 @@ services:
     build:
       context: ../warptalk-backend
       dockerfile: billing/Dockerfile
+      network: host
     container_name: warptalk-billing
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
@@ -309,6 +382,8 @@ services:
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
       PaymentServiceGrpcUrl: "http://payment-service:50058"
     depends_on:
+      migrator:
+        condition: service_started
       pgbouncer:
         condition: service_started
       redis:
@@ -332,6 +407,7 @@ services:
   frontend:
     build:
       context: ../warptalk-web
+      network: host
       args:
         NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:5200/api/v1}
         NEXT_PUBLIC_SIGNALR_URL: ${FRONTEND_SIGNALR_URL:-http://localhost:5200}
@@ -410,6 +486,16 @@ services:
       - ./observability/dashboards:/etc/grafana/provisioning/dashboards:ro
     depends_on:
       - prometheus
+    networks:
+      - warptalk-net
+
+  # ── LiveKit — WebRTC SFU (clients connect here for A/V) ────────────
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: warptalk-livekit
+    command: --dev --bind 0.0.0.0
+    environment:
+      - "LIVEKIT_KEYS=APIBVnfFo9PzzoQ: wbB6j98H2jfF5nLTZYhaiYXQM8hM6nB3KoVoXfMNTPA"
     networks:
       - warptalk-net
 
