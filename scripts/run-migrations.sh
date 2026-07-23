@@ -14,7 +14,7 @@
 #   PGHOST=localhost PGPORT=5432 PGUSER=postgres PGPASSWORD=*** PGDATABASE=warptalk \
 #     ./scripts/run-migrations.sh
 # ====================================================================
-set -eu
+set -e
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-$SCRIPT_DIR/migrations}"

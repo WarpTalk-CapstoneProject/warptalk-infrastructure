@@ -192,8 +192,28 @@ BEGIN
 
         -- Memberships
         -- Demo User (Owner)
-        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, can_create_meetings, joined_at)
-        VALUES (gen_random_uuid(), v_workspace_id, v_user_id, v_owner_role_id, 'internal', 'active', true, NOW())
+        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, joined_at)
+        VALUES (gen_random_uuid(), v_workspace_id, v_user_id, v_owner_role_id, 'internal', 'active', NOW())
+        ON CONFLICT (workspace_id, user_id) DO NOTHING;
+
+        -- Alice Smith (Admin)
+        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, joined_at)
+        VALUES (gen_random_uuid(), v_workspace_id, '019ea677-6c84-7d7b-9f48-738b3cde41ab', v_admin_role_id, 'internal', 'active', NOW())
+        ON CONFLICT (workspace_id, user_id) DO NOTHING;
+
+        -- Bob Johnson (Member)
+        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, joined_at)
+        VALUES (gen_random_uuid(), v_workspace_id, '019ea677-6c84-7d7b-9f48-738b3cde41ac', v_member_role_id, 'internal', 'active', NOW())
+        ON CONFLICT (workspace_id, user_id) DO NOTHING;
+
+        -- Charlie Brown (Member)
+        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, joined_at)
+        VALUES (gen_random_uuid(), v_workspace_id, '019ea677-6c84-7d7b-9f48-738b3cde41ad', v_member_role_id, 'internal', 'active', NOW())
+        ON CONFLICT (workspace_id, user_id) DO NOTHING;
+
+        -- Diana Prince (Member)
+        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, joined_at)
+        VALUES (gen_random_uuid(), v_workspace_id, '019ea677-6c84-7d7b-9f48-738b3cde41ae', v_member_role_id, 'internal', 'active', NOW())
         ON CONFLICT (workspace_id, user_id) DO NOTHING;
 
 
