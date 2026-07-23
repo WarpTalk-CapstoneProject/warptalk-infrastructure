@@ -47,8 +47,10 @@ done
 echo "PostgreSQL is ready."
 
 # The tracking table itself must exist before we can check what's applied.
+# SQL is piped through `tr -d '\r'` so a CRLF-committed file (e.g. checked
+# out on Windows) still applies cleanly, regardless of line endings.
 if [ -f "$MIGRATIONS_DIR/000-init-migrations.sql" ]; then
-  psql_exec -q -f "$MIGRATIONS_DIR/000-init-migrations.sql" >/dev/null
+  tr -d '\r' < "$MIGRATIONS_DIR/000-init-migrations.sql" | psql_exec -q >/dev/null
 fi
 
 TMP_LIST="$(mktemp)"
@@ -86,7 +88,7 @@ sort "$TMP_LIST" | while IFS="$(printf '\t')" read -r _sortkey filename; do
   fi
 
   echo "  Applying $filename..."
-  psql_exec -f "$MIGRATIONS_DIR/$filename"
+  tr -d '\r' < "$MIGRATIONS_DIR/$filename" | psql_exec
   psql_exec -q -c "INSERT INTO public.schema_migrations(version) VALUES ('$filename');"
 done
 
