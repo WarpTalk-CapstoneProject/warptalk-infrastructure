@@ -44,7 +44,17 @@ services:
       MIGRATIONS_DIR: /scripts/migrations
     volumes:
       - ./scripts:/scripts:ro
-    entrypoint: ["sh", "-c", "tr -d '\\r' < /scripts/run-migrations.sh | sh -s -- /scripts/run-migrations.sh"]
+    # Self-heal against CRLF: /scripts is read-only, so copy to a writable
+    # tmp path, strip carriage returns, then run. Works even if a Windows
+    # checkout left CRLF in run-migrations.sh (no re-clone needed).
+    # MIGRATIONS_DIR must be pinned because $0/dirname now points at /tmp.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        tr -d '\r' < /scripts/run-migrations.sh > /tmp/run-migrations.sh
+        export MIGRATIONS_DIR=/scripts/migrations
+        exec sh /tmp/run-migrations.sh
     networks:
       - warptalk-net
 

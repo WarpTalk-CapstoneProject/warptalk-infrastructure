@@ -1,3 +1,33 @@
-# Force LF line endings for all shell scripts and SQL migrations on all operating systems
-*.sh text eol=lf
-*.sql text eol=lf
+# ====================================================================
+# Line-ending normalization — keep the repo OS-agnostic.
+# Files below are executed INSIDE Linux containers (postgres:alpine,
+# service images). They MUST be LF, or a CRLF checkout on Windows breaks
+# the migrator and every service that depends on it.
+# ====================================================================
+
+# Sane default: let git decide text vs binary, normalize to LF in the repo.
+* text=auto eol=lf
+
+# Anything run in a Linux container / shell — force LF unconditionally.
+*.sh    text eol=lf
+*.sql   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.env   text eol=lf
+*.conf  text eol=lf
+*.ini   text eol=lf
+Dockerfile      text eol=lf
+*.dockerfile    text eol=lf
+
+# Windows-only helpers keep CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binaries — never touch.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
