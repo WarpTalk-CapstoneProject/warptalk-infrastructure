@@ -41,9 +41,10 @@ services:
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB:-warptalk}
+      MIGRATIONS_DIR: /scripts/migrations
     volumes:
       - ./scripts:/scripts:ro
-    entrypoint: ["sh", "/scripts/run-migrations.sh"]
+    entrypoint: ["sh", "-c", "tr -d '\\r' < /scripts/run-migrations.sh | sh -s -- /scripts/run-migrations.sh"]
     networks:
       - warptalk-net
 
@@ -104,6 +105,43 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+  # ── MinIO — S3 Compatible Object Storage ─────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: warptalk-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-warptalk-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - warptalk-net
+
+  minio-workspace-provisioner:
+    image: minio/mc:latest
+    container_name: warptalk-minio-workspace-provisioner
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
+        mc mb --ignore-existing "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}" &&
+        mc anonymous set none "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-warptalk-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+      MINIO_WORKSPACE_DOCUMENTS_BUCKET: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}
     networks:
       - warptalk-net
 
@@ -148,6 +186,13 @@ services:
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
       RabbitMQ__Username: ${RABBITMQ_USERNAME:-warptalk}
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:-warptalk-dev-rabbitmq}
+      Storage__Provider: ${WORKSPACE_STORAGE_PROVIDER:-MinIO}
+      Storage__MasterKey: ${WORKSPACE_STORAGE_MASTER_KEY}
+      Storage__S3__ServiceUrl: ${WORKSPACE_STORAGE_S3_ENDPOINT:-http://minio:9000}
+      Storage__S3__AccessKey: ${MINIO_ROOT_USER:-warptalk-admin}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+      Storage__S3__BucketName: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}
+      Storage__S3__EnsureBucketExists: ${WORKSPACE_STORAGE_ENSURE_BUCKET:-false}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -157,6 +202,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      minio-workspace-provisioner:
+        condition: service_completed_successfully
       auth-service:
         condition: service_started
     networks:
@@ -494,6 +541,7 @@ volumes:
   pgdata:
   redis-data:
   rabbitmq-data:
+  minio-data:
   seq-data:
   prometheus-data:
   grafana-data:

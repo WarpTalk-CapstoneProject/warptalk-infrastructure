@@ -1,0 +1,3 @@
+# Force LF line endings for all shell scripts and SQL migrations on all operating systems
+*.sh text eol=lf
+*.sql text eol=lf
