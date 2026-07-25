@@ -115,6 +115,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+    networks:
+      - warptalk-net
   # ── MinIO — S3 Compatible Object Storage ─────────────────────────
   minio:
     image: minio/minio:latest
@@ -167,6 +169,7 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
       migrator:
@@ -460,12 +463,14 @@ services:
         NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:5200/api/v1}
         NEXT_PUBLIC_SIGNALR_URL: ${FRONTEND_SIGNALR_URL:-http://localhost:5200}
         NEXT_PUBLIC_LIVEKIT_URL: ${FRONTEND_LIVEKIT_URL:-ws://localhost:7880}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
     container_name: warptalk-frontend
     environment:
       # Server-side (Server Components/Actions) calls run inside this container,
       # so they must hit the gateway by its service name, not the browser-facing
       # localhost URLs baked into the client bundle above.
       API_GATEWAY_URL: "http://gateway:5200"
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
     depends_on:
       gateway:
         condition: service_started
