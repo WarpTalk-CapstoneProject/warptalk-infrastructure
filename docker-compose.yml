@@ -115,6 +115,43 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+  # ── MinIO — S3 Compatible Object Storage ─────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: warptalk-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-warptalk-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - warptalk-net
+
+  minio-workspace-provisioner:
+    image: minio/mc:latest
+    container_name: warptalk-minio-workspace-provisioner
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
+        mc mb --ignore-existing "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}" &&
+        mc anonymous set none "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-warptalk-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+      MINIO_WORKSPACE_DOCUMENTS_BUCKET: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}
     networks:
       - warptalk-net
   # ── MinIO — S3 Compatible Object Storage ─────────────────────────
@@ -266,6 +303,7 @@ services:
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
       GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
       GrpcUrls__BillingServiceUrl: "http://billing-service:50057"
+      GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
@@ -280,6 +318,8 @@ services:
       auth-service:
         condition: service_started
       translation-room-service:
+        condition: service_started
+      workspace-service:
         condition: service_started
     networks:
       - warptalk-net
@@ -463,7 +503,7 @@ services:
         NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:5200/api/v1}
         NEXT_PUBLIC_SIGNALR_URL: ${FRONTEND_SIGNALR_URL:-http://localhost:5200}
         NEXT_PUBLIC_LIVEKIT_URL: ${FRONTEND_LIVEKIT_URL:-ws://localhost:7880}
-        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     container_name: warptalk-frontend
     environment:
       # Server-side (Server Components/Actions) calls run inside this container,

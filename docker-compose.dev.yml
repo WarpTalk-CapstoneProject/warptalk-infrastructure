@@ -61,8 +61,6 @@ services:
       - "5200:5200"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      Logging__LogLevel__Yarp: Debug
-      Logging__LogLevel__System.Net.Http: Debug
 
   billing-service:
     ports:
