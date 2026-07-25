@@ -467,7 +467,6 @@ services:
         NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:5200/api/v1}
         NEXT_PUBLIC_SIGNALR_URL: ${FRONTEND_SIGNALR_URL:-http://localhost:5200}
         NEXT_PUBLIC_LIVEKIT_URL: ${FRONTEND_LIVEKIT_URL:-ws://localhost:7880}
-        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     container_name: warptalk-frontend
     environment:
       # Server-side (Server Components/Actions) calls run inside this container,
