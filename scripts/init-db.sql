@@ -130,6 +130,21 @@ CREATE TABLE auth.roles (
   deleted_by UUID
 );
 
+-- Core roles seeded in every environment (not just demo) — 'admin' is the platform-wide
+-- system-administrator role that [Authorize(Roles = "admin")] endpoints (e.g.
+-- ~/api/v1/admin/notifications, ~/api/v1/admin/global-glossary) check for. Without this seed,
+-- no environment has a role for JwtTokenGenerator to ever put an "admin" claim into a token —
+-- see docs/global-glossary-plan.md §3.
+INSERT INTO auth.roles (id, name, description, is_system, is_active, created_at)
+VALUES
+    (gen_random_uuid(), 'admin', 'System administrator', true, true, NOW()),
+    (gen_random_uuid(), 'user', 'Regular user', true, true, NOW()),
+    (gen_random_uuid(), 'moderator', 'Content moderator', true, true, NOW()),
+    (gen_random_uuid(), 'Owner', 'Workspace Owner', true, true, NOW()),
+    (gen_random_uuid(), 'Admin', 'Workspace Administrator', true, true, NOW()),
+    (gen_random_uuid(), 'Member', 'Workspace Member', true, true, NOW())
+ON CONFLICT (name) DO NOTHING;
+
 CREATE TABLE auth.permissions (
   id UUID PRIMARY KEY DEFAULT (uuidv7()),
   code VARCHAR(100) UNIQUE NOT NULL,
@@ -321,28 +336,12 @@ CREATE INDEX idx_workspace_doc_audits_doc_id ON workspace.workspace_document_aud
 CREATE INDEX idx_workspace_doc_audits_workspace_action ON workspace.workspace_document_audits (workspace_id, action_at);
 CREATE INDEX idx_workspace_doc_audits_actor_action ON workspace.workspace_document_audits (actor_id, action_at);
 
-CREATE TABLE workspace.workspace_knowledge_glossaries (
-  id UUID PRIMARY KEY DEFAULT (uuidv7()),
-  workspace_id UUID NOT NULL REFERENCES workspace.workspaces(id) ON DELETE RESTRICT,
-  name VARCHAR(255) NOT NULL,
-  business_domain VARCHAR(100),
-  source_language VARCHAR(20) NOT NULL,
-  target_language VARCHAR(20) NOT NULL,
-  term VARCHAR(255) NOT NULL,
-  preferred_translation VARCHAR(255) NOT NULL,
-  part_of_speech VARCHAR(50),
-  definition TEXT,
-  usage_note TEXT,
-  status VARCHAR(30) NOT NULL DEFAULT 'active',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
-  created_by UUID,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
-  updated_by UUID,
-  UNIQUE (workspace_id, business_domain, source_language, target_language, term)
-);
-
-CREATE INDEX idx_workspace_glossaries_lookup ON workspace.workspace_knowledge_glossaries (workspace_id, business_domain, source_language);
-
+-- NOTE: workspace.workspace_knowledge_glossaries intentionally does NOT live here. It was an
+-- orphan table (EF-mapped, never wired to any service/controller/API) — transcript.glossaries/
+-- glossary_terms below is the glossary model that actually runs. Its useful fields
+-- (definition/usage_note/part_of_speech) were merged onto transcript.glossary_terms instead.
+-- See migrations/037-25-07-2026-merge-and-drop-workspace-knowledge-glossaries.sql and
+-- docs/global-glossary-plan.md §1.2/§2.2/§9.
 
 CREATE TABLE auth.refresh_tokens (
   id UUID PRIMARY KEY DEFAULT (uuidv7()),
@@ -596,6 +595,11 @@ CREATE TABLE transcript.glossary_terms (
   domain VARCHAR(50),
   priority INT NOT NULL DEFAULT 5,
   is_active BOOLEAN NOT NULL DEFAULT true,
+  -- Merged over from the now-dropped workspace.workspace_knowledge_glossaries (§2.2 of
+  -- docs/global-glossary-plan.md) — genuinely useful for admin-facing term explanations and RAG.
+  definition TEXT,
+  usage_note TEXT,
+  part_of_speech VARCHAR(50),
   created_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),
   created_by UUID,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()),

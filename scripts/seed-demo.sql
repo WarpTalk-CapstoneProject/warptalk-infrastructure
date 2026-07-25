@@ -9,6 +9,7 @@ DO $$
 DECLARE
     v_user_id uuid := '019ea677-6c84-7d7b-9f48-738b3cde41a9';
     v_system_user_role_id uuid;
+    v_system_admin_role_id uuid;
 BEGIN
     -- 1. Seed system and workspace roles in auth.roles if they don't exist
     INSERT INTO auth.roles (id, name, description, is_system, is_active, created_at)
@@ -23,6 +24,7 @@ BEGIN
 
     -- Retrieve system 'user' role ID
     SELECT id INTO v_system_user_role_id FROM auth.roles WHERE name = 'user';
+    SELECT id INTO v_system_admin_role_id FROM auth.roles WHERE name = 'admin';
 
     -- 2. Seed Users in auth.users first — migration 018 made user_settings the
     -- dependent side of the FK (user_settings.user_id -> users.id), so users
@@ -139,6 +141,15 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM auth.user_roles WHERE user_id = v_user_id AND role_id = v_system_user_role_id) THEN
         INSERT INTO auth.user_roles (id, user_id, role_id, assigned_at)
         VALUES (gen_random_uuid(), v_user_id, v_system_user_role_id, NOW());
+    END IF;
+
+    -- Grant the demo user (demo@enterprise.vn) the platform 'admin' system role too, so
+    -- ~/api/v1/admin/* endpoints (notifications, global-glossary) are reachable in the demo
+    -- environment without a separate admin-provisioning step.
+    IF v_system_admin_role_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM auth.user_roles WHERE user_id = v_user_id AND role_id = v_system_admin_role_id) THEN
+        INSERT INTO auth.user_roles (id, user_id, role_id, assigned_at)
+        VALUES (gen_random_uuid(), v_user_id, v_system_admin_role_id, NOW());
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM auth.user_roles WHERE user_id = '019ea677-6c84-7d7b-9f48-738b3cde41ab' AND role_id = v_system_user_role_id) THEN

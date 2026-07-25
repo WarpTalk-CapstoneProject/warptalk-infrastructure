@@ -263,6 +263,7 @@ services:
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
       GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
       GrpcUrls__BillingServiceUrl: "http://billing-service:50057"
+      GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
@@ -277,6 +278,8 @@ services:
       auth-service:
         condition: service_started
       translation-room-service:
+        condition: service_started
+      workspace-service:
         condition: service_started
     networks:
       - warptalk-net
