@@ -75,12 +75,6 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
 
-  payment-service:
-    ports:
-      - "5047:8080"
-    environment:
-      ASPNETCORE_ENVIRONMENT: Development
-
   frontend:
     ports:
       - "3000:3000"
