@@ -395,7 +395,6 @@ services:
       ReverseProxy__Clusters__meeting-cluster__Destinations__meeting-service__Address: "http://meeting-service:5105"
       ReverseProxy__Clusters__workspace-cluster__Destinations__workspace-service__Address: "http://workspace-service:5106"
       ReverseProxy__Clusters__billing-cluster__Destinations__billing-service__Address: "http://billing-service:5107"
-      ReverseProxy__Clusters__payment-cluster__Destinations__payment-service__Address: "http://payment-service:8080"
       ReverseProxy__Clusters__assistant-cluster__Destinations__assistant-service__Address: "http://assistant-service:5108"
       GrpcUrls__NotificationServiceUrl: "http://notification-service:50054"
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
@@ -417,8 +416,6 @@ services:
         condition: service_started
       billing-service:
         condition: service_started
-      payment-service:
-        condition: service_started
       assistant-service:
         condition: service_started
     networks:
@@ -438,7 +435,6 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
-      PaymentServiceGrpcUrl: "http://payment-service:50058"
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -448,16 +444,6 @@ services:
         condition: service_healthy
       auth-service:
         condition: service_started
-    networks:
-      - warptalk-net
-
-  # ── Payment Service (Stripe integration) ──────────────────────────
-  payment-service:
-    image: alpine:latest
-    container_name: warptalk-payment
-    environment:
-      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
     networks:
       - warptalk-net
 
