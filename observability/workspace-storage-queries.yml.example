@@ -1,0 +1,27 @@
+global:
+  scrape_timeout: 10s
+  scrape_timeout_offset: 500ms
+  min_interval: 1m
+  max_connections: 1
+  max_idle_connections: 1
+  max_connection_lifetime: 10m
+
+target:
+  name: warptalk_workspace
+  # Overridden at runtime by SQLEXPORTER_TARGET_DSN so no password is rendered.
+  data_source_name: postgresql://invalid:invalid@postgres/warptalk_workspace
+  collectors: [warptalk_workspace_storage]
+
+collectors:
+  - collector_name: warptalk_workspace_storage
+    metrics:
+      - metric_name: warptalk_object_storage_bytes
+        type: gauge
+        help: "Application-indexed object storage bytes"
+        key_labels: [source]
+        values: [bytes]
+        query: |
+          SELECT 'workspace-documents'::text AS source,
+                 coalesce(sum(size_bytes), 0)::double precision AS bytes
+          FROM workspace.workspace_documents
+          WHERE deleted_at IS NULL;

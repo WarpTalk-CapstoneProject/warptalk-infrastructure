@@ -1,0 +1,167 @@
+name: immutable-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_ref:
+        description: Backend commit SHA
+        required: true
+      web_ref:
+        description: Web commit SHA
+        required: true
+      ai_ref:
+        description: AI commit SHA
+        required: true
+      infrastructure_ref:
+        description: Infrastructure commit SHA
+        required: true
+      release_tag:
+        description: Immutable release identifier
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build-scan-sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: release
+    env:
+      IMAGE_REGISTRY: ghcr.io/warptalk-capstoneproject
+      IMAGE_TAG: ${{ inputs.release_tag }}
+      NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+      NEXT_PUBLIC_SIGNALR_URL: ${{ vars.NEXT_PUBLIC_SIGNALR_URL }}
+      NEXT_PUBLIC_LIVEKIT_URL: ${{ vars.NEXT_PUBLIC_LIVEKIT_URL }}
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: WarpTalk-CapstoneProject/warptalk-backend
+          ref: ${{ inputs.backend_ref }}
+          path: warptalk-backend
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: WarpTalk-CapstoneProject/warptalk-web
+          ref: ${{ inputs.web_ref }}
+          path: warptalk-web
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: WarpTalk-CapstoneProject/warptalk-ai
+          ref: ${{ inputs.ai_ref }}
+          path: warptalk-ai
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.infrastructure_ref }}
+          path: warptalk-infrastructure
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable images
+        working-directory: warptalk-infrastructure
+        run: ./scripts/build-release.sh
+      - name: Install trusted scanning and signing tools
+        run: |
+          trivy_version=0.70.0
+          curl --fail --location --silent --show-error \
+            --output trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${trivy_version}/trivy_${trivy_version}_Linux-64bit.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output trivy-checksums.txt \
+            "https://github.com/aquasecurity/trivy/releases/download/v${trivy_version}/trivy_${trivy_version}_checksums.txt"
+          grep " trivy_${trivy_version}_Linux-64bit.tar.gz$" trivy-checksums.txt |
+            sha256sum --check
+          tar -xzf trivy.tar.gz trivy
+          sudo install -m 0755 trivy /usr/local/bin/trivy
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - name: Generate SBOMs, scan and keylessly sign every digest
+        working-directory: warptalk-infrastructure
+        run: |
+          mkdir -p deploy/production/sbom
+          jq -c '.images[]' deploy/production/release-manifest.json |
+          while IFS= read -r image; do
+            name="$(printf '%s' "$image" | jq -r '.name')"
+            ref="$(printf '%s' "$image" | jq -r '.ref')"
+            digest="$(printf '%s' "$image" | jq -r '.digest')"
+            subject="$ref@$digest"
+            trivy image \
+              --exit-code 1 \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed \
+              "$subject"
+            trivy image \
+              --format spdx-json \
+              --output "deploy/production/sbom/$name.spdx.json" \
+              "$subject"
+            cosign sign --yes "$subject"
+            cosign attest --yes \
+              --predicate "deploy/production/sbom/$name.spdx.json" \
+              --type spdxjson \
+              "$subject"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ inputs.release_tag }}
+          path: |
+            warptalk-infrastructure/deploy/production/release-manifest.json
+            warptalk-infrastructure/deploy/production/sbom
+
+  staging:
+    needs: build-scan-sign
+    if: ${{ vars.STAGING_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-${{ inputs.release_tag }}
+          path: release
+      - name: Install SSH identity
+        env:
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$STAGING_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$STAGING_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Deploy the same digests to staging
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          APP_BASE_URL: ${{ vars.STAGING_APP_BASE_URL }}
+          API_BASE_URL: ${{ vars.STAGING_API_BASE_URL }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          case "$RELEASE_TAG" in
+            ""|*[!A-Za-z0-9._-]*)
+              echo "Unsafe release tag" >&2
+              exit 1
+              ;;
+          esac
+          manifest="$(find release -type f -name release-manifest.json -print -quit)"
+          test -n "$manifest"
+          scp "$manifest" \
+            "$STAGING_USER@$STAGING_HOST:/opt/warptalk/releases/$RELEASE_TAG.json"
+          ssh "$STAGING_USER@$STAGING_HOST" \
+            "RELEASE_MANIFEST=/opt/warptalk/releases/$RELEASE_TAG.json \
+             PRODUCTION_ENV_FILE=/etc/warptalk/staging.env \
+             /opt/warptalk/current/scripts/deploy-release.sh"
+          case "$APP_BASE_URL $API_BASE_URL" in
+            *"'"*|*[\;\&\|]*)
+              echo "Unsafe staging URL" >&2
+              exit 1
+              ;;
+          esac
+          # shellcheck disable=SC2029
+          ssh "$STAGING_USER@$STAGING_HOST" \
+            "APP_BASE_URL='$APP_BASE_URL' API_BASE_URL='$API_BASE_URL' \
+             /opt/warptalk/current/scripts/smoke-production.sh"

@@ -1,0 +1,13 @@
+# Copy outside the repository and replace every CHANGE_ME value.
+externalSecrets:
+  secretStoreName: CHANGE_ME-production-secret-store
+  postgresRemoteKey: CHANGE_ME/warptalk/production/postgres-superuser
+  backupRemoteKey: CHANGE_ME/warptalk/production/postgres-backup
+  redisRemoteKey: CHANGE_ME/warptalk/production/redis
+  qdrantRemoteKey: CHANGE_ME/warptalk/production/qdrant
+
+postgres:
+  backup:
+    destinationPath: s3://CHANGE_ME/warptalk-postgres/production
+    endpointURL: https://CHANGE_ME
+    retentionPolicy: 30d

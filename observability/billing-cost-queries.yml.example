@@ -1,0 +1,52 @@
+global:
+  scrape_timeout: 10s
+  scrape_timeout_offset: 500ms
+  min_interval: 1m
+  max_connections: 1
+  max_idle_connections: 1
+  max_connection_lifetime: 10m
+
+target:
+  name: warptalk_billing
+  # Overridden at runtime by SQLEXPORTER_TARGET_DSN so no password is rendered.
+  data_source_name: postgresql://invalid:invalid@postgres/warptalk_billing
+  collectors: [warptalk_ai_cost_30d]
+
+collectors:
+  - collector_name: warptalk_ai_cost_30d
+    metrics:
+      - metric_name: warptalk_ai_cost_30d
+        type: gauge
+        help: "Trailing 30-day AI provider usage, estimated cost and budget"
+        key_labels: [service]
+        value_label: metric
+        values:
+          - usage_minutes
+          - estimated_cost_usd
+          - unit_cost_usd_per_minute
+          - budget_usd
+          - credits_consumed
+        query: |
+          WITH rates(service, unit_cost_usd, budget_usd) AS (
+            VALUES
+              ('stt', __STT_COST_USD_PER_MINUTE__::numeric, __STT_MONTHLY_BUDGET_USD__::numeric),
+              ('translation', __TRANSLATION_COST_USD_PER_MINUTE__::numeric, __TRANSLATION_MONTHLY_BUDGET_USD__::numeric),
+              ('audio_dubbing_standard', __TTS_COST_USD_PER_MINUTE__::numeric, __TTS_MONTHLY_BUDGET_USD__::numeric),
+              ('audio_dubbing_voice_clone', __VOICE_CLONE_COST_USD_PER_MINUTE__::numeric, __VOICE_CLONE_MONTHLY_BUDGET_USD__::numeric)
+          ),
+          usage AS (
+            SELECT lower(usage_type) AS service,
+                   sum(quantity)::double precision / 60.0 AS usage_minutes,
+                   sum(credits_consumed)::double precision AS credits_consumed
+            FROM subscription.usage_records
+            WHERE recorded_at >= now() - interval '30 days'
+            GROUP BY lower(usage_type)
+          )
+          SELECT rates.service,
+                 coalesce(usage.usage_minutes, 0)::double precision AS usage_minutes,
+                 (coalesce(usage.usage_minutes, 0) * rates.unit_cost_usd)::double precision AS estimated_cost_usd,
+                 rates.unit_cost_usd::double precision AS unit_cost_usd_per_minute,
+                 rates.budget_usd::double precision AS budget_usd,
+                 coalesce(usage.credits_consumed, 0)::double precision AS credits_consumed
+          FROM rates
+          LEFT JOIN usage USING (service);

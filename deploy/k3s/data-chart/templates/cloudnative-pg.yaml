@@ -1,0 +1,136 @@
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: warptalk-postgres-backup
+  namespace: {{ .Values.postgres.namespace }}
+spec:
+  configuration:
+    destinationPath: {{ required "postgres.backup.destinationPath is required" .Values.postgres.backup.destinationPath | quote }}
+    endpointURL: {{ required "postgres.backup.endpointURL is required" .Values.postgres.backup.endpointURL | quote }}
+    s3Credentials:
+      accessKeyId:
+        name: warptalk-backup-credentials
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: warptalk-backup-credentials
+        key: SECRET_ACCESS_KEY
+    wal:
+      compression: gzip
+      maxParallel: 4
+    data:
+      compression: gzip
+      jobs: 2
+  retentionPolicy: {{ .Values.postgres.backup.retentionPolicy }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: warptalk-postgres
+  namespace: {{ .Values.postgres.namespace }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+  primaryUpdateStrategy: unsupervised
+  failoverDelay: 30
+  switchoverDelay: 60
+  smartShutdownTimeout: 30
+  stopDelay: 300
+  minSyncReplicas: 1
+  maxSyncReplicas: 1
+  storage:
+    size: {{ .Values.postgres.storageSize }}
+    storageClass: {{ .Values.storageClass }}
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "4"
+      memory: 12Gi
+  bootstrap:
+    initdb:
+      database: postgres
+      owner: postgres
+      secret:
+        name: warptalk-postgres-superuser
+  superuserSecret:
+    name: warptalk-postgres-superuser
+  enableSuperuserAccess: true
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_preload_libraries: pg_stat_statements
+      wal_level: replica
+      archive_timeout: 5min
+      max_wal_senders: "10"
+      max_replication_slots: "10"
+      log_min_duration_statement: "500"
+  monitoring:
+    enablePodMonitor: true
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: warptalk-postgres-backup
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: warptalk-postgres-pooler-rw
+  namespace: {{ .Values.postgres.namespace }}
+spec:
+  cluster:
+    name: warptalk-postgres
+  instances: {{ .Values.postgres.pooler.instances }}
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: {{ .Values.postgres.pooler.maxClientConnections | quote }}
+      default_pool_size: {{ .Values.postgres.pooler.defaultPoolSize | quote }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: warptalk-postgres-pooler
+    spec:
+      containers:
+        - name: pgbouncer
+          resources:
+            requests:
+              cpu: {{ .Values.postgres.pooler.resources.requests.cpu | quote }}
+              memory: {{ .Values.postgres.pooler.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.postgres.pooler.resources.limits.cpu | quote }}
+              memory: {{ .Values.postgres.pooler.resources.limits.memory | quote }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: warptalk-postgres-pooler
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: warptalk-postgres-pooler
+  namespace: {{ .Values.postgres.namespace }}
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: warptalk-postgres-pooler
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: warptalk-postgres-daily
+  namespace: {{ .Values.postgres.namespace }}
+spec:
+  schedule: "0 0 2 * * *"
+  backupOwnerReference: self
+  immediate: true
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  cluster:
+    name: warptalk-postgres

@@ -1,0 +1,111 @@
+name: infrastructure-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+        env:
+          POSTGRES_DB: warptalk
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-postgres-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d warptalk"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: warptalk-infrastructure
+          fetch-depth: 0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: WarpTalk-CapstoneProject/warptalk-backend
+          path: warptalk-backend
+      - name: Secret scan for introduced commits
+        env:
+          SECRET_SCAN_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          range="$SECRET_SCAN_BASE..$GITHUB_SHA"
+          if [ -z "$SECRET_SCAN_BASE" ] || printf '%s' "$SECRET_SCAN_BASE" | grep -Eq '^0+$'; then
+            range=-1
+          fi
+          docker run --rm \
+            -v "$PWD/warptalk-infrastructure:/repo:ro" \
+            zricethezav/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
+            git /repo --log-opts="$range" --redact --exit-code 1 --no-banner
+      - name: Immutable workflow and Terraform-state contract
+        working-directory: warptalk-infrastructure
+        run: |
+          if grep -REn 'uses:[[:space:]]+[^[:space:]#]+@(v[0-9]+|main|master|latest)([[:space:]#]|$)' .github/workflows; then
+            echo "GitHub Actions must be pinned to full commit SHAs." >&2
+            exit 1
+          fi
+          git ls-files '*.tfstate' '*.tfstate.*' |
+          while IFS= read -r state_file; do
+            if [ -e "$state_file" ]; then
+              echo "Terraform state must never be tracked by Git: $state_file" >&2
+              exit 1
+            fi
+          done
+      - name: Shell lint
+        working-directory: warptalk-infrastructure
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck age
+          find scripts backup -type f -name '*.sh' -print0 |
+            xargs -0 shellcheck --severity=warning
+      - name: Backup encryption contract
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-backup-encryption.sh
+      - name: Stage service-owned migrations
+        working-directory: warptalk-infrastructure
+        run: ./scripts/collect-service-migrations.sh
+      - name: Migration framework tests
+        working-directory: warptalk-infrastructure
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: ci-postgres-only
+          PGDATABASE: warptalk
+        run: ./scripts/test-logical-database-migrations.sh
+      - name: Production deployment contracts
+        working-directory: warptalk-infrastructure
+        run: ./scripts/check-production-deployment.sh
+      - name: Performance workload contract
+        working-directory: warptalk-infrastructure
+        run: ./scripts/check-performance-contract.sh
+      - name: K3s and HA deployment contracts
+        working-directory: warptalk-infrastructure
+        run: ./scripts/check-k3s-deployment.sh
+      - name: Locked K3s add-on contracts
+        working-directory: warptalk-infrastructure
+        run: ./scripts/check-k3s-addons.sh
+      - name: Immutable K3s release contract
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-k3s-release-contract.sh
+      - name: K3s runtime secret contract
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-k3s-runtime-secret-contract.sh
+      - name: K3s data platform contract
+        working-directory: warptalk-infrastructure
+        env:
+          K3S_DATA_VALUES_FILE: deploy/k3s/data-provider-values.contract.yaml
+          K3S_SECRET_STORE_NAME: contract-secret-store
+          K3S_STORAGE_CLASS: replicated-nvme
+          OFFLINE_RENDER_ONLY: "true"
+        run: ./scripts/deploy-k3s-data.sh

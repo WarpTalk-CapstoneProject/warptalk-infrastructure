@@ -1,0 +1,18 @@
+[Unit]
+Description=WarpTalk encrypted production backup
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=warptalk
+Group=warptalk
+EnvironmentFile=/etc/warptalk/backup.env
+WorkingDirectory=/opt/warptalk/current
+ExecStart=/opt/warptalk/current/scripts/backup-production.sh
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/warptalk
+UMask=0077

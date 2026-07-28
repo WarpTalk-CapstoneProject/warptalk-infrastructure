@@ -23,7 +23,7 @@ processors:
 
 exporters:
   # Seq for structured logs
-  otlphttp/seq:
+  otlp_http/seq:
     endpoint: http://seq:80/ingest/otlp
     tls:
       insecure: true
@@ -38,11 +38,21 @@ exporters:
     verbosity: basic
 
 service:
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+                without_type_suffix: true
+                without_units: true
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlphttp/seq]
+      exporters: [otlp_http/seq]
 
     metrics:
       receivers: [otlp]
@@ -52,4 +62,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlphttp/seq]
+      exporters: [otlp_http/seq]

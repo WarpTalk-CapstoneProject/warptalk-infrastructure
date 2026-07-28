@@ -1,0 +1,100 @@
+groups:
+  - name: warptalk-platform
+    rules:
+      - alert: WarpTalkTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus target {{ $labels.job }} is down"
+
+      - alert: WarpTalkApiHighErrorRatio
+        expr: |
+          sum(rate(warptalk_http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(warptalk_http_server_request_duration_seconds_count[5m])), 0.001)
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API 5xx ratio is above 5%"
+
+      - alert: WarpTalkApiHighP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, service_name) (
+              rate(warptalk_http_server_request_duration_seconds_bucket[5m])
+            )
+          ) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service_name }} P95 latency is above 1.5 seconds"
+
+      - alert: WarpTalkPostgresConnectionsNearBudget
+        expr: sum(pg_stat_activity_count) > 160
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL is above 80% of its 200-connection budget"
+
+      - alert: WarpTalkRedisMemoryNearLimit
+        expr: redis_memory_used_bytes / clamp_min(redis_memory_max_bytes, 1) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory is above 85% of maxmemory"
+
+      - alert: WarpTalkRedisEvicting
+        expr: increase(redis_evicted_keys_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis evicted keys during the last five minutes"
+
+      - alert: WarpTalkRabbitQueueBacklog
+        expr: sum by (queue) (rabbitmq_queue_messages_ready) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RabbitMQ queue {{ $labels.queue }} has more than 1000 ready messages"
+
+      - alert: WarpTalkAiWorkerMissing
+        expr: max by (key) (redis_keys_count{key=~"warptalk:worker:heartbeat:(stt|translation|tts|assistant|assistant-chat|embedding|embedding-search|billing|livekit_ingress|security):\\*"}) < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Required AI worker heartbeat {{ $labels.key }} is missing"
+
+      - alert: WarpTalkAiStreamLag
+        expr: max by (stream, group) (redis_stream_group_lag) > 100
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.group }} is more than 100 messages behind on {{ $labels.stream }}"
+
+      - alert: WarpTalkAiPendingStuck
+        expr: max by (stream, group) (redis_stream_group_messages_pending) > 50
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.group }} has stuck pending messages on {{ $labels.stream }}"
+
+      - alert: WarpTalkDeadLetterPresent
+        expr: redis_stream_length{stream=~".*:dead-letter"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dead-letter stream {{ $labels.stream }} is not empty"

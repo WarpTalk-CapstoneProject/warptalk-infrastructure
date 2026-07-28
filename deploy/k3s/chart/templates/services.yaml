@@ -1,0 +1,25 @@
+{{- range $name, $app := .Values.workloads }}
+{{- with $app.port }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "warptalk.labels" $ | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - name: http
+      port: {{ . }}
+      targetPort: http
+    {{- with $app.grpcPort }}
+    - name: grpc
+      port: {{ . }}
+      targetPort: grpc
+    {{- end }}
+{{- end }}
+{{- end }}

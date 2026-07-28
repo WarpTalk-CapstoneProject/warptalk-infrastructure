@@ -20,11 +20,9 @@ echo -e "${YELLOW}⏹  Stopping WarpTalk services...${NC}"
 
 if [[ "${1:-}" == "--clean" ]]; then
     echo -e "${RED}   ⚠  --clean flag: volumes will be removed!${NC}"
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v 2>/dev/null || \
-    docker compose -f docker-compose.yml -f docker-compose.prod.yml down -v 2>/dev/null || true
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.mac.yml down -v
 else
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml down 2>/dev/null || \
-    docker compose -f docker-compose.yml -f docker-compose.prod.yml down 2>/dev/null || true
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.mac.yml down
 fi
 
 echo -e "${GREEN}✅ All services stopped.${NC}"

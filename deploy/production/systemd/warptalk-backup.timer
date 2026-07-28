@@ -1,0 +1,11 @@
+[Unit]
+Description=Run WarpTalk backup every day
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=warptalk-backup.service
+
+[Install]
+WantedBy=timers.target

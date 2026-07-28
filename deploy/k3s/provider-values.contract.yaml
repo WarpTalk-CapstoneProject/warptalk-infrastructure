@@ -1,0 +1,35 @@
+global:
+  domain: contract.warptalk.invalid
+
+secret:
+  externalSecret:
+    enabled: true
+    secretStoreName: contract-secret-store
+    remoteKey: contract/warptalk/runtime
+    postgresRemoteKey: contract/postgres-superuser
+    redisRemoteKey: contract/redis
+    qdrantRemoteKey: contract/qdrant
+
+ingress:
+  className: traefik
+  tlsSecretName: contract-warptalk-tls
+  certManager:
+    enabled: true
+    clusterIssuerName: contract-warptalk-issuer
+    email: platform@warptalk.invalid
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+
+costObservability:
+  rates:
+    sttUsdPerMinute: "0.01"
+    translationUsdPerMinute: "0.01"
+    ttsUsdPerMinute: "0.01"
+    voiceCloneUsdPerMinute: "0.01"
+    livekitUsdPerRoomMinute: "0.01"
+  budgets:
+    sttUsd: "100"
+    translationUsd: "100"
+    ttsUsd: "100"
+    voiceCloneUsd: "100"
+    livekitUsd: "100"
+    objectStorageGb: "100"

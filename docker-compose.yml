@@ -1,6 +1,6 @@
 # ====================================================================
 # WarpTalk — Full Stack Docker Compose (Base)
-# Override with docker-compose.dev.yml or docker-compose.prod.yml
+# Local development base; production uses deploy/production/*.compose.yml.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 # ====================================================================
 
@@ -8,8 +8,18 @@ services:
 
   # ── PostgreSQL ────────────────────────────────────────────────────
   postgres:
-    image: postgres:18-alpine
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     container_name: warptalk-postgres
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - track_io_timing=on
+      - -c
+      - log_min_duration_statement=500
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-warptalk}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -30,7 +40,7 @@ services:
   #    completion and exits; see scripts/run-migrations.sh for the ordering
   #    logic and why plain alphabetical sort of the filenames is unsafe.
   migrator:
-    image: postgres:18-alpine
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     container_name: warptalk-migrator
     depends_on:
       postgres:
@@ -42,8 +52,28 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB:-warptalk}
       MIGRATIONS_DIR: /scripts/migrations
+      SERVICE_MIGRATIONS_ROOT: /service-migrations
+      RELEASE_ID: ${IMAGE_TAG:-local-compose}
+      MIGRATION_APPLIED_BY: local-compose-migrator
+      SUBSCRIPTION_DB_PASSWORD: ${SUBSCRIPTION_DB_PASSWORD}
+      WORKSPACE_DB_PASSWORD: ${WORKSPACE_DB_PASSWORD:-warptalk-workspace-dev}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD}
+      TRANSLATION_ROOM_DB_PASSWORD: ${TRANSLATION_ROOM_DB_PASSWORD:-warptalk-translation-room-dev}
+      TRANSCRIPT_DB_PASSWORD: ${TRANSCRIPT_DB_PASSWORD}
+      MEETING_DB_PASSWORD: ${MEETING_DB_PASSWORD}
+      ASSISTANT_DB_PASSWORD: ${ASSISTANT_DB_PASSWORD:-warptalk-assistant-dev}
+      MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD:?Set MONITOR_DB_PASSWORD in .env}
     volumes:
       - ./scripts:/scripts:ro
+      - ../warptalk-backend/auth/database/migrations:/service-migrations/auth:ro
+      - ../warptalk-backend/workspace/database/migrations:/service-migrations/workspace:ro
+      - ../warptalk-backend/translation-room/database/migrations:/service-migrations/translation-room:ro
+      - ../warptalk-backend/transcript/database/migrations:/service-migrations/transcript:ro
+      - ../warptalk-backend/notification/database/migrations:/service-migrations/notification:ro
+      - ../warptalk-backend/meeting/database/migrations:/service-migrations/meeting:ro
+      - ../warptalk-backend/assistant/database/migrations:/service-migrations/assistant:ro
+      - ../warptalk-backend/billing/database/migrations:/service-migrations/billing:ro
     # Self-heal against CRLF: /scripts is read-only, so copy to a writable
     # tmp path, strip carriage returns, then run. Works even if a Windows
     # checkout left CRLF in run-migrations.sh (no re-clone needed).
@@ -52,26 +82,36 @@ services:
       - sh
       - -c
       - |
+        set -e
         tr -d '\r' < /scripts/run-migrations.sh > /tmp/run-migrations.sh
+        tr -d '\r' < /scripts/provision-service-db-users.sh > /tmp/provision-service-db-users.sh
+        tr -d '\r' < /scripts/extract-logical-databases.sh > /tmp/extract-logical-databases.sh
+        tr -d '\r' < /scripts/run-logical-database-migrations.sh > /tmp/run-logical-database-migrations.sh
         export MIGRATIONS_DIR=/scripts/migrations
-        exec sh /tmp/run-migrations.sh
+        sh /tmp/run-migrations.sh
+        sh /tmp/provision-service-db-users.sh
+        sh /tmp/extract-logical-databases.sh
+        sh /tmp/run-logical-database-migrations.sh
+        exec sh /scripts/enable-postgres-performance-observability.sh
     networks:
       - warptalk-net
 
   # ── PgBouncer — Connection Pooling ────────────────────────────────
   pgbouncer:
-    image: edoburu/pgbouncer:latest
+    image: edoburu/pgbouncer:v1.25.2-p0@sha256:7d7a27d9e90985cab5cf42256f5c13a3120baa4b055b69df37beb272b89b2340
     container_name: warptalk-pgbouncer
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-warptalk}
       POOL_MODE: transaction
-      MAX_CLIENT_CONN: 200
-      DEFAULT_POOL_SIZE: 20
-      MIN_POOL_SIZE: 5
+      MAX_CLIENT_CONN: 300
+      DEFAULT_POOL_SIZE: 15
+      MIN_POOL_SIZE: 2
       RESERVE_POOL_SIZE: 5
       IGNORE_STARTUP_PARAMETERS: extra_float_digits, search_path
       AUTH_TYPE: scram-sha-256
       LISTEN_PORT: 6432
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,7 +120,7 @@ services:
 
   # ── Redis — Cache + Streams ───────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.9-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     container_name: warptalk-redis
     command: >
       redis-server
@@ -102,7 +142,7 @@ services:
 
   # ── RabbitMQ — Durable domain events ─────────────────────────────
   rabbitmq:
-    image: rabbitmq:4-management-alpine
+    image: rabbitmq:4.3.2-management-alpine@sha256:0753b75ce99094c385483d89449d532a0544fb85e4942a478b21cc497ab66d33
     container_name: warptalk-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-warptalk}
@@ -115,14 +155,17 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+    networks:
+      - warptalk-net
   # ── MinIO — S3 Compatible Object Storage ─────────────────────────
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: warptalk-minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-warptalk-admin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     volumes:
       - minio-data:/data
     ports:
@@ -137,7 +180,7 @@ services:
       - warptalk-net
 
   minio-workspace-provisioner:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     container_name: warptalk-minio-workspace-provisioner
     depends_on:
       minio:
@@ -147,11 +190,17 @@ services:
       - >-
         mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
         mc mb --ignore-existing "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}" &&
-        mc anonymous set none "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}"
+        mc anonymous set none "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}" &&
+        mc mb --ignore-existing "local/$${MINIO_MEETING_CHAT_BUCKET:-warptalk-meeting-chat}" &&
+        mc anonymous set none "local/$${MINIO_MEETING_CHAT_BUCKET:-warptalk-meeting-chat}" &&
+        mc mb --ignore-existing "local/$${MINIO_VOICE_SAMPLES_BUCKET:-warptalk-voice-samples}" &&
+        mc anonymous set none "local/$${MINIO_VOICE_SAMPLES_BUCKET:-warptalk-voice-samples}"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-warptalk-admin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
       MINIO_WORKSPACE_DOCUMENTS_BUCKET: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}
+      MINIO_MEETING_CHAT_BUCKET: ${MINIO_MEETING_CHAT_BUCKET:-warptalk-meeting-chat}
+      MINIO_VOICE_SAMPLES_BUCKET: ${MINIO_VOICE_SAMPLES_BUCKET:-warptalk-voice-samples}
     networks:
       - warptalk-net
 
@@ -163,11 +212,19 @@ services:
     container_name: warptalk-auth
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__AuthDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=auth,public"
+      ConnectionStrings__AuthDb: "Host=pgbouncer;Port=6432;Database=warptalk_auth;Username=warptalk_auth;Password=${AUTH_DB_PASSWORD};Search Path=auth,public;GSS Encryption Mode=Disable"
+      AppBaseUrl: ${APP_BASE_URL:-http://localhost:3000}
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      Storage__Provider: ${AUTH_STORAGE_PROVIDER:-MinIO}
+      Storage__S3__ServiceUrl: ${AUTH_STORAGE_S3_ENDPOINT:-http://minio:9000}
+      Storage__S3__AccessKey: ${MINIO_ROOT_USER:-warptalk-admin}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+      Storage__S3__BucketName: ${MINIO_VOICE_SAMPLES_BUCKET:-warptalk-voice-samples}
+      Storage__S3__EnsureBucketExists: ${AUTH_STORAGE_ENSURE_BUCKET:-false}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -175,6 +232,8 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+      minio-workspace-provisioner:
+        condition: service_completed_successfully
     networks:
       - warptalk-net
 
@@ -186,18 +245,20 @@ services:
     container_name: warptalk-workspace
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__WorkspaceDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=workspace,public"
+      ConnectionStrings__WorkspaceDb: "Host=pgbouncer;Port=6432;Database=warptalk_workspace;Username=warptalk_workspace;Password=${WORKSPACE_DB_PASSWORD:-warptalk-workspace-dev};Search Path=workspace,public;GSS Encryption Mode=Disable"
+      AppBaseUrl: ${APP_BASE_URL:-http://localhost:3000}
       GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
       RabbitMQ__Host: "rabbitmq"
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
       RabbitMQ__Username: ${RABBITMQ_USERNAME:-warptalk}
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:-warptalk-dev-rabbitmq}
       Storage__Provider: ${WORKSPACE_STORAGE_PROVIDER:-MinIO}
-      Storage__MasterKey: ${WORKSPACE_STORAGE_MASTER_KEY}
+      Storage__MasterKey: ${WORKSPACE_STORAGE_MASTER_KEY:-warptalk-local-storage-master-key-change-for-shared-environments}
       Storage__S3__ServiceUrl: ${WORKSPACE_STORAGE_S3_ENDPOINT:-http://minio:9000}
       Storage__S3__AccessKey: ${MINIO_ROOT_USER:-warptalk-admin}
       Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
@@ -227,11 +288,13 @@ services:
     container_name: warptalk-translation-room
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__TranslationRoomDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=translation_room,public"
+      ConnectionStrings__TranslationRoomDb: "Host=pgbouncer;Port=6432;Database=warptalk_translation_room;Username=warptalk_translation_room;Password=${TRANSLATION_ROOM_DB_PASSWORD:-warptalk-translation-room-dev};Search Path=translation_room,public;GSS Encryption Mode=Disable"
+      App__FrontendBaseUrl: ${FRONTEND_BASE_URL:-http://localhost:3000}
       GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
       Smtp__Host: ${SMTP_HOST}
       Smtp__Port: ${SMTP_PORT:-587}
@@ -259,14 +322,15 @@ services:
     container_name: warptalk-transcript
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__TranscriptDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=transcript,public"
+      ConnectionStrings__TranscriptDb: "Host=pgbouncer;Port=6432;Database=warptalk_transcript;Username=warptalk_transcript;Password=${TRANSCRIPT_DB_PASSWORD};Search Path=transcript,public;GSS Encryption Mode=Disable"
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
+      GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
       GrpcUrls__BillingServiceUrl: "http://billing-service:50057"
-      GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
       migrator:
@@ -277,9 +341,9 @@ services:
         condition: service_healthy
       auth-service:
         condition: service_started
-      translation-room-service:
-        condition: service_started
       workspace-service:
+        condition: service_started
+      translation-room-service:
         condition: service_started
     networks:
       - warptalk-net
@@ -292,17 +356,24 @@ services:
     container_name: warptalk-notification
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__DefaultConnection: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=notification,public"
+      ConnectionStrings__DefaultConnection: "Host=pgbouncer;Port=6432;Database=warptalk_notification;Username=warptalk_notification;Password=${NOTIFICATION_DB_PASSWORD};Search Path=notification,public;GSS Encryption Mode=Disable"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      RabbitMQ__Host: "rabbitmq"
+      RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
+      RabbitMQ__Username: ${RABBITMQ_USERNAME:-warptalk}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD:-warptalk-dev-rabbitmq}
     depends_on:
       migrator:
         condition: service_completed_successfully
       pgbouncer:
         condition: service_started
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - warptalk-net
@@ -315,12 +386,13 @@ services:
     container_name: warptalk-meeting
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__DefaultConnection: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=meeting,public"
+      ConnectionStrings__DefaultConnection: "Host=pgbouncer;Port=6432;Database=warptalk_meeting;Username=warptalk_meeting;Password=${MEETING_DB_PASSWORD};Search Path=meeting,public;GSS Encryption Mode=Disable"
       GrpcUrls__TranslationRoomService: "http://translation-room-service:50052"
       GrpcUrls__BillingService: "http://billing-service:50057"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
       LiveKit__Url: ${LIVEKIT_URL:?Set LIVEKIT_URL to the LiveKit Cloud project URL}
       LiveKit__ApiKey: ${LIVEKIT_API_KEY}
       LiveKit__ApiSecret: ${LIVEKIT_API_SECRET}
@@ -338,6 +410,12 @@ services:
       Smtp__FromName: ${SMTP_FROM_NAME}
       OpenAI__ApiKey: ${OPENAI_API_KEY}
       OpenAI__ChatTranslationModel: ${OPENAI_CHAT_TRANSLATION_MODEL:-gpt-4o-mini}
+      Storage__Provider: ${MEETING_CHAT_STORAGE_PROVIDER:-MinIO}
+      Storage__S3__ServiceUrl: ${MEETING_CHAT_STORAGE_S3_ENDPOINT:-http://minio:9000}
+      Storage__S3__AccessKey: ${MINIO_ROOT_USER:-warptalk-admin}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+      Storage__S3__BucketName: ${MINIO_MEETING_CHAT_BUCKET:-warptalk-meeting-chat}
+      Storage__S3__EnsureBucketExists: ${MEETING_CHAT_STORAGE_ENSURE_BUCKET:-false}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -345,6 +423,8 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+      minio-workspace-provisioner:
+        condition: service_completed_successfully
       translation-room-service:
         condition: service_started
     networks:
@@ -359,10 +439,11 @@ services:
     container_name: warptalk-assistant
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__AssistantDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=assistant,public"
+      ConnectionStrings__AssistantDb: "Host=pgbouncer;Port=6432;Database=warptalk_assistant;Username=warptalk_assistant;Password=${ASSISTANT_DB_PASSWORD:-warptalk-assistant-dev};Search Path=assistant,public;GSS Encryption Mode=Disable"
       Jwt__SecretKey: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
       migrator:
@@ -388,6 +469,7 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
       ReverseProxy__Clusters__auth-cluster__Destinations__auth-service__Address: "http://auth-service:5101"
       ReverseProxy__Clusters__translation-room-cluster__Destinations__translation-room-service__Address: "http://translation-room-service:5102"
       ReverseProxy__Clusters__transcript-cluster__Destinations__transcript-service__Address: "http://transcript-service:5103"
@@ -400,6 +482,12 @@ services:
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
       AllowedOrigins__0: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      RateLimits__IpPermitLimit: ${RATE_LIMIT_IP_PER_WINDOW:-300}
+      RateLimits__UserPermitLimit: ${RATE_LIMIT_USER_PER_WINDOW:-180}
+      RateLimits__WorkspacePermitLimit: ${RATE_LIMIT_WORKSPACE_PER_WINDOW:-1000}
+      RateLimits__LoginPermitLimit: ${RATE_LIMIT_LOGIN_PER_WINDOW:-5}
+      RateLimits__InboxPermitLimit: ${RATE_LIMIT_INBOX_PER_WINDOW:-30}
+      RateLimits__WindowSeconds: ${RATE_LIMIT_WINDOW_SECONDS:-60}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
       auth-service:
@@ -429,12 +517,22 @@ services:
     container_name: warptalk-billing
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      ConnectionStrings__BillingDb: "Host=pgbouncer;Port=6432;Database=${POSTGRES_DB:-warptalk};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Search Path=subscription,workspace,public"
+      ConnectionStrings__BillingDb: "Host=pgbouncer;Port=6432;Database=warptalk_billing;Username=warptalk_billing;Password=${SUBSCRIPTION_DB_PASSWORD};Search Path=subscription,public;GSS Encryption Mode=Disable"
       ConnectionStrings__Redis: "redis:6379,password=${REDIS_PASSWORD}"
+      RabbitMQ__Host: "rabbitmq"
+      RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
+      RabbitMQ__Username: ${RABBITMQ_USERNAME:-warptalk}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD:-warptalk-dev-rabbitmq}
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
+      GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
+      Stripe__SuccessUrl: ${STRIPE_SUCCESS_URL:-http://localhost:3000/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}}
+      Stripe__CancelUrl: ${STRIPE_CANCEL_URL:-http://localhost:3000/workspace/payment/plans}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -442,7 +540,11 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       auth-service:
+        condition: service_started
+      workspace-service:
         condition: service_started
     networks:
       - warptalk-net
@@ -470,7 +572,7 @@ services:
   # ── COTURN Primary — TURN/STUN for WebRTC ─────────────────────────
   coturn-primary:
     profiles: ["selfhost"]
-    image: coturn/coturn:latest
+    image: coturn/coturn:4.15.0-r0@sha256:0feee4fc1f45c7c053c8fee3e1ab941b1a1b9a0429bc01e18126735410770bfd
     container_name: warptalk-coturn-primary
     volumes:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
@@ -483,7 +585,7 @@ services:
   # ── COTURN Backup — Failover ──────────────────────────────────────
   coturn-backup:
     profiles: ["selfhost"]
-    image: coturn/coturn:latest
+    image: coturn/coturn:4.15.0-r0@sha256:0feee4fc1f45c7c053c8fee3e1ab941b1a1b9a0429bc01e18126735410770bfd
     container_name: warptalk-coturn-backup
     volumes:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
@@ -493,9 +595,127 @@ services:
     networks:
       - warptalk-net
 
+  # ── OpenTelemetry Collector ───────────────────────────────────────
+  otel-collector:
+    image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.153.0@sha256:93aad750175cbf1a973ae1c5886c3371f4d800f61be25cdd26870b8441ffe9fa
+    container_name: warptalk-otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    volumes:
+      - ./observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro
+    depends_on:
+      seq:
+        condition: service_started
+    networks:
+      - warptalk-net
+
+  # ── PostgreSQL / Redis / Stream metrics exporters ────────────────
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.19.1@sha256:e96064f876226d94bb6ce48a4c4b3dd76edba91168ec1ab024e5c4b959310b0f
+    container_name: warptalk-postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: postgresql://warptalk_monitor:${MONITOR_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-warptalk}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - warptalk-net
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.84.0@sha256:7ef8e9c26638158fa4e7ad60df8c7e53d1919986753d6c1d2d1876b6ec38d87b
+    container_name: warptalk-redis-exporter
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - warptalk-net
+
+  metrics-exporter:
+    build:
+      context: ../warptalk-ai
+      target: metrics
+    container_name: warptalk-metrics-exporter
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      METRICS_PORT: "9108"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen("http://127.0.0.1:9108/health/ready", timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - warptalk-net
+
+  billing-cost-exporter:
+    image: burningalchemist/sql_exporter:0.24.3@sha256:f2de0ba8061268bd980d206101846d461117439bb61a9b666a5ffc4f77ad1afa
+    container_name: warptalk-billing-cost-exporter
+    command:
+      - -config.file=/etc/sql_exporter/sql_exporter.yml
+      - -web.listen-address=:9188
+    environment:
+      SQLEXPORTER_TARGET_DSN: postgresql://warptalk_monitor:${MONITOR_DB_PASSWORD}@postgres:5432/warptalk_billing?sslmode=disable
+    volumes:
+      - ./observability/billing-cost-queries.yml:/etc/sql_exporter/sql_exporter.yml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - warptalk-net
+
+  livekit-cost-exporter:
+    image: burningalchemist/sql_exporter:0.24.3@sha256:f2de0ba8061268bd980d206101846d461117439bb61a9b666a5ffc4f77ad1afa
+    container_name: warptalk-livekit-cost-exporter
+    command:
+      - -config.file=/etc/sql_exporter/sql_exporter.yml
+      - -web.listen-address=:9189
+    environment:
+      SQLEXPORTER_TARGET_DSN: postgresql://warptalk_monitor:${MONITOR_DB_PASSWORD}@postgres:5432/warptalk_translation_room?sslmode=disable
+    volumes:
+      - ./observability/livekit-cost-queries.yml:/etc/sql_exporter/sql_exporter.yml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - warptalk-net
+
+  workspace-storage-exporter:
+    image: burningalchemist/sql_exporter:0.24.3@sha256:f2de0ba8061268bd980d206101846d461117439bb61a9b666a5ffc4f77ad1afa
+    container_name: warptalk-workspace-storage-exporter
+    command:
+      - -config.file=/etc/sql_exporter/sql_exporter.yml
+      - -web.listen-address=:9190
+    environment:
+      SQLEXPORTER_TARGET_DSN: postgresql://warptalk_monitor:${MONITOR_DB_PASSWORD}@postgres:5432/warptalk_workspace?sslmode=disable
+    volumes:
+      - ./observability/workspace-storage-queries.yml:/etc/sql_exporter/sql_exporter.yml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - warptalk-net
+
   # ── Seq — Centralized Logging ─────────────────────────────────────
   seq:
-    image: datalust/seq:latest
+    image: datalust/seq:2025.2.16202@sha256:868a12e93ec0b8c993767a7dd4cd6c8ebc441511c79e4cfac66c911f62d4db65
     container_name: warptalk-seq
     environment:
       ACCEPT_EULA: "Y"
@@ -508,27 +728,54 @@ services:
 
   # ── Prometheus — Metrics ──────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.13.1@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893
     container_name: warptalk-prometheus
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.retention.time=30d'
+    depends_on:
+      - alertmanager
+      - otel-collector
+      - postgres-exporter
+      - redis-exporter
+      - metrics-exporter
+      - billing-cost-exporter
+      - livekit-cost-exporter
+      - workspace-storage-exporter
+    networks:
+      - warptalk-net
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba
+    container_name: warptalk-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./observability/alertmanager.local.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
     networks:
       - warptalk-net
 
   # ── Grafana — Dashboards ──────────────────────────────────────────
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.1.0@sha256:121a7a9ece6dc10b969f1f96eed64b4f07dfac0d0b8abc070f7cb83bbde86f63
     container_name: warptalk-grafana
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./observability/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
     networks:
@@ -537,7 +784,7 @@ services:
   # ── LiveKit — WebRTC SFU (clients connect here for A/V) ────────────
   livekit:
     profiles: ["selfhost"]
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.13.0@sha256:e07c51c497c116f8503bfecfc1a58e4504adb4cdcd6542bea64e489154b5db89
     container_name: warptalk-livekit
     command: --dev --bind 0.0.0.0
     environment:
@@ -553,6 +800,7 @@ volumes:
   seq-data:
   prometheus-data:
   grafana-data:
+  alertmanager-data:
 
 networks:
   warptalk-net:

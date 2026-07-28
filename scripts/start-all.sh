@@ -3,7 +3,7 @@
 # WarpTalk — Start Full Stack
 # Usage:
 #   ./start-all.sh          # Start in dev mode
-#   ./start-all.sh --prod   # Start in production mode
+#   RELEASE_MANIFEST=... PRODUCTION_ENV_FILE=... ./start-all.sh --prod
 #   ./start-all.sh --build  # Force rebuild images
 # ====================================================================
 set -eu
@@ -23,21 +23,14 @@ echo -e "${NC}"
 
 cd "$INFRA_DIR"
 
-# Check .env exists
-if [[ ! -f .env ]]; then
-    echo "⚠  No .env found. Copying from .env.example..."
-    cp .env.example .env
-    echo "   Please edit .env with real values, then re-run."
-    exit 1
-fi
-
 BUILD_FLAG=""
 COMPOSE_FILES="-f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.mac.yml"
+PRODUCTION_MODE=false
 
 for arg in "$@"; do
     case "$arg" in
         --prod)
-            COMPOSE_FILES="-f docker-compose.yml -f docker-compose.prod.yml"
+            PRODUCTION_MODE=true
             echo "   Mode: Production"
             ;;
         --build)
@@ -46,6 +39,22 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+if [[ "$PRODUCTION_MODE" == true ]]; then
+    if [[ -n "$BUILD_FLAG" ]]; then
+        echo "Production images must be built by scripts/build-release.sh; --build is not allowed." >&2
+        exit 1
+    fi
+    exec "$INFRA_DIR/scripts/deploy-release.sh"
+fi
+
+# Local Compose alone uses the development environment file.
+if [[ ! -f .env ]]; then
+    echo "⚠  No .env found. Copying from .env.example..."
+    cp .env.example .env
+    echo "   Please edit .env with real values, then re-run."
+    exit 1
+fi
 
 echo -e "${CYAN}Starting services...${NC}"
 # The migrator service (base docker-compose.yml) applies scripts/migrations/*.sql
