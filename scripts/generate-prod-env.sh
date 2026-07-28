@@ -49,7 +49,7 @@ JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n+/=' | head -c 64)
 JWT_ISSUER=WarpTalk.AuthService
 JWT_AUDIENCE=WarpTalk
 
-# ── COTURN (TURN/STUN) ──────────────────────────────────────────────
+# ── Self-host fallback only ─────────────────────────────────────────
 TURN_SECRET=$(generate_secret)
 TURN_REALM=warptalk.vn
 
@@ -62,9 +62,18 @@ SEQ_API_KEY=$(generate_secret)
 SEQ_ADMIN_PASSWORD=$(generate_secret)
 GRAFANA_ADMIN_PASSWORD=$(generate_secret)
 
-# ── LiveKit (get from LiveKit Cloud dashboard or self-hosted server) ─
+# ── LiveKit Cloud ───────────────────────────────────────────────────
+LIVEKIT_URL=wss://<project-subdomain>.livekit.cloud
 LIVEKIT_API_KEY=<your-livekit-api-key>
 LIVEKIT_API_SECRET=<your-livekit-api-secret>
+FRONTEND_LIVEKIT_URL=wss://<project-subdomain>.livekit.cloud
+
+# ── LiveKit Cloud Egress recording output ───────────────────────────
+LIVEKIT_EGRESS_S3_ACCESS_KEY=<your-s3-access-key>
+LIVEKIT_EGRESS_S3_SECRET=<your-s3-secret>
+LIVEKIT_EGRESS_S3_BUCKET=warptalk-recordings
+LIVEKIT_EGRESS_S3_REGION=ap-southeast-1
+LIVEKIT_EGRESS_S3_ENDPOINT=https://<your-s3-compatible-endpoint>
 
 # ── Backup (S3/MinIO) ───────────────────────────────────────────────
 BACKUP_S3_BUCKET=warptalk-backups

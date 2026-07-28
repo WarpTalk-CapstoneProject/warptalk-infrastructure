@@ -18,7 +18,7 @@ services:
       - pgdata:/var/lib/postgresql
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -93,7 +93,7 @@ services:
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -111,7 +111,7 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -132,7 +132,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: [ "CMD", "mc", "ready", "local" ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -145,12 +145,10 @@ services:
     depends_on:
       minio:
         condition: service_healthy
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: [ "/bin/sh", "-c" ]
     command:
       - >-
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
-        mc mb --ignore-existing "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}" &&
-        mc anonymous set none "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}"
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" && mc mb --ignore-existing "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}" && mc anonymous set none "local/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-warptalk-admin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
@@ -325,8 +323,14 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
+      LiveKit__Url: ${LIVEKIT_URL:?Set LIVEKIT_URL to the LiveKit Cloud project URL}
       LiveKit__ApiKey: ${LIVEKIT_API_KEY}
       LiveKit__ApiSecret: ${LIVEKIT_API_SECRET}
+      LiveKit__Egress__S3__AccessKey: ${LIVEKIT_EGRESS_S3_ACCESS_KEY:-}
+      LiveKit__Egress__S3__Secret: ${LIVEKIT_EGRESS_S3_SECRET:-}
+      LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:-}
+      LiveKit__Egress__S3__Region: ${LIVEKIT_EGRESS_S3_REGION:-}
+      LiveKit__Egress__S3__Endpoint: ${LIVEKIT_EGRESS_S3_ENDPOINT:-}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
       Smtp__Host: ${SMTP_HOST}
       Smtp__Port: ${SMTP_PORT:-587}
@@ -347,7 +351,6 @@ services:
         condition: service_started
     networks:
       - warptalk-net
-
 
   # ── Assistant Service ─────────────────────────────────────────────
   assistant-service:
@@ -393,7 +396,6 @@ services:
       ReverseProxy__Clusters__meeting-cluster__Destinations__meeting-service__Address: "http://meeting-service:5105"
       ReverseProxy__Clusters__workspace-cluster__Destinations__workspace-service__Address: "http://workspace-service:5106"
       ReverseProxy__Clusters__billing-cluster__Destinations__billing-service__Address: "http://billing-service:5107"
-      ReverseProxy__Clusters__payment-cluster__Destinations__payment-service__Address: "http://payment-service:8080"
       ReverseProxy__Clusters__assistant-cluster__Destinations__assistant-service__Address: "http://assistant-service:5108"
       GrpcUrls__NotificationServiceUrl: "http://notification-service:50054"
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
@@ -415,8 +417,6 @@ services:
         condition: service_started
       billing-service:
         condition: service_started
-      payment-service:
-        condition: service_started
       assistant-service:
         condition: service_started
     networks:
@@ -436,7 +436,6 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
-      PaymentServiceGrpcUrl: "http://payment-service:50058"
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -449,16 +448,6 @@ services:
     networks:
       - warptalk-net
 
-  # ── Payment Service (Stripe integration) ──────────────────────────
-  payment-service:
-    image: alpine:latest
-    container_name: warptalk-payment
-    environment:
-      ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
-      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
-    networks:
-      - warptalk-net
-
   # ── Frontend — Next.js Web App ─────────────────────────────────────
   frontend:
     build:
@@ -466,8 +455,8 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:5200/api/v1}
         NEXT_PUBLIC_SIGNALR_URL: ${FRONTEND_SIGNALR_URL:-http://localhost:5200}
-        NEXT_PUBLIC_LIVEKIT_URL: ${FRONTEND_LIVEKIT_URL:-ws://localhost:7880}
         NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_LIVEKIT_URL: ${FRONTEND_LIVEKIT_URL:?Set FRONTEND_LIVEKIT_URL to the LiveKit Cloud project URL}
     container_name: warptalk-frontend
     environment:
       # Server-side (Server Components/Actions) calls run inside this container,
@@ -483,6 +472,7 @@ services:
 
   # ── COTURN Primary — TURN/STUN for WebRTC ─────────────────────────
   coturn-primary:
+    profiles: [ "selfhost" ]
     image: coturn/coturn:latest
     container_name: warptalk-coturn-primary
     volumes:
@@ -495,6 +485,7 @@ services:
 
   # ── COTURN Backup — Failover ──────────────────────────────────────
   coturn-backup:
+    profiles: [ "selfhost" ]
     image: coturn/coturn:latest
     container_name: warptalk-coturn-backup
     volumes:
@@ -548,11 +539,12 @@ services:
 
   # ── LiveKit — WebRTC SFU (clients connect here for A/V) ────────────
   livekit:
+    profiles: [ "selfhost" ]
     image: livekit/livekit-server:latest
     container_name: warptalk-livekit
     command: --dev --bind 0.0.0.0
     environment:
-      - "LIVEKIT_KEYS=APIBVnfFo9PzzoQ: wbB6j98H2jfF5nLTZYhaiYXQM8hM6nB3KoVoXfMNTPA"
+      - "LIVEKIT_KEYS=${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     networks:
       - warptalk-net
 
