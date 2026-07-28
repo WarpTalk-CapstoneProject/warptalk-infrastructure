@@ -1,0 +1,131 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: warptalk-otel-collector
+  labels:
+    app.kubernetes.io/name: warptalk-otel-collector
+    {{- include "warptalk.labels" . | nindent 4 }}
+data:
+  collector.yaml: |
+{{ .Files.Get "files/otel-collector.yaml" | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: warptalk-otel-collector
+  labels:
+    app.kubernetes.io/name: warptalk-otel-collector
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.telemetry.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: warptalk-otel-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: warptalk-otel-collector
+        {{- include "warptalk.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ .Files.Get "files/otel-collector.yaml" | sha256sum }}
+    spec:
+      serviceAccountName: warptalk
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: warptalk-otel-collector
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: warptalk-otel-collector
+      containers:
+        - name: collector
+          image: {{ .Values.telemetry.image | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["--config=/conf/collector.yaml"]
+          ports:
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+            - {name: metrics, containerPort: 8889}
+            - {name: health, containerPort: 13133}
+          readinessProbe:
+            httpGet: {path: /, port: health}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /, port: health}
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            {{- toYaml .Values.telemetry.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /conf, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap:
+            name: warptalk-otel-collector
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: warptalk-otel-collector
+  labels:
+    app.kubernetes.io/name: warptalk-otel-collector
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: warptalk-otel-collector
+  ports:
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
+    - {name: otlp-http, port: 4318, targetPort: otlp-http}
+    - {name: metrics, port: 8889, targetPort: metrics}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: warptalk-otel-collector
+  labels:
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: warptalk-otel-collector
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: warptalk-otel-collector
+  labels:
+    release: monitoring
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: warptalk-otel-collector
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s

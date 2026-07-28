@@ -16,7 +16,7 @@
 # ====================================================================
 set -e
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-$SCRIPT_DIR/migrations}"
 
 PGHOST="${PGHOST:-localhost}"
@@ -46,15 +46,13 @@ until psql_exec -c "SELECT 1" >/dev/null 2>&1; do
 done
 echo "PostgreSQL is ready."
 
-# The tracking table itself must exist before we can check what's applied.
-# SQL is piped through `tr -d '\r'` so a CRLF-committed file (e.g. checked
-# out on Windows) still applies cleanly, regardless of line endings.
-if [ -f "$MIGRATIONS_DIR/000-init-migrations.sql" ]; then
-  tr -d '\r' < "$MIGRATIONS_DIR/000-init-migrations.sql" | psql_exec -q >/dev/null
-fi
-
-TMP_LIST="$(mktemp)"
-trap 'rm -f "$TMP_LIST"' EXIT INT TERM
+# Keep one psql session for the whole run. This makes the advisory lock effective
+# across the check/apply/record sequence and prevents two deploys from racing.
+# ON_ERROR_STOP ensures a broken migration is never recorded as applied.
+TMP_DIR="$(mktemp -d)"
+TMP_LIST="$TMP_DIR/migrations.list"
+SESSION_SQL="$TMP_DIR/run.sql"
+trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
 for path in "$MIGRATIONS_DIR"/*.sql; do
   [ -f "$path" ] || continue
@@ -75,21 +73,38 @@ for path in "$MIGRATIONS_DIR"/*.sql; do
     sortkey="99999999"
   fi
 
+  sanitized_path="$TMP_DIR/$filename"
+  tr -d '\r' < "$path" > "$sanitized_path"
   printf '%s\t%s\n' "$sortkey" "$filename" >> "$TMP_LIST"
 done
 
-sort "$TMP_LIST" | while IFS="$(printf '\t')" read -r _sortkey filename; do
-  already_applied=$(psql_exec -tAc \
-    "SELECT 1 FROM public.schema_migrations WHERE version='$filename';" 2>/dev/null || true)
+{
+  echo '\set ON_ERROR_STOP on'
+  echo "SELECT pg_advisory_lock(hashtext('warptalk-schema-migrations'));"
 
-  if [ "$already_applied" = "1" ]; then
-    echo "  Skipping $filename (already applied)"
-    continue
+  if [ -f "$MIGRATIONS_DIR/000-init-migrations.sql" ]; then
+    init_path="$TMP_DIR/000-init-migrations.sql"
+    tr -d '\r' < "$MIGRATIONS_DIR/000-init-migrations.sql" > "$init_path"
+    printf '%s\n' "\\ir '$init_path'"
   fi
 
-  echo "  Applying $filename..."
-  tr -d '\r' < "$MIGRATIONS_DIR/$filename" | psql_exec
-  psql_exec -q -c "INSERT INTO public.schema_migrations(version) VALUES ('$filename');"
-done
+  sort "$TMP_LIST" | while IFS="$(printf '\t')" read -r _sortkey filename; do
+    escaped_filename=$(printf '%s' "$filename" | sed "s/'/''/g")
+    sanitized_path="$TMP_DIR/$filename"
+
+    printf "SELECT EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '%s') AS migration_applied \\gset\n" "$escaped_filename"
+    echo '\if :migration_applied'
+    printf '%s\n' "\\echo '  Skipping $filename (already applied)'"
+    echo '\else'
+    printf '%s\n' "\\echo '  Applying $filename...'"
+    printf '%s\n' "\\ir '$sanitized_path'"
+    printf "INSERT INTO public.schema_migrations(version) VALUES ('%s');\n" "$escaped_filename"
+    echo '\endif'
+  done
+
+  echo "SELECT pg_advisory_unlock(hashtext('warptalk-schema-migrations'));"
+} > "$SESSION_SQL"
+
+psql_exec -X -v ON_ERROR_STOP=1 -f "$SESSION_SQL"
 
 echo "Migrations complete."

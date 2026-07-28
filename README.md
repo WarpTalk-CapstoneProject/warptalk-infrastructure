@@ -23,8 +23,11 @@ cp .env.example .env
 #    standalone: PGHOST=localhost PGPASSWORD=*** ./scripts/run-migrations.sh
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
-# 4. Start full stack (production)
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# 4. Production uses immutable release manifests and the canonical App/Data
+#    topology. Follow deploy/production/README.md; do not reuse local Compose.
+RELEASE_MANIFEST=/releases/warptalk-<sha>.json \
+PRODUCTION_ENV_FILE=/etc/warptalk/.env.production \
+./scripts/start-all.sh --prod
 ```
 
 ## Structure
@@ -32,7 +35,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 ├── docker-compose.yml          # Base: all services
 ├── docker-compose.dev.yml      # Dev overrides (ports, debug)
-├── docker-compose.prod.yml     # Production (replicas, resource limits)
+├── deploy/production/          # Canonical immutable App/Data deployment
+├── deploy/k3s/                 # Multi-node HA/K3s upgrade path
 ├── pgbouncer/
 │   └── pgbouncer.ini           # Connection pooling config
 ├── coturn/
@@ -60,9 +64,13 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 | PgBouncer | 6432 | Connection pooling |
 | Redis | 6379 | Cache + Streams |
 | Auth Service | 5101 | Authentication & users |
-| Meeting Service | 5102 | Meeting management |
+| Translation Room Service | 5102 | Translation-room lifecycle |
 | Transcript Service | 5103 | Transcription |
 | Notification Service | 5104 | Push/email notifications |
+| Meeting Service | 5105 | Meeting management |
+| Workspace Service | 5106 | Workspaces and documents |
+| Billing Service | 5107 | Subscription, Stripe and credits |
+| Assistant Service | 5108 | Assistant orchestration |
 | API Gateway | 5200 | YARP + SignalR hubs |
 | COTURN Primary | 3478 | TURN/STUN server |
 | COTURN Backup | 3479 | TURN/STUN failover |

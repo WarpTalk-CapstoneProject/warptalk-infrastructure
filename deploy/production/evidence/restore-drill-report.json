@@ -1,0 +1,58 @@
+{
+  "status": "passed",
+  "completed_at": "2026-07-27T12:16:43Z",
+  "databases": [
+    {
+      "database": "warptalk_auth",
+      "tables": 15,
+      "status": "restored"
+    },
+    {
+      "database": "warptalk_workspace",
+      "tables": 11,
+      "status": "restored"
+    },
+    {
+      "database": "warptalk_translation_room",
+      "tables": 12,
+      "status": "restored"
+    },
+    {
+      "database": "warptalk_transcript",
+      "tables": 15,
+      "status": "restored"
+    },
+    {
+      "database": "warptalk_notification",
+      "tables": 18,
+      "status": "restored"
+    },
+    {
+      "database": "warptalk_meeting",
+      "tables": 19,
+      "status": "restored"
+    },
+    {
+      "database": "warptalk_assistant",
+      "tables": 6,
+      "status": "restored"
+    },
+    {
+      "database": "warptalk_billing",
+      "tables": 16,
+      "status": "restored"
+    }
+  ],
+  "qdrant_collections": [
+    {
+      "collection": "workspace_00000000-0000-0000-0000-000000000000",
+      "points": 556,
+      "status": "restored"
+    },
+    {
+      "collection": "workspace_625d01cf-b20f-470a-be04-b5f16881e579",
+      "points": 1,
+      "status": "restored"
+    }
+  ]
+}

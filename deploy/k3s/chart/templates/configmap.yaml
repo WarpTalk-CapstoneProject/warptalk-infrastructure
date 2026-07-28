@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: warptalk-runtime
+  labels:
+    {{- include "warptalk.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-30"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  AllowedOrigins__0: {{ printf "https://%s" .Values.global.domain | quote }}
+  AppBaseUrl: {{ printf "https://%s" .Values.global.domain | quote }}
+  App__FrontendBaseUrl: {{ printf "https://%s" .Values.global.domain | quote }}
+  Stripe__SuccessUrl: {{ printf "https://%s/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}" .Values.global.domain | quote }}
+  Stripe__CancelUrl: {{ printf "https://%s/workspace/payment/plans" .Values.global.domain | quote }}
+  {{- range $key, $value := .Values.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}

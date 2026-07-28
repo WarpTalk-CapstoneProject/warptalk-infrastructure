@@ -1,0 +1,284 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "API request rate",
+      "targets": [
+        {
+          "expr": "sum by (service_name) (rate(warptalk_http_server_request_duration_seconds_count[5m]))"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "API P95 latency",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, service_name) (rate(warptalk_http_server_request_duration_seconds_bucket[5m])))"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "API 5xx ratio",
+      "targets": [
+        {
+          "expr": "sum by (service_name) (rate(warptalk_http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum by (service_name) (rate(warptalk_http_server_request_duration_seconds_count[5m])), 0.001)"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "PostgreSQL connections",
+      "targets": [
+        {
+          "expr": "sum(pg_stat_activity_count)"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Redis memory utilization",
+      "targets": [
+        {
+          "expr": "redis_memory_used_bytes / clamp_min(redis_memory_max_bytes, 1)"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "RabbitMQ ready messages",
+      "targets": [
+        {
+          "expr": "sum by (queue) (rabbitmq_queue_messages_ready)"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Alive AI worker heartbeats",
+      "targets": [
+        {
+          "expr": "sum(max by (key) (redis_keys_count{key=~\"warptalk:worker:heartbeat:(stt|translation|tts|assistant|assistant-chat|embedding|embedding-search|billing|livekit_ingress|security):\\\\*\"}))"
+        }
+      ],
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 16
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "AI stream consumer lag",
+      "targets": [
+        {
+          "expr": "max by (stream, group) (redis_stream_group_lag)"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 6,
+        "y": 16
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "AI pending messages",
+      "targets": [
+        {
+          "expr": "max by (stream, group) (redis_stream_group_messages_pending)"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 15,
+        "y": 16
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Dead-letter stream length",
+      "targets": [
+        {
+          "expr": "redis_stream_length{stream=~\".*:dead-letter\"}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Qdrant collection points",
+      "targets": [
+        {
+          "expr": "collections_total"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Billing API failures",
+      "targets": [
+        {
+          "expr": "sum(rate(warptalk_http_server_request_duration_seconds_count{service_name=\"warptalk-billing\",http_response_status_code=~\"4..|5..\"}[5m]))"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "AI provider estimated cost (30d USD)",
+      "targets": [
+        {
+          "expr": "max by (service) (warptalk_ai_cost_30d{metric=\"estimated_cost_usd\"})",
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 32
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "AI provider budget utilization",
+      "targets": [
+        {
+          "expr": "max by (service) (warptalk_ai_cost_30d{metric=\"estimated_cost_usd\"}) / clamp_min(max by (service) (warptalk_ai_cost_30d{metric=\"budget_usd\"}), 0.000001)",
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      }
+    },
+    {
+      "type": "stat",
+      "title": "LiveKit estimated cost (30d USD)",
+      "targets": [
+        {
+          "expr": "max(warptalk_livekit_cost_30d{metric=\"estimated_cost_usd\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 16,
+        "y": 32
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Object storage used",
+      "targets": [
+        {
+          "expr": "sum(max by (source) (warptalk_object_storage_bytes))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 20,
+        "y": 32
+      }
+    }
+  ],
+  "schemaVersion": 41,
+  "tags": [
+    "warptalk",
+    "production",
+    "ai",
+    "billing"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "WarpTalk Operations Overview",
+  "uid": "warptalk-overview",
+  "version": 3
+}

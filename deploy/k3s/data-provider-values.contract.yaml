@@ -1,0 +1,12 @@
+externalSecrets:
+  secretStoreName: contract-secret-store
+  postgresRemoteKey: contract/postgres-superuser
+  backupRemoteKey: contract/postgres-backup
+  redisRemoteKey: contract/redis
+  qdrantRemoteKey: contract/qdrant
+
+postgres:
+  backup:
+    destinationPath: s3://contract-backups/warptalk-postgres
+    endpointURL: https://object-store.warptalk.invalid
+    retentionPolicy: 30d

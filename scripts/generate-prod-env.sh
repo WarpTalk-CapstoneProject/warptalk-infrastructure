@@ -34,11 +34,13 @@ POSTGRES_PASSWORD=$(generate_secret)
 
 # ── Per-Service DB Users ─────────────────────────────────────────────
 AUTH_DB_PASSWORD=$(generate_secret)
+WORKSPACE_DB_PASSWORD=$(generate_secret)
 MEETING_DB_PASSWORD=$(generate_secret)
 TRANSCRIPT_DB_PASSWORD=$(generate_secret)
 SUBSCRIPTION_DB_PASSWORD=$(generate_secret)
 NOTIFICATION_DB_PASSWORD=$(generate_secret)
 TRANSLATION_ROOM_DB_PASSWORD=$(generate_secret)
+ASSISTANT_DB_PASSWORD=$(generate_secret)
 
 # ── Redis ────────────────────────────────────────────────────────────
 REDIS_PASSWORD=$(generate_secret)

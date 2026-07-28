@@ -1,0 +1,39 @@
+# Copy outside the repository, replace every CHANGE_ME value and pass the copy
+# as K3S_VALUES_FILE. Runtime credentials remain in the external secret store.
+global:
+  domain: CHANGE_ME.warptalk.vn
+
+secret:
+  externalSecret:
+    enabled: true
+    secretStoreName: CHANGE_ME-production-secret-store
+    remoteKey: CHANGE_ME/warptalk/production/runtime
+    postgresRemoteKey: CHANGE_ME/warptalk/production/postgres-superuser
+    redisRemoteKey: CHANGE_ME/warptalk/production/redis
+    qdrantRemoteKey: CHANGE_ME/warptalk/production/qdrant
+
+ingress:
+  className: traefik
+  tlsSecretName: warptalk-tls
+  certManager:
+    enabled: true
+    clusterIssuerName: warptalk-letsencrypt
+    email: CHANGE_ME@example.org
+    server: https://acme-v02.api.letsencrypt.org/directory
+
+# Operational estimates only. Use signed provider-contract rates; these values
+# never determine customer invoices. Every budget must be greater than zero.
+costObservability:
+  rates:
+    sttUsdPerMinute: "CHANGE_ME"
+    translationUsdPerMinute: "CHANGE_ME"
+    ttsUsdPerMinute: "CHANGE_ME"
+    voiceCloneUsdPerMinute: "CHANGE_ME"
+    livekitUsdPerRoomMinute: "CHANGE_ME"
+  budgets:
+    sttUsd: "CHANGE_ME"
+    translationUsd: "CHANGE_ME"
+    ttsUsd: "CHANGE_ME"
+    voiceCloneUsd: "CHANGE_ME"
+    livekitUsd: "CHANGE_ME"
+    objectStorageGb: "CHANGE_ME"

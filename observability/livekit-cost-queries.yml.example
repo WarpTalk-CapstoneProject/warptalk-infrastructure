@@ -1,0 +1,52 @@
+global:
+  scrape_timeout: 10s
+  scrape_timeout_offset: 500ms
+  min_interval: 1m
+  max_connections: 1
+  max_idle_connections: 1
+  max_connection_lifetime: 10m
+
+target:
+  name: warptalk_translation_room
+  # Overridden at runtime by SQLEXPORTER_TARGET_DSN so no password is rendered.
+  data_source_name: postgresql://invalid:invalid@postgres/warptalk_translation_room
+  collectors: [warptalk_livekit_cost_30d, warptalk_translation_storage]
+
+collectors:
+  - collector_name: warptalk_livekit_cost_30d
+    metrics:
+      - metric_name: warptalk_livekit_cost_30d
+        type: gauge
+        help: "Trailing 30-day LiveKit-backed room usage, estimated cost and budget"
+        value_label: metric
+        values:
+          - room_minutes
+          - estimated_cost_usd
+          - unit_cost_usd_per_room_minute
+          - budget_usd
+        query: |
+          SELECT coalesce(sum(duration_seconds), 0)::double precision / 60.0 AS room_minutes,
+                 (coalesce(sum(duration_seconds), 0)::numeric / 60.0 * __LIVEKIT_COST_USD_PER_ROOM_MINUTE__::numeric)::double precision AS estimated_cost_usd,
+                 __LIVEKIT_COST_USD_PER_ROOM_MINUTE__::double precision AS unit_cost_usd_per_room_minute,
+                 __LIVEKIT_MONTHLY_BUDGET_USD__::double precision AS budget_usd
+          FROM translation_room.translation_rooms
+          WHERE started_at >= now() - interval '30 days'
+            AND deleted_at IS NULL;
+  - collector_name: warptalk_translation_storage
+    metrics:
+      - metric_name: warptalk_object_storage_bytes
+        type: gauge
+        help: "Application-indexed object storage bytes"
+        key_labels: [source]
+        values: [bytes]
+        query: |
+          SELECT 'translation-artifacts'::text AS source,
+                 coalesce(sum(file_size_bytes), 0)::double precision AS bytes
+          FROM translation_room.translation_room_artifacts
+          WHERE deleted_at IS NULL;
+      - metric_name: warptalk_object_storage_budget_bytes
+        type: gauge
+        help: "Configured application object storage capacity budget"
+        values: [bytes]
+        query: |
+          SELECT (__OBJECT_STORAGE_BUDGET_GB__::numeric * 1024 * 1024 * 1024)::double precision AS bytes;
