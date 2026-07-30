@@ -35,7 +35,7 @@ an independent penetration test.
 Run after each staging or production deployment:
 
 ```sh
-APP_URL=https://app.warptalk.vn \
-API_URL=https://api.warptalk.vn \
+APP_URL=https://app.warptalk.io.vn \
+API_URL=https://api.warptalk.io.vn \
 ./scripts/security-smoke.sh
 ```

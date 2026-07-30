@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-: "${APP_URL:?APP_URL is required, for example https://app.warptalk.vn}"
-: "${API_URL:?API_URL is required, for example https://api.warptalk.vn}"
+: "${APP_URL:?APP_URL is required, for example https://app.warptalk.io.vn}"
+: "${API_URL:?API_URL is required, for example https://api.warptalk.io.vn}"
 
 for command_name in curl grep; do
   command -v "$command_name" >/dev/null 2>&1 ||
