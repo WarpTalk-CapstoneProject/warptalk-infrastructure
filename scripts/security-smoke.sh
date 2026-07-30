@@ -45,7 +45,7 @@ status="$(
     -H 'Content-Type: application/json' \
     -H 'Stripe-Signature: invalid-security-smoke-signature' \
     --data '{}' \
-    "$API_URL/api/v1/billing/payments/webhook"
+    "$API_URL/api/v1/payments/webhook"
 )"
 case "$status" in
   400|401) ;;
