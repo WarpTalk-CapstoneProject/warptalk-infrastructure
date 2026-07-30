@@ -17,7 +17,7 @@ spec:
       media-src 'self' blob: https:;
       connect-src 'self' https: wss: https://accounts.google.com/gsi/;
       script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client;
-      style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style;
+      style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style https://fonts.googleapis.com;
       font-src 'self' data: https:;
       worker-src 'self' blob:
     referrerPolicy: strict-origin-when-cross-origin
