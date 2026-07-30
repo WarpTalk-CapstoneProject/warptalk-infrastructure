@@ -7,6 +7,7 @@ LOCAL_ENV_FILE="$ROOT_DIR/.env.example"
 DEPLOY_DIR="$ROOT_DIR/deploy/production"
 ENV_FILE="$DEPLOY_DIR/.env.example"
 DATA_COMPOSE="$DEPLOY_DIR/data.compose.yml"
+INFRA_COMPOSE="$DEPLOY_DIR/infra.compose.yml"
 APP_COMPOSE="$DEPLOY_DIR/app.compose.yml"
 SINGLE_HOST_COMPOSE="$DEPLOY_DIR/single-host.compose.yml"
 SINGLE_HOST_INVENTORY="$DEPLOY_DIR/inventory/single-host.env.example"
@@ -60,7 +61,7 @@ for dependency in docker jq; do
   command -v "$dependency" >/dev/null 2>&1 || fail "missing dependency: $dependency"
 done
 
-for required_file in "$LOCAL_COMPOSE" "$LOCAL_ENV_FILE" "$ENV_FILE" "$DATA_COMPOSE" "$APP_COMPOSE" "$SINGLE_HOST_COMPOSE" "$SINGLE_HOST_INVENTORY" "$SPLIT_HOST_INVENTORY" "$HOST_BOOTSTRAP" "$IMAGE_MATRIX" "$OUTBOX_MIGRATION" "$DEAD_LETTER_MIGRATION" "$NOTIFICATION_INBOX_MIGRATION" "$BILLING_RUNTIME_ROLE_MIGRATION" "$WORKSPACE_RUNTIME_ROLE_MIGRATION" "$NOTIFICATION_RUNTIME_ROLE_MIGRATION" "$AUTH_RUNTIME_ROLE_MIGRATION" "$TRANSLATION_REFERENCE_MIGRATION" "$TRANSLATION_RUNTIME_ROLE_MIGRATION" "$TRANSCRIPT_RUNTIME_ROLE_MIGRATION" "$MEETING_RUNTIME_ROLE_MIGRATION" "$ASSISTANT_RUNTIME_ROLE_MIGRATION" "$SERVICE_DB_USER_PROVISIONER" "$DATABASE_BOUNDARY_CHECK" "$LOGICAL_DATABASE_EXTRACTOR" "$LOGICAL_DATABASE_CHECK" "$LOGICAL_DATABASE_BACKUP" "$SOURCE_READONLY_WINDOW" "$LOGICAL_MIGRATION_RUNNER" "$COST_RENDERER" "$BILLING_COST_TEMPLATE" "$LIVEKIT_COST_TEMPLATE" "$WORKSPACE_STORAGE_TEMPLATE" "$COST_RULES_TEMPLATE" "$COST_GOVERNANCE" "$LOCAL_PROMETHEUS_CONFIG" "$LOCAL_ALERT_RULES" "$LOCAL_ALERTMANAGER_CONFIG" "$DEPENDENCY_READINESS_DRILL"; do
+for required_file in "$LOCAL_COMPOSE" "$LOCAL_ENV_FILE" "$ENV_FILE" "$DATA_COMPOSE" "$INFRA_COMPOSE" "$APP_COMPOSE" "$SINGLE_HOST_COMPOSE" "$SINGLE_HOST_INVENTORY" "$SPLIT_HOST_INVENTORY" "$HOST_BOOTSTRAP" "$IMAGE_MATRIX" "$OUTBOX_MIGRATION" "$DEAD_LETTER_MIGRATION" "$NOTIFICATION_INBOX_MIGRATION" "$BILLING_RUNTIME_ROLE_MIGRATION" "$WORKSPACE_RUNTIME_ROLE_MIGRATION" "$NOTIFICATION_RUNTIME_ROLE_MIGRATION" "$AUTH_RUNTIME_ROLE_MIGRATION" "$TRANSLATION_REFERENCE_MIGRATION" "$TRANSLATION_RUNTIME_ROLE_MIGRATION" "$TRANSCRIPT_RUNTIME_ROLE_MIGRATION" "$MEETING_RUNTIME_ROLE_MIGRATION" "$ASSISTANT_RUNTIME_ROLE_MIGRATION" "$SERVICE_DB_USER_PROVISIONER" "$DATABASE_BOUNDARY_CHECK" "$LOGICAL_DATABASE_EXTRACTOR" "$LOGICAL_DATABASE_CHECK" "$LOGICAL_DATABASE_BACKUP" "$SOURCE_READONLY_WINDOW" "$LOGICAL_MIGRATION_RUNNER" "$COST_RENDERER" "$BILLING_COST_TEMPLATE" "$LIVEKIT_COST_TEMPLATE" "$WORKSPACE_STORAGE_TEMPLATE" "$COST_RULES_TEMPLATE" "$COST_GOVERNANCE" "$LOCAL_PROMETHEUS_CONFIG" "$LOCAL_ALERT_RULES" "$LOCAL_ALERTMANAGER_CONFIG" "$DEPENDENCY_READINESS_DRILL"; do
   [ -f "$required_file" ] || fail "missing file: $required_file"
 done
 for required_directory in "$LOCAL_GRAFANA_PROVISIONING" "$LOCAL_GRAFANA_DASHBOARDS"; do
@@ -101,6 +102,7 @@ compose_images_file="$(mktemp)"
 {
   docker compose --env-file "$ENV_FILE" -f "$APP_COMPOSE" config --images
   docker compose --env-file "$ENV_FILE" -f "$DATA_COMPOSE" config --images
+  docker compose --env-file "$ENV_FILE" -f "$INFRA_COMPOSE" config --images
 } |
   while IFS= read -r image_ref; do
     # Every internal Warptalk image in Compose must be represented in the
@@ -194,6 +196,7 @@ render_compose() {
 }
 
 DATA_JSON="$(render_compose "$DATA_COMPOSE")"
+INFRA_JSON="$(render_compose "$INFRA_COMPOSE")"
 APP_JSON="$(render_compose "$APP_COMPOSE")"
 LOCAL_JSON="$(
   docker compose \
@@ -204,9 +207,14 @@ LOCAL_JSON="$(
 )"
 
 echo "$DATA_JSON" | jq -e '
-  [.services | to_entries[] | select(.key != "metrics-exporter")]
+  [.services | to_entries[]]
   | all(.[]; .value.image | test("@sha256:[0-9a-f]{64}$"))
 ' >/dev/null || fail "every third-party Data image must be pinned by digest"
+
+echo "$INFRA_JSON" | jq -e '
+  [.services | to_entries[] | select(.key != "metrics-exporter")]
+  | all(.[]; .value.image | test("@sha256:[0-9a-f]{64}$"))
+' >/dev/null || fail "every third-party Infra image must be pinned by digest"
 
 echo "$APP_JSON" | jq -e '
   [.services.migrator.image, .services.caddy.image]
@@ -217,6 +225,7 @@ SINGLE_HOST_JSON="$(
   docker compose \
     --env-file "$ENV_FILE" \
     -f "$DATA_COMPOSE" \
+    -f "$INFRA_COMPOSE" \
     -f "$APP_COMPOSE" \
     -f "$SINGLE_HOST_COMPOSE" \
     config \
@@ -234,9 +243,12 @@ assert_services() {
 }
 
 assert_services "$DATA_JSON" \
-  postgres pgbouncer redis rabbitmq minio minio-init qdrant alertmanager \
+  postgres pgbouncer minio minio-init qdrant
+
+assert_services "$INFRA_JSON" \
+  redis rabbitmq alertmanager prometheus grafana seq otel-collector \
   postgres-exporter billing-cost-exporter livekit-cost-exporter \
-  workspace-storage-exporter redis-exporter
+  workspace-storage-exporter redis-exporter metrics-exporter
 
 assert_services "$APP_JSON" \
   migrator auth-service workspace-service translation-room-service \
@@ -292,6 +304,18 @@ echo "$DATA_JSON" | jq -e --arg private_ip "$data_private_ip" '
   | length == 0
 ' >/dev/null || fail "Data VM ports must bind only to DATA_PRIVATE_IP"
 
+infra_private_ip="$(sed -n 's/^INFRA_PRIVATE_IP=//p' "$ENV_FILE" | tail -n 1)"
+[ -n "$infra_private_ip" ] || fail "INFRA_PRIVATE_IP is missing from production env example"
+echo "$INFRA_JSON" | jq -e --arg private_ip "$infra_private_ip" '
+  [
+    .services
+    | to_entries[]
+    | (.value.ports // [])[]
+    | select(.host_ip != $private_ip)
+  ]
+  | length == 0
+' >/dev/null || fail "Infra VM ports must bind only to INFRA_PRIVATE_IP"
+
 echo "$DATA_JSON" | jq -e '
   [
     .services
@@ -301,6 +325,15 @@ echo "$DATA_JSON" | jq -e '
   ]
   | length == 0
 ' >/dev/null || fail "all persistent Data VM services must use restart: unless-stopped"
+
+echo "$INFRA_JSON" | jq -e '
+  [
+    .services
+    | to_entries[]
+    | select((.value.restart // "") != "unless-stopped")
+  ]
+  | length == 0
+' >/dev/null || fail "all persistent Infra VM services must use restart: unless-stopped"
 
 echo "$DATA_JSON" | jq -e '
   [
@@ -319,15 +352,34 @@ echo "$DATA_JSON" | jq -e '
   | length == 0
 ' >/dev/null || fail "Data VM services must use init, no-new-privileges, bounded logs, and nofile limits"
 
+echo "$INFRA_JSON" | jq -e '
+  [
+    .services
+    | to_entries[]
+    | select(
+        .value.init != true
+        or (.value.security_opt // [] | index("no-new-privileges:true") | not)
+        or .value.logging.driver != "json-file"
+        or .value.logging.options["max-size"] == null
+        or .value.logging.options["max-file"] == null
+        or .value.ulimits.nofile.soft == null
+      )
+  ]
+  | length == 0
+' >/dev/null || fail "Infra VM services must use init, no-new-privileges, bounded logs, and nofile limits"
+
 echo "$DATA_JSON" | jq -e '
   [
     .services.postgres,
-    .services.redis,
-    .services.rabbitmq,
     .services.minio
   ]
   | all(.healthcheck.start_period != null)
-' >/dev/null || fail "stateful dependency health checks must define startup grace periods"
+' >/dev/null || fail "Data dependency health checks must define startup grace periods"
+
+echo "$INFRA_JSON" | jq -e '
+  [.services.redis, .services.rabbitmq]
+  | all(.healthcheck.start_period != null)
+' >/dev/null || fail "Infra dependency health checks must define startup grace periods"
 
 grep -q 'ADMIN_CIDR must not allow the entire Internet' "$HOST_BOOTSTRAP" ||
   fail "host bootstrap must reject world-open SSH"
@@ -339,7 +391,7 @@ grep -q 'APP_PRIVATE_IP=10.20.0.10' "$SINGLE_HOST_INVENTORY" &&
   grep -q 'DATA_PRIVATE_IP=10.20.0.10' "$SINGLE_HOST_INVENTORY" ||
   fail "single-host inventory must route both roles through one private interface"
 
-echo "$DATA_JSON" | jq -e '
+echo "$INFRA_JSON" | jq -e '
   .services["metrics-exporter"]
   | (.image | contains("/ai-metrics:"))
     and (.environment.REDIS_URL == "redis://redis:6379")
@@ -349,13 +401,13 @@ echo "$DATA_JSON" | jq -e '
 grep -q "metrics-exporter:9108" "$ROOT_DIR/observability/prometheus.yml" ||
   fail "Prometheus must scrape the WarpTalk metrics exporter"
 
-echo "$DATA_JSON" | jq -e '
+echo "$INFRA_JSON" | jq -e '
   .services["postgres-exporter"].environment.DATA_SOURCE_NAME
   | contains("warptalk_monitor")
     and (contains("postgres:${POSTGRES_PASSWORD}") | not)
 ' >/dev/null || fail "PostgreSQL exporter must use the least-privilege monitor role"
 
-echo "$DATA_JSON" | jq -e '
+echo "$INFRA_JSON" | jq -e '
   [
     .services["billing-cost-exporter"],
     .services["livekit-cost-exporter"],
@@ -364,7 +416,8 @@ echo "$DATA_JSON" | jq -e '
   | all(
       (.image | startswith("burningalchemist/sql_exporter:0.24.3@sha256:"))
       and (.environment.SQLEXPORTER_TARGET_DSN | contains("warptalk_monitor"))
-      and .deploy.resources.limits.memory == "67108864"
+      and ((.deploy.resources.limits.memory | tonumber) >= 50331648)
+      and ((.deploy.resources.limits.memory | tonumber) <= 67108864)
     )
 ' >/dev/null || fail "cost exporters must use pinned SQL Exporter and the monitor role"
 
@@ -374,7 +427,7 @@ echo "$DATA_JSON" | jq -e '
 
 grep -q 'alertmanager:9093' "$ROOT_DIR/observability/prometheus.yml" ||
   fail "Prometheus must forward alerts to Alertmanager"
-for target in billing-cost-exporter:9188 livekit-cost-exporter:9189 workspace-storage-exporter:9190 minio:9000; do
+for target in billing-cost-exporter:9188 livekit-cost-exporter:9189 workspace-storage-exporter:9190 data-host:9000 data-host:6333; do
   grep -q "$target" "$ROOT_DIR/observability/prometheus.yml" ||
     fail "Prometheus is missing scrape target $target"
 done
@@ -382,6 +435,15 @@ grep -q 'WarpTalkAiWorkerMissing' "$ROOT_DIR/observability/alerts/warptalk.rules
   fail "AI worker heartbeat alert is missing"
 grep -q 'WarpTalkDeadLetterPresent' "$ROOT_DIR/observability/alerts/warptalk.rules.yml" ||
   fail "dead-letter alert is missing"
+
+echo "$APP_JSON" | jq -e '
+  [
+    .services["auth-service"].environment.Redis__ConnectionString,
+    .services["workspace-service"].environment.RabbitMQ__Host,
+    .services["auth-service"].environment.OTEL_EXPORTER_OTLP_ENDPOINT
+  ]
+  | all(contains("10.20.0.30"))
+' >/dev/null || fail "App services must route Redis, RabbitMQ, and OTLP through the Infra VM"
 
 echo "$APP_JSON" | jq -e '
   [

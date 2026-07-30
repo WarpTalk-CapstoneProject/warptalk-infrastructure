@@ -1,5 +1,5 @@
 name: warptalk-single-host
 
-# Combine with data.compose.yml and app.compose.yml. Both planes continue to use
-# DATA_PRIVATE_IP, so moving to split-host changes only the inventory values.
+# Combine with data.compose.yml, infra.compose.yml and app.compose.yml. Set all
+# three private IP variables to the same interface in the single-host inventory.
 services: {}
