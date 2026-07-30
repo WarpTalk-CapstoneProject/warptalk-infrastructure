@@ -33,6 +33,7 @@ TRANSCRIPT_RUNTIME_ROLE_MIGRATION="$ROOT_DIR/scripts/migrations/038-27-07-2026-a
 MEETING_RUNTIME_ROLE_MIGRATION="$ROOT_DIR/scripts/migrations/039-27-07-2026-add-meeting-runtime-role.sql"
 ASSISTANT_RUNTIME_ROLE_MIGRATION="$ROOT_DIR/scripts/migrations/040-27-07-2026-add-assistant-runtime-role.sql"
 WORKSPACE_OUTBOX_MIGRATION="$ROOT_DIR/scripts/migrations/042-28-07-2026-add-workspace-outbox.sql"
+CROSS_SERVICE_FK_MIGRATION="$ROOT_DIR/scripts/migrations/043-30-07-2026-drop-cross-service-workspace-foreign-keys.sql"
 WORKSPACE_SERVICE_OUTBOX_MIGRATION="$ROOT_DIR/../warptalk-backend/workspace/database/migrations/20260728142000_add_workspace_outbox.sql"
 SERVICE_DB_USER_PROVISIONER="$ROOT_DIR/scripts/provision-service-db-users.sh"
 DATABASE_BOUNDARY_CHECK="$ROOT_DIR/scripts/check-database-boundaries.sh"
@@ -65,7 +66,7 @@ for dependency in docker jq; do
   command -v "$dependency" >/dev/null 2>&1 || fail "missing dependency: $dependency"
 done
 
-for required_file in "$LOCAL_COMPOSE" "$LOCAL_ENV_FILE" "$ENV_FILE" "$DATA_COMPOSE" "$INFRA_COMPOSE" "$APP_COMPOSE" "$SINGLE_HOST_COMPOSE" "$SINGLE_HOST_INVENTORY" "$SPLIT_HOST_INVENTORY" "$HOST_BOOTSTRAP" "$IMAGE_MATRIX" "$NOTIFICATION_MESSAGES_MIGRATION" "$ADMIN_NOTIFICATIONS_MIGRATION" "$TRANSLATION_AUDIO_RENAME_MIGRATION" "$ACTIVE_SUBSCRIPTION_MIGRATION" "$OUTBOX_MIGRATION" "$DEAD_LETTER_MIGRATION" "$NOTIFICATION_INBOX_MIGRATION" "$BILLING_RUNTIME_ROLE_MIGRATION" "$WORKSPACE_RUNTIME_ROLE_MIGRATION" "$NOTIFICATION_RUNTIME_ROLE_MIGRATION" "$AUTH_RUNTIME_ROLE_MIGRATION" "$TRANSLATION_REFERENCE_MIGRATION" "$TRANSLATION_RUNTIME_ROLE_MIGRATION" "$TRANSCRIPT_RUNTIME_ROLE_MIGRATION" "$MEETING_RUNTIME_ROLE_MIGRATION" "$ASSISTANT_RUNTIME_ROLE_MIGRATION" "$SERVICE_DB_USER_PROVISIONER" "$DATABASE_BOUNDARY_CHECK" "$LOGICAL_DATABASE_EXTRACTOR" "$LOGICAL_DATABASE_CHECK" "$LOGICAL_DATABASE_BACKUP" "$SOURCE_READONLY_WINDOW" "$LOGICAL_MIGRATION_RUNNER" "$COST_RENDERER" "$BILLING_COST_TEMPLATE" "$LIVEKIT_COST_TEMPLATE" "$WORKSPACE_STORAGE_TEMPLATE" "$COST_RULES_TEMPLATE" "$COST_GOVERNANCE" "$LOCAL_PROMETHEUS_CONFIG" "$LOCAL_ALERT_RULES" "$LOCAL_ALERTMANAGER_CONFIG" "$DEPENDENCY_READINESS_DRILL"; do
+for required_file in "$LOCAL_COMPOSE" "$LOCAL_ENV_FILE" "$ENV_FILE" "$DATA_COMPOSE" "$INFRA_COMPOSE" "$APP_COMPOSE" "$SINGLE_HOST_COMPOSE" "$SINGLE_HOST_INVENTORY" "$SPLIT_HOST_INVENTORY" "$HOST_BOOTSTRAP" "$IMAGE_MATRIX" "$NOTIFICATION_MESSAGES_MIGRATION" "$ADMIN_NOTIFICATIONS_MIGRATION" "$TRANSLATION_AUDIO_RENAME_MIGRATION" "$ACTIVE_SUBSCRIPTION_MIGRATION" "$OUTBOX_MIGRATION" "$DEAD_LETTER_MIGRATION" "$NOTIFICATION_INBOX_MIGRATION" "$BILLING_RUNTIME_ROLE_MIGRATION" "$WORKSPACE_RUNTIME_ROLE_MIGRATION" "$NOTIFICATION_RUNTIME_ROLE_MIGRATION" "$AUTH_RUNTIME_ROLE_MIGRATION" "$TRANSLATION_REFERENCE_MIGRATION" "$TRANSLATION_RUNTIME_ROLE_MIGRATION" "$TRANSCRIPT_RUNTIME_ROLE_MIGRATION" "$MEETING_RUNTIME_ROLE_MIGRATION" "$ASSISTANT_RUNTIME_ROLE_MIGRATION" "$WORKSPACE_OUTBOX_MIGRATION" "$CROSS_SERVICE_FK_MIGRATION" "$SERVICE_DB_USER_PROVISIONER" "$DATABASE_BOUNDARY_CHECK" "$LOGICAL_DATABASE_EXTRACTOR" "$LOGICAL_DATABASE_CHECK" "$LOGICAL_DATABASE_BACKUP" "$SOURCE_READONLY_WINDOW" "$LOGICAL_MIGRATION_RUNNER" "$COST_RENDERER" "$BILLING_COST_TEMPLATE" "$LIVEKIT_COST_TEMPLATE" "$WORKSPACE_STORAGE_TEMPLATE" "$COST_RULES_TEMPLATE" "$COST_GOVERNANCE" "$LOCAL_PROMETHEUS_CONFIG" "$LOCAL_ALERT_RULES" "$LOCAL_ALERTMANAGER_CONFIG" "$DEPENDENCY_READINESS_DRILL"; do
   [ -f "$required_file" ] || fail "missing file: $required_file"
 done
 for required_directory in "$LOCAL_GRAFANA_PROVISIONING" "$LOCAL_GRAFANA_DASHBOARDS"; do
@@ -152,6 +153,22 @@ grep -q 'WHERE is_active = true AND workspace_id IS NOT NULL' "$ACTIVE_SUBSCRIPT
   fail "active subscription uniqueness must use the live is_active model"
 grep -q 'workspace.outbox_messages' "$WORKSPACE_OUTBOX_MIGRATION" ||
   fail "Workspace outbox migration is missing"
+for legacy_constraint in \
+  workspace_invitations_invited_by_fkey \
+  workspace_invitations_role_id_fkey \
+  workspace_members_removed_by_fkey \
+  workspace_members_role_id_fkey \
+  workspace_members_user_id_fkey \
+  workspace_verified_domains_created_by_fkey \
+  workspace_verified_domains_updated_by_fkey \
+  workspace_verified_domains_verified_by_fkey \
+  workspaces_created_by_fkey \
+  workspaces_deleted_by_fkey \
+  workspaces_owner_id_fkey \
+  workspaces_updated_by_fkey; do
+  grep -q "DROP CONSTRAINT IF EXISTS $legacy_constraint" "$CROSS_SERVICE_FK_MIGRATION" ||
+    fail "cross-service FK migration is missing $legacy_constraint"
+done
 grep -q 'workspace.outbox_messages' "$WORKSPACE_SERVICE_OUTBOX_MIGRATION" ||
   fail "Workspace logical-database outbox migration is missing"
 grep -q 'FOR UPDATE SKIP LOCKED' \
@@ -199,6 +216,8 @@ grep -q 'extract-logical-databases.sh' "$APP_COMPOSE" ||
   fail "production migrator must create or verify logical databases"
 grep -q 'run-logical-database-migrations.sh' "$APP_COMPOSE" ||
   fail "production migrator must run service-owned logical database migrations"
+grep -q 'check-database-boundaries.sh' "$APP_COMPOSE" ||
+  fail "production migrator must verify service boundaries before extraction"
 if grep -R -n --include='*.cs' --exclude-dir=Migrations \
   'workspace\.workspaces' "$BACKEND_DIR/billing/src" >/dev/null; then
   fail "billing-service source must not query workspace.workspaces directly"

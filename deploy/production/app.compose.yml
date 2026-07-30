@@ -98,10 +98,12 @@ services:
       - >-
         tr -d '\r' < /scripts/run-migrations.sh > /tmp/run-migrations.sh &&
         tr -d '\r' < /scripts/provision-service-db-users.sh > /tmp/provision-service-db-users.sh &&
+        tr -d '\r' < /scripts/check-database-boundaries.sh > /tmp/check-database-boundaries.sh &&
         tr -d '\r' < /scripts/extract-logical-databases.sh > /tmp/extract-logical-databases.sh &&
         tr -d '\r' < /scripts/run-logical-database-migrations.sh > /tmp/run-logical-database-migrations.sh &&
         sh /tmp/run-migrations.sh &&
         sh /tmp/provision-service-db-users.sh &&
+        sh /tmp/check-database-boundaries.sh &&
         sh /tmp/extract-logical-databases.sh &&
         sh /tmp/run-logical-database-migrations.sh &&
         exec sh /scripts/enable-postgres-performance-observability.sh
