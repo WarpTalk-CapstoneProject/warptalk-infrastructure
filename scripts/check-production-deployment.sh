@@ -537,6 +537,12 @@ echo "$APP_JSON" | jq -e '
 ' >/dev/null || fail "auth-service must use its least-privilege database login"
 
 echo "$APP_JSON" | jq -e '
+  .services["auth-service"].environment
+  | has("Authentication__Google__ClientId")
+    and (.["Authentication__Google__ClientId"] | length > 0)
+' >/dev/null || fail "auth-service must receive the Google OAuth client ID"
+
+echo "$APP_JSON" | jq -e '
   .services["workspace-service"].environment
   | (.["ConnectionStrings__WorkspaceDb"] | contains("Database=warptalk_workspace"))
     and (.["ConnectionStrings__WorkspaceDb"] | contains("Search Path=workspace,public"))

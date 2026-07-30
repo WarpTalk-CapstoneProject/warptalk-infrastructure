@@ -116,6 +116,7 @@ services:
       <<: *dotnet-environment
       HEALTH_PORT: "5101"
       AppBaseUrl: https://${APP_DOMAIN:?}
+      Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID:?}
       Resend__ApiKey: ${RESEND_API_KEY:?}
       Resend__FromEmail: ${RESEND_FROM_EMAIL:?}
       Resend__FromName: ${RESEND_FROM_NAME:-WarpTalk}
