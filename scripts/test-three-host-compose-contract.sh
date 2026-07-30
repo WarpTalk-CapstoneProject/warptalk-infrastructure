@@ -26,6 +26,12 @@ printf '%s\n' "$data_json" | jq -e '
   and ([.services | keys[] | select(. == "redis" or . == "rabbitmq" or . == "prometheus")] | length == 0)
 ' >/dev/null || fail "Data host service boundary is invalid"
 
+printf '%s\n' "$data_json" | jq -e '
+  .services["minio-init"].read_only == true and
+  .services["minio-init"].environment.MC_CONFIG_DIR == "/tmp/.mc" and
+  any(.services["minio-init"].tmpfs[]; startswith("/tmp:"))
+' >/dev/null || fail "MinIO init must keep its writable config under tmpfs"
+
 printf '%s\n' "$infra_json" | jq -e '
   (.services | has("redis") and has("rabbitmq") and has("otel-collector") and has("prometheus"))
   and ([.services | to_entries[] | (.value.ports // [])[] | select(.host_ip != "10.20.0.30")] | length == 0)
