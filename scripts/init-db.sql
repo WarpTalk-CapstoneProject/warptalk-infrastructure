@@ -1,4 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 
 
@@ -2211,7 +2212,7 @@ ALTER TABLE workspace.workspace_verified_domains ADD FOREIGN KEY (updated_by) RE
 
 ALTER TABLE auth.refresh_tokens ADD FOREIGN KEY (user_id) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE auth.users ADD FOREIGN KEY (id) REFERENCES auth.user_settings (user_id) DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE auth.user_settings ADD CONSTRAINT user_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE auth.user_settings ADD FOREIGN KEY (updated_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 

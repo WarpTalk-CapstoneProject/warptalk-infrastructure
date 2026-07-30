@@ -1,6 +1,7 @@
 -- Migration: 005-09-05-2026-add-admin-notifications-table
 -- Description: Create the admin_notifications table for Admin Notification Management (WT-58)
 
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 CREATE SCHEMA IF NOT EXISTS notification;
 
 CREATE TABLE notification.admin_notifications (
