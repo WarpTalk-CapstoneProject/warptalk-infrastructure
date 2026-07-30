@@ -111,7 +111,7 @@ jq -c '.images[]' "$MATRIX_FILE" | while IFS= read -r image_entry; do
     set -- "$@" --load
   fi
 
-  echo "release build: building $image_ref for $platform"
+  echo "release build: building $image_ref for $platform" >&2
   "$@" "$context_dir"
 
   if [ "$PUSH_IMAGES" = "true" ]; then
