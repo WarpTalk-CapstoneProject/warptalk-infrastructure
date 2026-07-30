@@ -789,6 +789,10 @@ services:
     command: --dev --bind 0.0.0.0
     environment:
       - "LIVEKIT_KEYS=${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
     networks:
       - warptalk-net
 
