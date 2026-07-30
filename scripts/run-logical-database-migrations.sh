@@ -60,6 +60,15 @@ BEGIN
 END
 $$;
 
+SELECT format(
+    'CREATE ROLE %I NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION',
+    :'runtime_role')
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_roles WHERE rolname = :'runtime_role'
+)
+\gexec
+
+CREATE SCHEMA IF NOT EXISTS :"schema_name";
 ALTER SCHEMA :"schema_name" OWNER TO warptalk_migrator;
 GRANT USAGE, CREATE ON SCHEMA :"schema_name" TO warptalk_migrator;
 
