@@ -1,5 +1,5 @@
 -- Migration: 004-01-05-2026-add-notification-message-table
--- Description: Create the notification_messages table with partitions, composite indexes and grants
+-- Description: Create the notification_messages table with partitions and composite indexes
 
 CREATE SCHEMA IF NOT EXISTS notification;
 
@@ -28,5 +28,3 @@ CREATE TABLE IF NOT EXISTS notification.notification_messages_default PARTITION 
 CREATE INDEX IF NOT EXISTS idx_notif_msgs_user_unread ON notification.notification_messages (user_id, created_at DESC) WHERE is_read = FALSE;
 CREATE INDEX IF NOT EXISTS idx_notif_msgs_created_at ON notification.notification_messages (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notif_msgs_user ON notification.notification_messages (user_id);
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON notification.notification_messages TO notif_svc;
