@@ -135,7 +135,7 @@ apply_service() {
   tmp="$(mktemp)"
   trap 'rm -f "$tmp"' EXIT INT TERM
   {
-    echo '\set ON_ERROR_STOP on'
+    printf '%s\n' '\set ON_ERROR_STOP on'
     printf "CREATE TABLE IF NOT EXISTS public.service_schema_migrations (service text NOT NULL, version text NOT NULL, checksum text, execution_ms bigint, release text, applied_by text, applied_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(service, version));\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS checksum text;\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS execution_ms bigint;\n"
@@ -151,9 +151,9 @@ apply_service() {
       escaped_applied_by="$(sql_literal "$MIGRATION_APPLIED_BY")"
       printf "SELECT EXISTS (SELECT 1 FROM public.service_schema_migrations WHERE service='%s' AND version='%s') AS applied, COALESCE((SELECT checksum FROM public.service_schema_migrations WHERE service='%s' AND version='%s'), '') AS applied_checksum \\gset\n" "$service" "$escaped" "$service" "$escaped"
       printf "SELECT 1 / (NOT (:'applied'::boolean AND :'applied_checksum' <> '%s'))::integer;\n" "$checksum"
-      echo '\if :applied'
+      printf '%s\n' '\if :applied'
       printf '%s\n' "\\echo '  Skipping $filename (already applied, checksum verified)'"
-      echo '\else'
+      printf '%s\n' '\else'
       printf '%s\n' "\\echo '  Applying $filename...'"
       echo 'SELECT clock_timestamp() AS migration_started_at \gset'
       echo 'BEGIN;'
@@ -163,7 +163,7 @@ apply_service() {
       echo 'RESET ROLE;'
       printf "INSERT INTO public.service_schema_migrations(service, version, checksum, execution_ms, release, applied_by) VALUES ('%s','%s','%s', GREATEST(0, ROUND(EXTRACT(EPOCH FROM (clock_timestamp() - :'migration_started_at'::timestamptz)) * 1000)::bigint), '%s', '%s');\n" "$service" "$escaped" "$checksum" "$escaped_release" "$escaped_applied_by"
       echo 'COMMIT;'
-      echo '\endif'
+      printf '%s\n' '\endif'
     done
     printf "SELECT pg_advisory_unlock(hashtext('warptalk-service-migrations:%s'));\n" "$service"
   } > "$tmp"
