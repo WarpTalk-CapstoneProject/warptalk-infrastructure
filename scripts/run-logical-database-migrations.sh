@@ -150,14 +150,9 @@ apply_service() {
       escaped_release="$(sql_literal "$RELEASE_ID")"
       escaped_applied_by="$(sql_literal "$MIGRATION_APPLIED_BY")"
       printf "SELECT EXISTS (SELECT 1 FROM public.service_schema_migrations WHERE service='%s' AND version='%s') AS applied, COALESCE((SELECT checksum FROM public.service_schema_migrations WHERE service='%s' AND version='%s'), '') AS applied_checksum \\gset\n" "$service" "$escaped" "$service" "$escaped"
+      printf "SELECT 1 / (NOT (:applied AND :'applied_checksum' <> '%s'))::integer;\n" "$checksum"
       echo '\if :applied'
-      printf "SELECT :'applied_checksum' = '%s' AS checksum_matches \\gset\n" "$checksum"
-      echo '\if :checksum_matches'
       printf '%s\n' "\\echo '  Skipping $filename (already applied, checksum verified)'"
-      echo '\else'
-      printf '%s\n' "\\echo 'ERROR: checksum mismatch for $filename'"
-      echo 'SELECT 1 / 0;'
-      echo '\endif'
       echo '\else'
       printf '%s\n' "\\echo '  Applying $filename...'"
       echo 'SELECT clock_timestamp() AS migration_started_at \gset'
