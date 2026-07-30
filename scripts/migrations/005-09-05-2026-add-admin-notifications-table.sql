@@ -2,8 +2,9 @@
 -- Description: Create the admin_notifications table for Admin Notification Management (WT-58)
 
 CREATE SCHEMA IF NOT EXISTS notification;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-CREATE TABLE notification.admin_notifications (
+CREATE TABLE IF NOT EXISTS notification.admin_notifications (
     id uuid NOT NULL DEFAULT (uuidv7()),
     title character varying(255) NOT NULL,
     content text NOT NULL,
@@ -20,12 +21,12 @@ CREATE TABLE notification.admin_notifications (
 );
 
 -- Basic Indexes
-CREATE INDEX idx_admin_notifications_created_at ON notification.admin_notifications (created_at DESC);
-CREATE INDEX idx_admin_notifications_created_by ON notification.admin_notifications (created_by);
-CREATE INDEX idx_admin_notifications_status ON notification.admin_notifications (status);
+CREATE INDEX IF NOT EXISTS idx_admin_notifications_created_at ON notification.admin_notifications (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_notifications_created_by ON notification.admin_notifications (created_by);
+CREATE INDEX IF NOT EXISTS idx_admin_notifications_status ON notification.admin_notifications (status);
 
 -- Query Optimization: Composite index for filtering by type/status and sorting
-CREATE INDEX idx_admin_notif_list_opt ON notification.admin_notifications (type, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_notif_list_opt ON notification.admin_notifications (type, status, created_at DESC);
 
 -- Search Support: Trigram index for fast title keyword search (ILIKE support)
-CREATE INDEX idx_admin_notif_title_trgm ON notification.admin_notifications USING gin (title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_admin_notif_title_trgm ON notification.admin_notifications USING gin (title gin_trgm_ops);
