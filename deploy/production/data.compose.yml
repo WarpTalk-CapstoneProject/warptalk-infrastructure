@@ -1,0 +1,173 @@
+name: warptalk-data
+
+x-data-service-defaults: &data-service-defaults
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 60s
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+
+services:
+  postgres:
+    <<: *data-service-defaults
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?}
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=6GB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - wal_compression=on
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - track_io_timing=on
+      - -c
+      - log_min_duration_statement=500
+    ports:
+      - "${DATA_PRIVATE_IP:?}:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ../../scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.25"
+          memory: 4G
+    networks: [data-net]
+
+  pgbouncer:
+    <<: *data-service-defaults
+    image: edoburu/pgbouncer:v1.24.1-p1@sha256:3db3d7223e93af52b4116f642951a1a5fa44702a88c2a59cf7562cac19320c9e
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 300
+      DEFAULT_POOL_SIZE: 15
+      MIN_POOL_SIZE: 2
+      RESERVE_POOL_SIZE: 5
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,search_path
+      AUTH_TYPE: scram-sha-256
+      LISTEN_PORT: 6432
+    volumes:
+      - ../../pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    ports:
+      - "${DATA_PRIVATE_IP:?}:6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.15"
+          memory: 256M
+    networks: [data-net]
+
+  minio:
+    <<: *data-service-defaults
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    ports:
+      - "${DATA_PRIVATE_IP:?}:9000:9000"
+      - "${DATA_PRIVATE_IP:?}:9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 1G
+    networks: [data-net]
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z@sha256:fb8f773eac8ef9d6da0486d5dec2f42f219358bcb8de579d1623d518c9ebd4cc
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+      MINIO_WORKSPACE_DOCUMENTS_BUCKET: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:?}
+      MINIO_MEETING_CHAT_BUCKET: ${MINIO_MEETING_CHAT_BUCKET:?}
+      MINIO_VOICE_SAMPLES_BUCKET: ${MINIO_VOICE_SAMPLES_BUCKET:?}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set data http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
+        mc mb --ignore-existing "data/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET}" &&
+        mc anonymous set none "data/$${MINIO_WORKSPACE_DOCUMENTS_BUCKET}" &&
+        mc mb --ignore-existing "data/$${MINIO_MEETING_CHAT_BUCKET}" &&
+        mc anonymous set none "data/$${MINIO_MEETING_CHAT_BUCKET}" &&
+        mc mb --ignore-existing "data/$${MINIO_VOICE_SAMPLES_BUCKET}" &&
+        mc anonymous set none "data/$${MINIO_VOICE_SAMPLES_BUCKET}"
+    networks: [data-net]
+
+  qdrant:
+    <<: *data-service-defaults
+    image: qdrant/qdrant:v1.15.3@sha256:31407c0e8e32eb771b71718f1a4772e2ad47a07557917b21ac96792f40eb8007
+    ports:
+      - "${DATA_PRIVATE_IP:?}:6333:6333"
+      - "${DATA_PRIVATE_IP:?}:6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 2G
+    networks: [data-net]
+
+volumes:
+  postgres-data:
+  minio-data:
+  qdrant-data:
+
+networks:
+  data-net:
+    driver: bridge

@@ -1,0 +1,491 @@
+global:
+  production: false
+  imageRegistry: ghcr.io/warptalk
+  imageTag: replace-with-git-sha
+  imagePullPolicy: IfNotPresent
+  domain: app.example.com
+  releaseId: local
+
+secret:
+  name: warptalk-runtime
+  externalSecret:
+    enabled: true
+    secretStoreName: warptalk-production
+    remoteKey: warptalk/production/runtime
+    postgresRemoteKey: warptalk/production/postgres-superuser
+    redisRemoteKey: warptalk/production/redis
+    qdrantRemoteKey: warptalk/production/qdrant
+
+migrator:
+  imageRef: ""
+
+config:
+  ASPNETCORE_ENVIRONMENT: Production
+  Jwt__Issuer: WarpTalk.AuthService
+  Jwt__Audience: WarpTalk
+  Observability__Enabled: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://warptalk-otel-collector:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  LOG_LEVEL: INFO
+  REDIS_MAX_CONNECTIONS: "10"
+  REDIS_STREAM_MAXLEN: "1000"
+  REDIS_SENTINEL_URLS: redis://warptalk-redis.warptalk-data.svc.cluster.local:26379
+  REDIS_SENTINEL_SERVICE_NAME: mymaster
+  RabbitMq__Host: warptalk-rabbitmq.warptalk.svc.cluster.local
+  RabbitMq__VirtualHost: /
+  VECTOR_DB_URL: http://warptalk-qdrant.warptalk-data.svc.cluster.local:6333
+  VECTOR_DB_PROVIDER: qdrant
+  EMBEDDING_PROVIDER: openai
+  EMBEDDING_MODEL: text-embedding-3-small
+  EMBEDDING_DIMENSIONS: "1536"
+  OPENAI_CHAT_TRANSLATION_MODEL: gpt-4o-mini
+  OpenAI__ChatTranslationModel: gpt-4o-mini
+  STT_MODEL: gpt-4o-mini-transcribe
+  TRANSLATION_MODEL: gpt-4.1-mini
+  TTS_MODEL: sonic-3.5
+  ASSISTANT_MODEL: gpt-4.1
+  ASSISTANT_CHAT_MODEL: gpt-4o-mini
+  TTS_CACHE_ENABLED: "true"
+  TTS_CACHE_TTL_SECONDS: "3600"
+  BILLING_DB_MIN_POOL_SIZE: "1"
+  BILLING_DB_MAX_POOL_SIZE: "5"
+  BillingRates__SttPerMinute: "15"
+  BillingRates__TranslationPerMinute: "15"
+  BillingRates__StandardTtsPerMinute: "15"
+  BillingRates__VoiceClonePerMinute: "40"
+  BillingRates__AiSummaryPerRequest: "5"
+  BillingRates__AiChatPerRequest: "2"
+  RateLimits__IpPermitLimit: "300"
+  RateLimits__UserPermitLimit: "180"
+  RateLimits__WorkspacePermitLimit: "1000"
+  RateLimits__LoginPermitLimit: "5"
+  RateLimits__InboxPermitLimit: "30"
+  RateLimits__WindowSeconds: "60"
+  PGHOST: warptalk-postgres-rw.warptalk-data.svc.cluster.local
+  PGPORT: "5432"
+  PGDATABASE: postgres
+  API_GATEWAY_URL: http://gateway:5200
+  ASSISTANT_CHAT_WORKSPACE_SERVICE_URL: http://workspace-service:5106
+  ASSISTANT_CHAT_TRANSCRIPT_SERVICE_URL: http://transcript-service:5103
+  ASSISTANT_CHAT_TRANSLATION_ROOM_SERVICE_URL: http://translation-room-service:5102
+  GrpcSettings__AuthServiceUrl: http://auth-service:50051
+  GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
+  GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
+  GrpcSettings__TranscriptServiceUrl: http://transcript-service:50053
+  GrpcSettings__NotificationServiceUrl: http://notification-service:50054
+  GrpcUrls__AuthServiceUrl: http://auth-service:50051
+  GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
+  GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
+  GrpcUrls__TranscriptServiceUrl: http://transcript-service:50053
+  GrpcUrls__NotificationServiceUrl: http://notification-service:50054
+  GrpcUrls__BillingServiceUrl: http://billing-service:50057
+  GrpcUrls__TranslationRoomService: http://translation-room-service:50052
+  GrpcUrls__BillingService: http://billing-service:50057
+  ReverseProxy__Clusters__auth-cluster__Destinations__auth-service__Address: http://auth-service:5101
+  ReverseProxy__Clusters__translation-room-cluster__Destinations__translation-room-service__Address: http://translation-room-service:5102
+  ReverseProxy__Clusters__transcript-cluster__Destinations__transcript-service__Address: http://transcript-service:5103
+  ReverseProxy__Clusters__notification-cluster__Destinations__notification-service__Address: http://notification-service:5104
+  ReverseProxy__Clusters__meeting-cluster__Destinations__meeting-service__Address: http://meeting-service:5105
+  ReverseProxy__Clusters__workspace-cluster__Destinations__workspace-service__Address: http://workspace-service:5106
+  ReverseProxy__Clusters__billing-cluster__Destinations__billing-service__Address: http://billing-service:5107
+  ReverseProxy__Clusters__assistant-cluster__Destinations__assistant-service__Address: http://assistant-service:5108
+
+workloads:
+  frontend:
+    image: frontend
+    writableCachePath: /app/.next/cache
+    replicas: 2
+    port: 3000
+    healthPath: /
+    cpu: 200m
+    memory: 256Mi
+    cpuLimit: "1"
+    memoryLimit: 1Gi
+    autoscaling: {enabled: true, min: 2, max: 6, cpu: 70}
+  gateway:
+    image: gateway
+    replicas: 2
+    port: 5200
+    healthPath: /health/ready
+    cpu: 200m
+    memory: 256Mi
+    cpuLimit: "1"
+    memoryLimit: 768Mi
+    autoscaling: {enabled: true, min: 2, max: 8, cpu: 70}
+    secretEnv:
+      Jwt__Secret: JWT_SECRET
+      Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
+      Grpc__InternalSecret: GRPC_INTERNAL_SECRET
+      Redis__ConnectionString: Redis__ConnectionString
+  auth-service:
+    image: auth-service
+    replicas: 2
+    port: 5101
+    grpcPort: 50051
+    healthPath: /health/ready
+    cpu: 150m
+    memory: 192Mi
+    cpuLimit: "1"
+    memoryLimit: 768Mi
+    autoscaling: {enabled: true, min: 2, max: 5, cpu: 70}
+    secretEnv:
+      ConnectionStrings__AuthDb: AUTH_CONNECTION_STRING
+      Jwt__Secret: JWT_SECRET
+      Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
+      Grpc__InternalSecret: GRPC_INTERNAL_SECRET
+      Redis__ConnectionString: Redis__ConnectionString
+      Resend__ApiKey: RESEND_API_KEY
+      Resend__FromEmail: RESEND_FROM_EMAIL
+      Resend__FromName: RESEND_FROM_NAME
+      Storage__Provider: STORAGE_PROVIDER
+      Storage__S3__ServiceUrl: STORAGE_S3_SERVICE_URL
+      Storage__S3__AccessKey: STORAGE_S3_ACCESS_KEY
+      Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
+      Storage__S3__BucketName: VOICE_SAMPLES_STORAGE_S3_BUCKET_NAME
+  translation-room-service:
+    image: translation-room-service
+    replicas: 2
+    port: 5102
+    grpcPort: 50052
+    healthPath: /health/ready
+    cpu: 150m
+    memory: 192Mi
+    cpuLimit: "1"
+    memoryLimit: 768Mi
+    autoscaling: {enabled: true, min: 2, max: 6, cpu: 70}
+    secretEnv:
+      ConnectionStrings__TranslationRoomDb: TRANSLATION_ROOM_CONNECTION_STRING
+      Jwt__Secret: JWT_SECRET
+      Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
+      Grpc__InternalSecret: GRPC_INTERNAL_SECRET
+      Redis__ConnectionString: Redis__ConnectionString
+      LiveKit__Egress__S3__AccessKey: LIVEKIT_EGRESS_S3_ACCESS_KEY
+      LiveKit__Egress__S3__Secret: LIVEKIT_EGRESS_S3_SECRET
+      LiveKit__Egress__S3__Bucket: LIVEKIT_EGRESS_S3_BUCKET
+      LiveKit__Egress__S3__Region: LIVEKIT_EGRESS_S3_REGION
+      LiveKit__Egress__S3__Endpoint: LIVEKIT_EGRESS_S3_ENDPOINT
+      Smtp__Host: SMTP_HOST
+      Smtp__Port: SMTP_PORT
+      Smtp__Username: SMTP_USERNAME
+      Smtp__Password: SMTP_PASSWORD
+      Smtp__FromEmail: SMTP_FROM_EMAIL
+      Smtp__FromName: SMTP_FROM_NAME
+  transcript-service:
+    image: transcript-service
+    replicas: 2
+    port: 5103
+    grpcPort: 50053
+    healthPath: /health/ready
+    cpu: 200m
+    memory: 256Mi
+    cpuLimit: "1"
+    memoryLimit: 1Gi
+    autoscaling: {enabled: true, min: 2, max: 8, cpu: 70}
+    secretEnv:
+      ConnectionStrings__TranscriptDb: TRANSCRIPT_CONNECTION_STRING
+      Jwt__Secret: JWT_SECRET
+      Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
+      Grpc__InternalSecret: GRPC_INTERNAL_SECRET
+      Redis__ConnectionString: Redis__ConnectionString
+  notification-service:
+    image: notification-service
+    replicas: 2
+    port: 5104
+    grpcPort: 50054
+    healthPath: /health/ready
+    cpu: 100m
+    memory: 192Mi
+    cpuLimit: 750m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: true, min: 2, max: 5, cpu: 70}
+    rabbitmq: true
+    secretEnv:
+      ConnectionStrings__DefaultConnection: NOTIFICATION_CONNECTION_STRING
+      Jwt__Secret: JWT_SECRET
+      Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
+      Grpc__InternalSecret: GRPC_INTERNAL_SECRET
+      Redis__ConnectionString: Redis__ConnectionString
+      RESEND_API_KEY: RESEND_API_KEY
+  meeting-service:
+    image: meeting-service
+    replicas: 2
+    port: 5105
+    grpcPort: 50055
+    healthPath: /health/ready
+    cpu: 150m
+    memory: 192Mi
+    cpuLimit: "1"
+    memoryLimit: 768Mi
+    autoscaling: {enabled: true, min: 2, max: 6, cpu: 70}
+    secretEnv:
+      ConnectionStrings__DefaultConnection: MEETING_CONNECTION_STRING
+      Jwt__Secret: JWT_SECRET
+      Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
+      Grpc__InternalSecret: GRPC_INTERNAL_SECRET
+      Redis__ConnectionString: Redis__ConnectionString
+      LiveKit__Url: LIVEKIT_URL
+      LiveKit__ApiKey: LIVEKIT_API_KEY
+      LiveKit__ApiSecret: LIVEKIT_API_SECRET
+      LiveKit__Egress__S3__AccessKey: LIVEKIT_EGRESS_S3_ACCESS_KEY
+      LiveKit__Egress__S3__Secret: LIVEKIT_EGRESS_S3_SECRET
+      LiveKit__Egress__S3__Bucket: LIVEKIT_EGRESS_S3_BUCKET
+      LiveKit__Egress__S3__Region: LIVEKIT_EGRESS_S3_REGION
+      LiveKit__Egress__S3__Endpoint: LIVEKIT_EGRESS_S3_ENDPOINT
+      Smtp__Host: SMTP_HOST
+      Smtp__Port: SMTP_PORT
+      Smtp__Username: SMTP_USERNAME
+      Smtp__Password: SMTP_PASSWORD
+      Smtp__FromEmail: SMTP_FROM_EMAIL
+      Smtp__FromName: SMTP_FROM_NAME
+      OpenAI__ApiKey: OPENAI_API_KEY
+      Storage__Provider: STORAGE_PROVIDER
+      Storage__S3__ServiceUrl: STORAGE_S3_SERVICE_URL
+      Storage__S3__AccessKey: STORAGE_S3_ACCESS_KEY
+      Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
+      Storage__S3__BucketName: MEETING_CHAT_STORAGE_S3_BUCKET_NAME
+  workspace-service:
+    image: workspace-service
+    replicas: 2
+    port: 5106
+    grpcPort: 50056
+    healthPath: /health/ready
+    cpu: 150m
+    memory: 256Mi
+    cpuLimit: "1"
+    memoryLimit: 1Gi
+    autoscaling: {enabled: true, min: 2, max: 6, cpu: 70}
+    rabbitmq: true
+    secretEnv:
+      ConnectionStrings__WorkspaceDb: WORKSPACE_CONNECTION_STRING
+      Jwt__Secret: JWT_SECRET
+      Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
+      Grpc__InternalSecret: GRPC_INTERNAL_SECRET
+      Redis__ConnectionString: Redis__ConnectionString
+      Resend__ApiKey: RESEND_API_KEY
+      Resend__FromEmail: RESEND_FROM_EMAIL
+      Resend__FromName: RESEND_FROM_NAME
+      Storage__Provider: STORAGE_PROVIDER
+      Storage__MasterKey: WORKSPACE_STORAGE_MASTER_KEY
+      Storage__S3__ServiceUrl: STORAGE_S3_SERVICE_URL
+      Storage__S3__AccessKey: STORAGE_S3_ACCESS_KEY
+      Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
+      Storage__S3__BucketName: STORAGE_S3_BUCKET_NAME
+  billing-service:
+    image: billing-service
+    replicas: 2
+    port: 5107
+    grpcPort: 50057
+    healthPath: /health/ready
+    cpu: 150m
+    memory: 192Mi
+    cpuLimit: "1"
+    memoryLimit: 768Mi
+    autoscaling: {enabled: true, min: 2, max: 5, cpu: 70}
+    rabbitmq: true
+    secretEnv:
+      ConnectionStrings__BillingDb: BILLING_CONNECTION_STRING
+      ConnectionStrings__Redis: ConnectionStrings__Redis
+      Jwt__Secret: JWT_SECRET
+      Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
+      Grpc__InternalSecret: GRPC_INTERNAL_SECRET
+      Redis__ConnectionString: Redis__ConnectionString
+      Stripe__SecretKey: STRIPE_SECRET_KEY
+      Stripe__WebhookSecret: STRIPE_WEBHOOK_SECRET
+  assistant-service:
+    image: assistant-service
+    replicas: 2
+    port: 5108
+    healthPath: /health/ready
+    cpu: 150m
+    memory: 192Mi
+    cpuLimit: "1"
+    memoryLimit: 768Mi
+    autoscaling: {enabled: true, min: 2, max: 5, cpu: 70}
+    secretEnv:
+      ConnectionStrings__AssistantDb: ASSISTANT_CONNECTION_STRING
+      Jwt__SecretKey: JWT_SECRET
+      Grpc__InternalSecret: GRPC_INTERNAL_SECRET
+      Redis__ConnectionString: Redis__ConnectionString
+  stt-worker:
+    image: ai-stt
+    workerHealthName: stt
+    replicas: 2
+    cpu: 500m
+    memory: 512Mi
+    cpuLimit: "2"
+    memoryLimit: 2Gi
+    autoscaling: {enabled: false}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
+      STT_PROVIDER: STT_PROVIDER
+      STT_API_KEY: STT_API_KEY
+  translation-worker:
+    image: ai-translation
+    workerHealthName: translation
+    replicas: 2
+    cpu: 300m
+    memory: 384Mi
+    cpuLimit: "2"
+    memoryLimit: 1Gi
+    autoscaling: {enabled: false}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
+      TRANSLATION_PROVIDER: TRANSLATION_PROVIDER
+      TRANSLATION_API_KEY: TRANSLATION_API_KEY
+  tts-worker:
+    image: ai-tts
+    workerHealthName: tts
+    replicas: 2
+    cpu: 300m
+    memory: 384Mi
+    cpuLimit: "2"
+    memoryLimit: 1Gi
+    autoscaling: {enabled: false}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
+      TTS_PROVIDER: TTS_PROVIDER
+      TTS_API_KEY: TTS_API_KEY
+  assistant-worker:
+    image: ai-assistant
+    workerHealthName: assistant,assistant-chat
+    replicas: 2
+    cpu: 200m
+    memory: 384Mi
+    cpuLimit: "1"
+    memoryLimit: 1Gi
+    autoscaling: {enabled: true, min: 2, max: 8, cpu: 70}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
+  embedding-worker:
+    image: ai-embedding
+    workerHealthName: embedding,embedding-search
+    replicas: 2
+    cpu: 200m
+    memory: 384Mi
+    cpuLimit: "1"
+    memoryLimit: 1Gi
+    autoscaling: {enabled: true, min: 2, max: 8, cpu: 70}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
+      EMBEDDING_API_KEY: OPENAI_API_KEY
+      VECTOR_DB_API_KEY: VECTOR_DB_API_KEY
+  billing-worker:
+    image: ai-billing
+    workerHealthName: billing
+    replicas: 2
+    cpu: 100m
+    memory: 192Mi
+    cpuLimit: 500m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: false}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
+      BILLING_DB_DSN: BILLING_DB_DSN
+  livekit-ingress-worker:
+    image: ai-livekit-ingress
+    workerHealthName: livekit_ingress
+    writableCachePath: /app/.cache
+    replicas: 2
+    cpu: 500m
+    memory: 768Mi
+    cpuLimit: "2"
+    memoryLimit: 3Gi
+    autoscaling: {enabled: true, min: 2, max: 8, cpu: 70}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
+      LIVEKIT_URL: LIVEKIT_URL
+      LIVEKIT_API_KEY: LIVEKIT_API_KEY
+      LIVEKIT_API_SECRET: LIVEKIT_API_SECRET
+  security-worker:
+    image: ai-security
+    workerHealthName: security
+    replicas: 2
+    cpu: 100m
+    memory: 192Mi
+    cpuLimit: 500m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: false}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
+  metrics-exporter:
+    image: ai-metrics
+    replicas: 2
+    port: 9108
+    healthPath: /health/ready
+    cpu: 100m
+    memory: 128Mi
+    cpuLimit: 500m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: false}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+
+ingress:
+  enabled: true
+  className: traefik
+  tlsSecretName: warptalk-tls
+  certManager:
+    enabled: false
+    clusterIssuerName: warptalk-letsencrypt
+    email: ""
+    server: https://acme-v02.api.letsencrypt.org/directory
+
+networkPolicy:
+  traefikNamespace: traefik
+
+telemetry:
+  replicas: 2
+  image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib@sha256:f2f01157055a9b2aab9df7118e1f1c9abf345e99b23bc7a2bc791db374a7d0f6
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+costObservability:
+  enabled: true
+  image: burningalchemist/sql_exporter@sha256:f2de0ba8061268bd980d206101846d461117439bb61a9b666a5ffc4f77ad1afa
+  rates:
+    sttUsdPerMinute: "0"
+    translationUsdPerMinute: "0"
+    ttsUsdPerMinute: "0"
+    voiceCloneUsdPerMinute: "0"
+    livekitUsdPerRoomMinute: "0"
+  budgets:
+    sttUsd: "0"
+    translationUsd: "0"
+    ttsUsd: "0"
+    voiceCloneUsd: "0"
+    livekitUsd: "0"
+    objectStorageGb: "0"
+  resources:
+    requests: {cpu: 25m, memory: 48Mi}
+    limits: {cpu: 200m, memory: 128Mi}
+
+keda:
+  enabled: true
+  redisSentinelAddresses: warptalk-redis.warptalk-data.svc.cluster.local:26379
+  queueLagThreshold: "120"
+  activationQueueLagThreshold: "1"
+  workers:
+    stt-worker:
+      min: 2
+      max: 12
+      stream: audio:chunks
+      consumerGroup: stt-workers
+    translation-worker:
+      min: 2
+      max: 12
+      stream: stt:results
+      consumerGroup: translate-workers
+    tts-worker:
+      min: 2
+      max: 12
+      stream: translate:results
+      consumerGroup: tts-workers

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux/amd64",
+  "images": [
+    { "name": "auth-service", "service": "auth-service", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "auth/Dockerfile" },
+    { "name": "workspace-service", "service": "workspace-service", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "workspace/Dockerfile" },
+    { "name": "translation-room-service", "service": "translation-room-service", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "translation-room/Dockerfile" },
+    { "name": "transcript-service", "service": "transcript-service", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "transcript/Dockerfile" },
+    { "name": "notification-service", "service": "notification-service", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "notification/Dockerfile" },
+    { "name": "meeting-service", "service": "meeting-service", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "meeting/Dockerfile" },
+    { "name": "assistant-service", "service": "assistant-service", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "assistant/Dockerfile" },
+    { "name": "billing-service", "service": "billing-service", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "billing/Dockerfile" },
+    { "name": "gateway", "service": "gateway", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "gateway/src/WarpTalk.Gateway/Dockerfile" },
+    { "name": "migrator", "service": "migrator", "repository": "warptalk-infrastructure", "context": "warptalk-infrastructure", "dockerfile": "deploy/k3s/migrator.Dockerfile", "compose": false },
+    {
+      "name": "frontend",
+      "service": "frontend",
+      "repository": "warptalk-web",
+      "context": "warptalk-web",
+      "dockerfile": "Dockerfile",
+      "buildArgs": [
+        "NEXT_PUBLIC_API_URL",
+        "NEXT_PUBLIC_SIGNALR_URL",
+        "NEXT_PUBLIC_LIVEKIT_URL",
+        "NEXT_PUBLIC_GOOGLE_CLIENT_ID"
+      ]
+    },
+    { "name": "ai-stt", "service": "stt-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "stt" },
+    { "name": "ai-translation", "service": "translation-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "translation" },
+    { "name": "ai-tts", "service": "tts-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "tts" },
+    { "name": "ai-assistant", "service": "assistant-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "assistant" },
+    { "name": "ai-embedding", "service": "embedding-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "embedding" },
+    { "name": "ai-billing", "service": "billing-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "billing" },
+    { "name": "ai-livekit-ingress", "service": "livekit-ingress-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "livekit-ingress" },
+    { "name": "ai-security", "service": "security-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "security" },
+    { "name": "ai-metrics", "service": "metrics-exporter", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "metrics" }
+  ]
+}

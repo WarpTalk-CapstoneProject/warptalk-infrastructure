@@ -1,0 +1,29 @@
+storageClass: replicated-nvme
+
+externalSecrets:
+  secretStoreName: warptalk-production
+  postgresRemoteKey: warptalk/production/postgres-superuser
+  backupRemoteKey: warptalk/production/postgres-backup
+  redisRemoteKey: warptalk/production/redis
+  qdrantRemoteKey: warptalk/production/qdrant
+
+postgres:
+  namespace: warptalk-data
+  instances: 3
+  storageSize: 150Gi
+  pooler:
+    instances: 3
+    maxClientConnections: "1000"
+    defaultPoolSize: "20"
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+  backup:
+    destinationPath: s3://CHANGE_ME/warptalk-postgres/production
+    endpointURL: https://CHANGE_ME
+    retentionPolicy: 30d
+
+rabbitmq:
+  namespace: warptalk
+  replicas: 3
+  storageSize: 30Gi

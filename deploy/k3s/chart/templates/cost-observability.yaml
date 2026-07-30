@@ -1,0 +1,321 @@
+{{- if .Values.costObservability.enabled }}
+{{- $values := list
+  .Values.costObservability.rates.sttUsdPerMinute
+  .Values.costObservability.rates.translationUsdPerMinute
+  .Values.costObservability.rates.ttsUsdPerMinute
+  .Values.costObservability.rates.voiceCloneUsdPerMinute
+  .Values.costObservability.rates.livekitUsdPerRoomMinute
+  .Values.costObservability.budgets.sttUsd
+  .Values.costObservability.budgets.translationUsd
+  .Values.costObservability.budgets.ttsUsd
+  .Values.costObservability.budgets.voiceCloneUsd
+  .Values.costObservability.budgets.livekitUsd
+  .Values.costObservability.budgets.objectStorageGb
+}}
+{{- range $value := $values }}
+{{- if not (regexMatch "^[0-9]+([.][0-9]+)?$" (toString $value)) }}
+{{- fail "costObservability rates and budgets must be non-negative decimal strings" }}
+{{- end }}
+{{- end }}
+{{- if .Values.global.production }}
+{{- range $budget := list
+  .Values.costObservability.budgets.sttUsd
+  .Values.costObservability.budgets.translationUsd
+  .Values.costObservability.budgets.ttsUsd
+  .Values.costObservability.budgets.voiceCloneUsd
+  .Values.costObservability.budgets.livekitUsd
+  .Values.costObservability.budgets.objectStorageGb
+}}
+{{- if le (float64 $budget) 0.0 }}
+{{- fail "production costObservability budgets must be greater than zero" }}
+{{- end }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-cost-exporter
+  labels:
+    {{- include "warptalk.labels" . | nindent 4 }}
+data:
+  sql_exporter.yml: |
+    global:
+      scrape_timeout: 10s
+      scrape_timeout_offset: 500ms
+      min_interval: 1m
+      max_connections: 1
+      max_idle_connections: 1
+      max_connection_lifetime: 10m
+    target:
+      name: warptalk_billing
+      data_source_name: postgresql://invalid:invalid@postgres/warptalk_billing
+      collectors: [warptalk_ai_cost_30d]
+    collectors:
+      - collector_name: warptalk_ai_cost_30d
+        metrics:
+          - metric_name: warptalk_ai_cost_30d
+            type: gauge
+            help: "Trailing 30-day AI provider usage, estimated cost and budget"
+            key_labels: [service]
+            value_label: metric
+            values:
+              - usage_minutes
+              - estimated_cost_usd
+              - unit_cost_usd_per_minute
+              - budget_usd
+              - credits_consumed
+            query: |
+              WITH rates(service, unit_cost_usd, budget_usd) AS (
+                VALUES
+                  ('stt', {{ .Values.costObservability.rates.sttUsdPerMinute }}::numeric, {{ .Values.costObservability.budgets.sttUsd }}::numeric),
+                  ('translation', {{ .Values.costObservability.rates.translationUsdPerMinute }}::numeric, {{ .Values.costObservability.budgets.translationUsd }}::numeric),
+                  ('audio_dubbing_standard', {{ .Values.costObservability.rates.ttsUsdPerMinute }}::numeric, {{ .Values.costObservability.budgets.ttsUsd }}::numeric),
+                  ('audio_dubbing_voice_clone', {{ .Values.costObservability.rates.voiceCloneUsdPerMinute }}::numeric, {{ .Values.costObservability.budgets.voiceCloneUsd }}::numeric)
+              ),
+              usage AS (
+                SELECT lower(usage_type) AS service,
+                       sum(quantity)::double precision / 60.0 AS usage_minutes,
+                       sum(credits_consumed)::double precision AS credits_consumed
+                FROM subscription.usage_records
+                WHERE recorded_at >= now() - interval '30 days'
+                GROUP BY lower(usage_type)
+              )
+              SELECT rates.service,
+                     coalesce(usage.usage_minutes, 0)::double precision AS usage_minutes,
+                     (coalesce(usage.usage_minutes, 0) * rates.unit_cost_usd)::double precision AS estimated_cost_usd,
+                     rates.unit_cost_usd::double precision AS unit_cost_usd_per_minute,
+                     rates.budget_usd::double precision AS budget_usd,
+                     coalesce(usage.credits_consumed, 0)::double precision AS credits_consumed
+              FROM rates
+              LEFT JOIN usage USING (service);
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: livekit-cost-exporter
+  labels:
+    {{- include "warptalk.labels" . | nindent 4 }}
+data:
+  sql_exporter.yml: |
+    global:
+      scrape_timeout: 10s
+      scrape_timeout_offset: 500ms
+      min_interval: 1m
+      max_connections: 1
+      max_idle_connections: 1
+      max_connection_lifetime: 10m
+    target:
+      name: warptalk_translation_room
+      data_source_name: postgresql://invalid:invalid@postgres/warptalk_translation_room
+      collectors: [warptalk_livekit_cost_30d, warptalk_translation_storage]
+    collectors:
+      - collector_name: warptalk_livekit_cost_30d
+        metrics:
+          - metric_name: warptalk_livekit_cost_30d
+            type: gauge
+            help: "Trailing 30-day LiveKit-backed room usage, estimated cost and budget"
+            value_label: metric
+            values:
+              - room_minutes
+              - estimated_cost_usd
+              - unit_cost_usd_per_room_minute
+              - budget_usd
+            query: |
+              SELECT coalesce(sum(duration_seconds), 0)::double precision / 60.0 AS room_minutes,
+                     (coalesce(sum(duration_seconds), 0)::numeric / 60.0 * {{ .Values.costObservability.rates.livekitUsdPerRoomMinute }}::numeric)::double precision AS estimated_cost_usd,
+                     {{ .Values.costObservability.rates.livekitUsdPerRoomMinute }}::double precision AS unit_cost_usd_per_room_minute,
+                     {{ .Values.costObservability.budgets.livekitUsd }}::double precision AS budget_usd
+              FROM translation_room.translation_rooms
+              WHERE started_at >= now() - interval '30 days'
+                AND deleted_at IS NULL;
+      - collector_name: warptalk_translation_storage
+        metrics:
+          - metric_name: warptalk_object_storage_bytes
+            type: gauge
+            help: "Application-indexed object storage bytes"
+            key_labels: [source]
+            values: [bytes]
+            query: |
+              SELECT 'translation-artifacts'::text AS source,
+                     coalesce(sum(file_size_bytes), 0)::double precision AS bytes
+              FROM translation_room.translation_room_artifacts
+              WHERE deleted_at IS NULL;
+          - metric_name: warptalk_object_storage_budget_bytes
+            type: gauge
+            help: "Configured application object storage capacity budget"
+            values: [bytes]
+            query: |
+              SELECT ({{ .Values.costObservability.budgets.objectStorageGb }}::numeric * 1024 * 1024 * 1024)::double precision AS bytes;
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workspace-storage-exporter
+  labels:
+    {{- include "warptalk.labels" . | nindent 4 }}
+data:
+  sql_exporter.yml: |
+    global:
+      scrape_timeout: 10s
+      scrape_timeout_offset: 500ms
+      min_interval: 1m
+      max_connections: 1
+      max_idle_connections: 1
+      max_connection_lifetime: 10m
+    target:
+      name: warptalk_workspace
+      data_source_name: postgresql://invalid:invalid@postgres/warptalk_workspace
+      collectors: [warptalk_workspace_storage]
+    collectors:
+      - collector_name: warptalk_workspace_storage
+        metrics:
+          - metric_name: warptalk_object_storage_bytes
+            type: gauge
+            help: "Application-indexed object storage bytes"
+            key_labels: [source]
+            values: [bytes]
+            query: |
+              SELECT 'workspace-documents'::text AS source,
+                     coalesce(sum(size_bytes), 0)::double precision AS bytes
+              FROM workspace.workspace_documents
+              WHERE deleted_at IS NULL;
+{{- $dsnKeys := dict "billing-cost-exporter" "BILLING_MONITOR_DSN" "livekit-cost-exporter" "LIVEKIT_MONITOR_DSN" "workspace-storage-exporter" "WORKSPACE_MONITOR_DSN" }}
+{{- range $name, $_ := dict "billing-cost-exporter" true "livekit-cost-exporter" true "workspace-storage-exporter" true }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "warptalk.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        {{- include "warptalk.labels" $ | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson $.Values.costObservability | sha256sum }}
+    spec:
+      serviceAccountName: warptalk
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: exporter
+          image: {{ $.Values.costObservability.image | quote }}
+          args: ["-config.file=/etc/sql-exporter/sql_exporter.yml", "-web.listen-address=:9187"]
+          env:
+            - name: SQLEXPORTER_TARGET_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secret.name }}
+                  key: {{ index $dsnKeys $name }}
+          ports:
+            - {name: metrics, containerPort: 9187}
+          readinessProbe:
+            httpGet: {path: /metrics, port: metrics}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /metrics, port: metrics}
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            {{- toYaml $.Values.costObservability.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/sql-exporter, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "warptalk.labels" $ | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - {name: metrics, port: 9187, targetPort: metrics}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $name }}
+  labels:
+    release: monitoring
+    {{- include "warptalk.labels" $ | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  endpoints:
+    - {port: metrics, path: /metrics, interval: 1m}
+{{- end }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: warptalk-cost
+  labels:
+    release: monitoring
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: warptalk-cost
+      rules:
+        - alert: WarpTalkAiMonthlyBudgetNearLimit
+          expr: max by (service) (warptalk_ai_cost_30d{metric="estimated_cost_usd"}) > max by (service) (warptalk_ai_cost_30d{metric="budget_usd"}) * 0.8
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "AI provider {{ `{{ $labels.service }}` }} is above 80% of its monthly budget"
+        - alert: WarpTalkAiMonthlyBudgetExceeded
+          expr: max by (service) (warptalk_ai_cost_30d{metric="estimated_cost_usd"}) > max by (service) (warptalk_ai_cost_30d{metric="budget_usd"})
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "AI provider {{ `{{ $labels.service }}` }} exceeded its monthly budget"
+        - alert: WarpTalkLiveKitMonthlyBudgetNearLimit
+          expr: max(warptalk_livekit_cost_30d{metric="estimated_cost_usd"}) > max(warptalk_livekit_cost_30d{metric="budget_usd"}) * 0.8
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "LiveKit estimated spend is above 80% of its monthly budget"
+        - alert: WarpTalkLiveKitMonthlyBudgetExceeded
+          expr: max(warptalk_livekit_cost_30d{metric="estimated_cost_usd"}) > max(warptalk_livekit_cost_30d{metric="budget_usd"})
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "LiveKit estimated spend exceeded its monthly budget"
+        - alert: WarpTalkObjectStorageBudgetNearLimit
+          expr: sum(max by (source) (warptalk_object_storage_bytes)) > max(warptalk_object_storage_budget_bytes) * 0.8
+          for: 30m
+          labels: {severity: warning}
+          annotations:
+            summary: "Application object storage is above 80% of its configured capacity budget"
+        - alert: WarpTalkObjectStorageBudgetExceeded
+          expr: sum(max by (source) (warptalk_object_storage_bytes)) > max(warptalk_object_storage_budget_bytes)
+          for: 15m
+          labels: {severity: critical}
+          annotations:
+            summary: "Application object storage exceeded its configured capacity budget"
+{{- end }}

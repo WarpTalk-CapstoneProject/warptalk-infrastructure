@@ -11,11 +11,23 @@ cp .env.example .env
 # 2. Initialize database schemas & users
 ./scripts/init-db.sh
 
-# 3. Start full stack (development)
+# 3. Start full stack (development). The `migrator` service applies every
+#    file in scripts/migrations/*.sql — in chronological order (parsed from
+#    each filename's DD-MM-YYYY, not plain alphabetical sort: several files
+#    share the same leading number, e.g. 007-16-05-2026 and 007-03-06-2026,
+#    and alphabetical sort gets those backwards) — before any service that
+#    needs the DB is allowed to start (`depends_on: migrator: condition:
+#    service_completed_successfully`). It's idempotent (tracks applied files
+#    in public.schema_migrations), so this is safe to run on every `up`.
+#    See scripts/run-migrations.sh for the ordering logic, or run it
+#    standalone: PGHOST=localhost PGPASSWORD=*** ./scripts/run-migrations.sh
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
-# 4. Start full stack (production)
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# 4. Production uses immutable release manifests and the canonical App/Data
+#    topology. Follow deploy/production/README.md; do not reuse local Compose.
+RELEASE_MANIFEST=/releases/warptalk-<sha>.json \
+PRODUCTION_ENV_FILE=/etc/warptalk/.env.production \
+./scripts/start-all.sh --prod
 ```
 
 ## Structure
@@ -23,7 +35,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 ├── docker-compose.yml          # Base: all services
 ├── docker-compose.dev.yml      # Dev overrides (ports, debug)
-├── docker-compose.prod.yml     # Production (replicas, resource limits)
+├── deploy/production/          # Canonical immutable App/Data deployment
+├── deploy/k3s/                 # Multi-node HA/K3s upgrade path
 ├── pgbouncer/
 │   └── pgbouncer.ini           # Connection pooling config
 ├── coturn/
@@ -37,6 +50,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 │   └── qdrant-backup.sh        # Vector DB snapshot
 └── scripts/
     ├── init-db.sh              # Create schemas & DB users
+    ├── run-migrations.sh       # Applies migrations/*.sql in order (used by the migrator service)
     ├── seed-data.sh            # Insert sample/test data
     ├── start-all.sh            # Full stack startup
     └── stop-all.sh             # Graceful shutdown
@@ -50,9 +64,13 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 | PgBouncer | 6432 | Connection pooling |
 | Redis | 6379 | Cache + Streams |
 | Auth Service | 5101 | Authentication & users |
-| Meeting Service | 5102 | Meeting management |
+| Translation Room Service | 5102 | Translation-room lifecycle |
 | Transcript Service | 5103 | Transcription |
 | Notification Service | 5104 | Push/email notifications |
+| Meeting Service | 5105 | Meeting management |
+| Workspace Service | 5106 | Workspaces and documents |
+| Billing Service | 5107 | Subscription, Stripe and credits |
+| Assistant Service | 5108 | Assistant orchestration |
 | API Gateway | 5200 | YARP + SignalR hubs |
 | COTURN Primary | 3478 | TURN/STUN server |
 | COTURN Backup | 3479 | TURN/STUN failover |

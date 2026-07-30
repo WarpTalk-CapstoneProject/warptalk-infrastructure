@@ -1,0 +1,47 @@
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: warptalk-redis-sentinel
+  labels:
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: {{ .Values.secret.name }}
+      key: REDIS_PASSWORD
+    - parameter: sentinelPassword
+      name: {{ .Values.secret.name }}
+      key: REDIS_PASSWORD
+{{- range $name, $worker := .Values.keda.workers }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}-queue-lag
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "warptalk.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ $name }}
+  minReplicaCount: {{ $worker.min }}
+  maxReplicaCount: {{ $worker.max }}
+  cooldownPeriod: 300
+  pollingInterval: 15
+  fallback:
+    failureThreshold: 3
+    replicas: {{ $worker.min }}
+  triggers:
+    - type: redis-sentinel-streams
+      metadata:
+        addresses: {{ $.Values.keda.redisSentinelAddresses | quote }}
+        sentinelMaster: {{ $.Values.config.REDIS_SENTINEL_SERVICE_NAME }}
+        stream: {{ $worker.stream }}
+        consumerGroup: {{ $worker.consumerGroup }}
+        lagCount: {{ $.Values.keda.queueLagThreshold | quote }}
+        activationLagCount: {{ $.Values.keda.activationQueueLagThreshold | quote }}
+      authenticationRef:
+        name: warptalk-redis-sentinel
+{{- end }}
+{{- end }}

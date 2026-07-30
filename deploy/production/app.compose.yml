@@ -1,0 +1,600 @@
+name: warptalk-app
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+  ulimits:
+    nproc: 256
+    nofile:
+      soft: 65536
+      hard: 65536
+  stop_grace_period: 30s
+  networks: [app-net]
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+
+x-dotnet-healthcheck: &dotnet-healthcheck
+  test:
+    - CMD
+    - /bin/bash
+    - -ec
+    - >-
+      exec 3<>/dev/tcp/127.0.0.1/$${HEALTH_PORT} &&
+      printf 'GET /health/ready HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 &&
+      grep -q '200 OK' <&3
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+x-ai-healthcheck: &ai-healthcheck
+  test: ["CMD", "python", "-m", "shared.health_probe"]
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: 60s
+
+x-dotnet-environment: &dotnet-environment
+  ASPNETCORE_ENVIRONMENT: Production
+  Jwt__Secret: ${JWT_SECRET:?}
+  Jwt__PreviousSecrets: ${JWT_PREVIOUS_SECRETS:-}
+  Jwt__Issuer: ${JWT_ISSUER:?}
+  Jwt__Audience: ${JWT_AUDIENCE:?}
+  Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?}
+  Redis__ConnectionString: ${INFRA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
+  Observability__Enabled: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://${INFRA_PRIVATE_IP:?}:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+
+x-ai-environment: &ai-environment
+  REDIS_URL: redis://:${REDIS_PASSWORD:?}@${INFRA_PRIVATE_IP:?}:6379
+  OPENAI_API_KEY: ${OPENAI_API_KEY:?}
+  LOG_LEVEL: INFO
+  REDIS_MAX_CONNECTIONS: "10"
+  REDIS_STREAM_MAXLEN: "1000"
+
+services:
+  migrator:
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    pids_limit: 128
+    environment:
+      PGHOST: ${DATA_PRIVATE_IP:?}
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:?}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?}
+      PGDATABASE: ${POSTGRES_DB:?}
+      MIGRATIONS_DIR: /scripts/migrations
+      SERVICE_MIGRATIONS_ROOT: /scripts/service-migrations
+      RELEASE_ID: ${IMAGE_TAG:?}
+      MIGRATION_APPLIED_BY: production-deployment
+      SUBSCRIPTION_DB_PASSWORD: ${SUBSCRIPTION_DB_PASSWORD:?}
+      WORKSPACE_DB_PASSWORD: ${WORKSPACE_DB_PASSWORD:?}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?}
+      TRANSLATION_ROOM_DB_PASSWORD: ${TRANSLATION_ROOM_DB_PASSWORD:?}
+      TRANSCRIPT_DB_PASSWORD: ${TRANSCRIPT_DB_PASSWORD:?}
+      MEETING_DB_PASSWORD: ${MEETING_DB_PASSWORD:?}
+      ASSISTANT_DB_PASSWORD: ${ASSISTANT_DB_PASSWORD:?}
+      MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD:?}
+    volumes:
+      - ../../scripts:/scripts:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        tr -d '\r' < /scripts/run-migrations.sh > /tmp/run-migrations.sh &&
+        tr -d '\r' < /scripts/provision-service-db-users.sh > /tmp/provision-service-db-users.sh &&
+        tr -d '\r' < /scripts/extract-logical-databases.sh > /tmp/extract-logical-databases.sh &&
+        tr -d '\r' < /scripts/run-logical-database-migrations.sh > /tmp/run-logical-database-migrations.sh &&
+        sh /tmp/run-migrations.sh &&
+        sh /tmp/provision-service-db-users.sh &&
+        sh /tmp/extract-logical-databases.sh &&
+        sh /tmp/run-logical-database-migrations.sh &&
+        exec sh /scripts/enable-postgres-performance-observability.sh
+    networks: [app-net]
+
+  auth-service:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/auth-service:${IMAGE_TAG:?}
+    environment:
+      <<: *dotnet-environment
+      HEALTH_PORT: "5101"
+      AppBaseUrl: https://${APP_DOMAIN:?}
+      Resend__ApiKey: ${RESEND_API_KEY:?}
+      Resend__FromEmail: ${RESEND_FROM_EMAIL:?}
+      Resend__FromName: ${RESEND_FROM_NAME:-WarpTalk}
+      ConnectionStrings__AuthDb: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_auth;Username=warptalk_auth;Password=${AUTH_DB_PASSWORD:?};Search Path=auth,public;GSS Encryption Mode=Disable
+      Storage__Provider: MinIO
+      Storage__S3__ServiceUrl: http://${DATA_PRIVATE_IP:?}:9000
+      Storage__S3__AccessKey: ${MINIO_ROOT_USER:?}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:?}
+      Storage__S3__BucketName: ${MINIO_VOICE_SAMPLES_BUCKET:?}
+      Storage__S3__EnsureBucketExists: "false"
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    healthcheck: *dotnet-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  workspace-service:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/workspace-service:${IMAGE_TAG:?}
+    environment:
+      <<: *dotnet-environment
+      HEALTH_PORT: "5106"
+      AppBaseUrl: https://${APP_DOMAIN:?}
+      ConnectionStrings__WorkspaceDb: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_workspace;Username=warptalk_workspace;Password=${WORKSPACE_DB_PASSWORD:?};Search Path=workspace,public;GSS Encryption Mode=Disable
+      GrpcSettings__AuthServiceUrl: http://auth-service:50051
+      GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
+      RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
+      RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
+      RabbitMQ__Username: ${RABBITMQ_USERNAME:?}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD:?}
+      Resend__ApiKey: ${RESEND_API_KEY:?}
+      Resend__FromEmail: ${RESEND_FROM_EMAIL:?}
+      Resend__FromName: ${RESEND_FROM_NAME:-WarpTalk}
+      Storage__Provider: MinIO
+      Storage__MasterKey: ${WORKSPACE_STORAGE_MASTER_KEY:?}
+      Storage__S3__ServiceUrl: http://${DATA_PRIVATE_IP:?}:9000
+      Storage__S3__AccessKey: ${MINIO_ROOT_USER:?}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:?}
+      Storage__S3__BucketName: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:?}
+      Storage__S3__EnsureBucketExists: "false"
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+    healthcheck: *dotnet-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 640M
+
+  translation-room-service:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/translation-room-service:${IMAGE_TAG:?}
+    environment:
+      <<: *dotnet-environment
+      HEALTH_PORT: "5102"
+      App__FrontendBaseUrl: https://${APP_DOMAIN:?}
+      ConnectionStrings__TranslationRoomDb: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_translation_room;Username=warptalk_translation_room;Password=${TRANSLATION_ROOM_DB_PASSWORD:?};Search Path=translation_room,public;GSS Encryption Mode=Disable
+      GrpcSettings__AuthServiceUrl: http://auth-service:50051
+      LiveKit__Egress__S3__AccessKey: ${LIVEKIT_EGRESS_S3_ACCESS_KEY:?}
+      LiveKit__Egress__S3__Secret: ${LIVEKIT_EGRESS_S3_SECRET:?}
+      LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:?}
+      LiveKit__Egress__S3__Region: ${LIVEKIT_EGRESS_S3_REGION:?}
+      LiveKit__Egress__S3__Endpoint: ${LIVEKIT_EGRESS_S3_ENDPOINT:?}
+      Smtp__Host: ${SMTP_HOST:?}
+      Smtp__Port: ${SMTP_PORT:-587}
+      Smtp__Username: ${SMTP_USERNAME:?}
+      Smtp__Password: ${SMTP_PASSWORD:?}
+      Smtp__FromEmail: ${SMTP_FROM_EMAIL:?}
+      Smtp__FromName: ${SMTP_FROM_NAME:-WarpTalk}
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+    healthcheck: *dotnet-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 640M
+
+  transcript-service:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/transcript-service:${IMAGE_TAG:?}
+    environment:
+      <<: *dotnet-environment
+      HEALTH_PORT: "5103"
+      ConnectionStrings__TranscriptDb: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_transcript;Username=warptalk_transcript;Password=${TRANSCRIPT_DB_PASSWORD:?};Search Path=transcript,public;GSS Encryption Mode=Disable
+      GrpcUrls__AuthServiceUrl: http://auth-service:50051
+      GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
+      GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
+      GrpcUrls__BillingServiceUrl: http://billing-service:50057
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      workspace-service:
+        condition: service_healthy
+      translation-room-service:
+        condition: service_healthy
+    healthcheck: *dotnet-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 640M
+
+  notification-service:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/notification-service:${IMAGE_TAG:?}
+    environment:
+      <<: *dotnet-environment
+      HEALTH_PORT: "5104"
+      ConnectionStrings__DefaultConnection: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_notification;Username=warptalk_notification;Password=${NOTIFICATION_DB_PASSWORD:?};Search Path=notification,public;GSS Encryption Mode=Disable
+      RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
+      RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
+      RabbitMQ__Username: ${RABBITMQ_USERNAME:?}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD:?}
+      RESEND_API_KEY: ${RESEND_API_KEY:?}
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    healthcheck: *dotnet-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.40"
+          memory: 384M
+
+  meeting-service:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/meeting-service:${IMAGE_TAG:?}
+    environment:
+      <<: *dotnet-environment
+      HEALTH_PORT: "5105"
+      ConnectionStrings__DefaultConnection: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_meeting;Username=warptalk_meeting;Password=${MEETING_DB_PASSWORD:?};Search Path=meeting,public;GSS Encryption Mode=Disable
+      GrpcUrls__TranslationRoomService: http://translation-room-service:50052
+      GrpcUrls__BillingService: http://billing-service:50057
+      LiveKit__Url: ${LIVEKIT_URL:?}
+      LiveKit__ApiKey: ${LIVEKIT_API_KEY:?}
+      LiveKit__ApiSecret: ${LIVEKIT_API_SECRET:?}
+      LiveKit__Egress__S3__AccessKey: ${LIVEKIT_EGRESS_S3_ACCESS_KEY:?}
+      LiveKit__Egress__S3__Secret: ${LIVEKIT_EGRESS_S3_SECRET:?}
+      LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:?}
+      LiveKit__Egress__S3__Region: ${LIVEKIT_EGRESS_S3_REGION:?}
+      LiveKit__Egress__S3__Endpoint: ${LIVEKIT_EGRESS_S3_ENDPOINT:?}
+      Smtp__Host: ${SMTP_HOST:?}
+      Smtp__Port: ${SMTP_PORT:-587}
+      Smtp__Username: ${SMTP_USERNAME:?}
+      Smtp__Password: ${SMTP_PASSWORD:?}
+      Smtp__FromEmail: ${SMTP_FROM_EMAIL:?}
+      Smtp__FromName: ${SMTP_FROM_NAME:-WarpTalk}
+      OpenAI__ApiKey: ${OPENAI_API_KEY:?}
+      OpenAI__ChatTranslationModel: ${OPENAI_CHAT_TRANSLATION_MODEL:-gpt-4o-mini}
+      Storage__Provider: MinIO
+      Storage__S3__ServiceUrl: http://${DATA_PRIVATE_IP:?}:9000
+      Storage__S3__AccessKey: ${MINIO_ROOT_USER:?}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:?}
+      Storage__S3__BucketName: ${MINIO_MEETING_CHAT_BUCKET:?}
+      Storage__S3__EnsureBucketExists: "false"
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      translation-room-service:
+        condition: service_healthy
+      billing-service:
+        condition: service_healthy
+    healthcheck: *dotnet-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 768M
+
+  assistant-service:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/assistant-service:${IMAGE_TAG:?}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      HEALTH_PORT: "5108"
+      ConnectionStrings__AssistantDb: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_assistant;Username=warptalk_assistant;Password=${ASSISTANT_DB_PASSWORD:?};Search Path=assistant,public;GSS Encryption Mode=Disable
+      Jwt__SecretKey: ${JWT_SECRET:?}
+      Jwt__Issuer: ${JWT_ISSUER:?}
+      Jwt__Audience: ${JWT_AUDIENCE:?}
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?}
+      Redis__ConnectionString: ${INFRA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    healthcheck: *dotnet-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 640M
+
+  billing-service:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/billing-service:${IMAGE_TAG:?}
+    environment:
+      <<: *dotnet-environment
+      HEALTH_PORT: "5107"
+      ConnectionStrings__BillingDb: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_billing;Username=warptalk_billing;Password=${SUBSCRIPTION_DB_PASSWORD:?};Search Path=subscription,public;GSS Encryption Mode=Disable
+      ConnectionStrings__Redis: ${INFRA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
+      RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
+      RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
+      RabbitMQ__Username: ${RABBITMQ_USERNAME:?}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD:?}
+      GrpcUrls__AuthServiceUrl: http://auth-service:50051
+      GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:?}
+      Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:?}
+      Stripe__SuccessUrl: https://${APP_DOMAIN:?}/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}
+      Stripe__CancelUrl: https://${APP_DOMAIN:?}/workspace/payment/plans
+      BillingRates__SttPerMinute: ${BILLING_RATE_STT_PER_MINUTE:-15}
+      BillingRates__TranslationPerMinute: ${BILLING_RATE_TRANSLATION_PER_MINUTE:-15}
+      BillingRates__StandardTtsPerMinute: ${BILLING_RATE_STANDARD_TTS_PER_MINUTE:-15}
+      BillingRates__VoiceClonePerMinute: ${BILLING_RATE_VOICE_CLONE_PER_MINUTE:-40}
+      BillingRates__AiSummaryPerRequest: ${BILLING_RATE_AI_SUMMARY_PER_REQUEST:-5}
+      BillingRates__AiChatPerRequest: ${BILLING_RATE_AI_CHAT_PER_REQUEST:-2}
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      workspace-service:
+        condition: service_healthy
+    healthcheck: *dotnet-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 640M
+
+  gateway:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/gateway:${IMAGE_TAG:?}
+    environment:
+      <<: *dotnet-environment
+      HEALTH_PORT: "5200"
+      ASPNETCORE_URLS: http://0.0.0.0:5200
+      ReverseProxy__Clusters__auth-cluster__Destinations__auth-service__Address: http://auth-service:5101
+      ReverseProxy__Clusters__translation-room-cluster__Destinations__translation-room-service__Address: http://translation-room-service:5102
+      ReverseProxy__Clusters__transcript-cluster__Destinations__transcript-service__Address: http://transcript-service:5103
+      ReverseProxy__Clusters__notification-cluster__Destinations__notification-service__Address: http://notification-service:5104
+      ReverseProxy__Clusters__meeting-cluster__Destinations__meeting-service__Address: http://meeting-service:5105
+      ReverseProxy__Clusters__workspace-cluster__Destinations__workspace-service__Address: http://workspace-service:5106
+      ReverseProxy__Clusters__billing-cluster__Destinations__billing-service__Address: http://billing-service:5107
+      ReverseProxy__Clusters__assistant-cluster__Destinations__assistant-service__Address: http://assistant-service:5108
+      GrpcUrls__NotificationServiceUrl: http://notification-service:50054
+      GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
+      GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
+      AllowedOrigins__0: ${ALLOWED_ORIGINS:?}
+      RateLimits__IpPermitLimit: ${RATE_LIMIT_IP_PER_WINDOW:-300}
+      RateLimits__UserPermitLimit: ${RATE_LIMIT_USER_PER_WINDOW:-180}
+      RateLimits__WorkspacePermitLimit: ${RATE_LIMIT_WORKSPACE_PER_WINDOW:-1000}
+      RateLimits__LoginPermitLimit: ${RATE_LIMIT_LOGIN_PER_WINDOW:-5}
+      RateLimits__InboxPermitLimit: ${RATE_LIMIT_INBOX_PER_WINDOW:-30}
+      RateLimits__WindowSeconds: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      workspace-service:
+        condition: service_healthy
+      translation-room-service:
+        condition: service_healthy
+      transcript-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      meeting-service:
+        condition: service_healthy
+      billing-service:
+        condition: service_healthy
+      assistant-service:
+        condition: service_healthy
+    healthcheck: *dotnet-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+
+  frontend:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/frontend:${IMAGE_TAG:?}
+    environment:
+      API_GATEWAY_URL: http://gateway:5200
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  stt-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-stt:${IMAGE_TAG:?}
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: stt
+      STT_PROVIDER: ${STT_PROVIDER:?}
+      STT_API_KEY: ${STT_API_KEY:?}
+      STT_MODEL: gpt-4o-mini-transcribe
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 2G
+
+  translation-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-translation:${IMAGE_TAG:?}
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: translation
+      TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:?}
+      TRANSLATION_API_KEY: ${TRANSLATION_API_KEY:?}
+      TRANSLATION_MODEL: gpt-4.1-mini
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 768M
+
+  tts-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-tts:${IMAGE_TAG:?}
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: tts
+      TTS_PROVIDER: ${TTS_PROVIDER:?}
+      TTS_API_KEY: ${TTS_API_KEY:?}
+      TTS_MODEL: sonic-3.5
+      TTS_CACHE_ENABLED: "true"
+      TTS_CACHE_TTL_SECONDS: "3600"
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1536M
+
+  assistant-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-assistant:${IMAGE_TAG:?}
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: assistant,assistant-chat
+      ASSISTANT_MODEL: gpt-4.1
+      ASSISTANT_CHAT_MODEL: gpt-4o-mini
+      ASSISTANT_CHAT_WORKSPACE_SERVICE_URL: http://workspace-service:5106
+      ASSISTANT_CHAT_TRANSCRIPT_SERVICE_URL: http://transcript-service:5103
+      ASSISTANT_CHAT_TRANSLATION_ROOM_SERVICE_URL: http://translation-room-service:5102
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.60"
+          memory: 768M
+
+  embedding-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-embedding:${IMAGE_TAG:?}
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: embedding,embedding-search
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_API_KEY: ${OPENAI_API_KEY:?}
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_DIMENSIONS: "1536"
+      VECTOR_DB_PROVIDER: qdrant
+      VECTOR_DB_URL: http://${DATA_PRIVATE_IP:?}:6333
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.60"
+          memory: 1G
+
+  billing-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-billing:${IMAGE_TAG:?}
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: billing
+      BILLING_DB_DSN: postgresql://warptalk_billing:${SUBSCRIPTION_DB_PASSWORD:?}@${DATA_PRIVATE_IP:?}:6432/warptalk_billing
+      BILLING_DB_MIN_POOL_SIZE: "1"
+      BILLING_DB_MAX_POOL_SIZE: "5"
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.40"
+          memory: 384M
+
+  livekit-ingress-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-livekit-ingress:${IMAGE_TAG:?}
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: livekit_ingress
+      LIVEKIT_URL: ${LIVEKIT_URL:?}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /app/.cache:rw,nosuid,size=512m
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 640M
+
+  security-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-security:${IMAGE_TAG:?}
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: security
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.40"
+          memory: 384M
+
+  caddy:
+    <<: *service-defaults
+    image: caddy:2.10.0-alpine@sha256:ae4458638da8e1a91aafffb231c5f8778e964bca650c8a8cb23a7e8ac557aa3c
+    cap_add: [NET_BIND_SERVICE]
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?}
+      API_DOMAIN: ${API_DOMAIN:?}
+      ACME_EMAIL: ${ACME_EMAIL:?}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 192M
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+networks:
+  app-net:
+    driver: bridge

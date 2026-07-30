@@ -8,7 +8,7 @@
 #   ./init-db.sh                 # uses default localhost:5432
 #   ./init-db.sh --docker        # runs against warptalk-postgres container
 # ====================================================================
-set -euo pipefail
+set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_DIR="$(dirname "$SCRIPT_DIR")"

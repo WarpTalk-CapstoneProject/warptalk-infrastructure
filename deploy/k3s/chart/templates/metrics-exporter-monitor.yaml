@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: metrics-exporter
+  labels:
+    release: monitoring
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: metrics-exporter
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

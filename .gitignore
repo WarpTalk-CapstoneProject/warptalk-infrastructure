@@ -1,26 +1,28 @@
-# Environment
 .env
+.env.*
+!.env.example
 *.local
-
-# OS
 .DS_Store
 Thumbs.db
-
-# IDE
 .idea/
 .vscode/
 *.swp
-
-# Data volumes
 data/
 pgdata/
 redis-data/
 qdrant-data/
-
-# Logs
 logs/
 *.log
-
-# Backup outputs
 backups/
 .terraform/
+*.tfstate
+*.tfstate.*
+.artifacts/
+performance/results/*.json
+observability/billing-cost-queries.yml
+observability/livekit-cost-queries.yml
+observability/workspace-storage-queries.yml
+observability/alerts/warptalk.cost.rules.yml
+deploy/production/.env.production
+deploy/production/release-manifest.json
+terraform/.local-state/

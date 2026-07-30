@@ -1,0 +1,148 @@
+{{- range $name, $app := .Values.workloads }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "warptalk.labels" $ | nindent 4 }}
+spec:
+  replicas: {{ $app.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        {{- include "warptalk.labels" $ | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+    spec:
+      serviceAccountName: warptalk
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $name }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: {{ $name }}
+      containers:
+        - name: {{ $name }}
+          {{- if $.Values.global.production }}
+          {{- $imageRef := required (printf "workloads.%s.imageRef is required in production" $name) $app.imageRef }}
+          {{- if not (regexMatch "^.+@sha256:[a-f0-9]{64}$" $imageRef) }}
+          {{- fail (printf "workloads.%s.imageRef must be an immutable @sha256 reference" $name) }}
+          {{- end }}
+          image: {{ $imageRef | quote }}
+          {{- else }}
+          image: "{{ $.Values.global.imageRegistry }}/{{ $app.image }}:{{ $.Values.global.imageTag }}"
+          {{- end }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - configMapRef:
+                name: warptalk-runtime
+          env:
+          {{- range $envName, $secretKey := $app.secretEnv }}
+            - name: {{ $envName }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secret.name }}
+                  key: {{ $secretKey }}
+          {{- end }}
+          {{- if $app.rabbitmq }}
+            - name: RabbitMq__Username
+              valueFrom:
+                secretKeyRef:
+                  name: warptalk-rabbitmq-default-user
+                  key: username
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef:
+                  name: warptalk-rabbitmq-default-user
+                  key: password
+          {{- end }}
+          {{- with $app.workerHealthName }}
+            - name: WORKER_HEALTH_NAME
+              value: {{ . | quote }}
+          {{- end }}
+          {{- with $app.workerHealthName }}
+          startupProbe:
+            exec:
+              command: ["python", "-m", "shared.health_probe"]
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            exec:
+              command: ["python", "-m", "shared.health_probe"]
+            periodSeconds: 20
+            failureThreshold: 3
+          {{- end }}
+          {{- with $app.port }}
+          ports:
+            - name: http
+              containerPort: {{ . }}
+            {{- with $app.grpcPort }}
+            - name: grpc
+              containerPort: {{ . }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ $app.healthPath }}
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: {{ $app.healthPath }}
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          {{- end }}
+          resources:
+            requests:
+              cpu: {{ $app.cpu }}
+              memory: {{ $app.memory }}
+            limits:
+              cpu: {{ $app.cpuLimit }}
+              memory: {{ $app.memoryLimit }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- with $app.writableCachePath }}
+            - name: application-cache
+              mountPath: {{ . }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- with $app.writableCachePath }}
+        - name: application-cache
+          emptyDir: {}
+        {{- end }}
+{{- end }}

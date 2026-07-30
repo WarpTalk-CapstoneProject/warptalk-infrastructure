@@ -1,0 +1,21 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: warptalk
+  labels:
+    release: monitoring
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+{{ .Files.Get "files/warptalk.rules.yml" | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: warptalk-grafana-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    {{- include "warptalk.labels" . | nindent 4 }}
+data:
+  warptalk-overview.json: |
+{{ .Files.Get "files/warptalk-overview.json" | nindent 4 }}

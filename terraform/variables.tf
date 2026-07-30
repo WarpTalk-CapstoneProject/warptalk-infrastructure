@@ -4,8 +4,8 @@ variable "aws_region" {
 }
 
 variable "instance_type" {
-  description = "The EC2 instance type (g4dn.xlarge for T4 GPU)"
-  default     = "g4dn.xlarge"
+  description = "The EC2 instance type"
+  default     = "t3.2xlarge"
 }
 
 variable "key_name" {

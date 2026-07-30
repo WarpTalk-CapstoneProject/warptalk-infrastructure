@@ -9,6 +9,7 @@ DO $$
 DECLARE
     v_user_id uuid := '019ea677-6c84-7d7b-9f48-738b3cde41a9';
     v_system_user_role_id uuid;
+    v_system_admin_role_id uuid;
 BEGIN
     -- 1. Seed system and workspace roles in auth.roles if they don't exist
     INSERT INTO auth.roles (id, name, description, is_system, is_active, created_at)
@@ -23,35 +24,11 @@ BEGIN
 
     -- Retrieve system 'user' role ID
     SELECT id INTO v_system_user_role_id FROM auth.roles WHERE name = 'user';
+    SELECT id INTO v_system_admin_role_id FROM auth.roles WHERE name = 'admin';
 
-    -- 2. Seed User Settings first to satisfy the FK constraint in auth.users
-    -- Demo User
-    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
-    VALUES (gen_random_uuid(), v_user_id, 'vi-VN', 'en-US', NOW())
-    ON CONFLICT (user_id) DO NOTHING;
-
-    -- Alice Smith settings (Admin)
-    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
-    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ab', 'en-US', 'vi-VN', NOW())
-    ON CONFLICT (user_id) DO NOTHING;
-
-    -- Bob Johnson settings (Member)
-    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
-    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ac', 'vi-VN', 'en-US', NOW())
-    ON CONFLICT (user_id) DO NOTHING;
-
-    -- Charlie Brown settings (Member, FPT)
-    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
-    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ad', 'en-US', 'vi-VN', NOW())
-    ON CONFLICT (user_id) DO NOTHING;
-
-    -- Diana Prince settings (Member, FPT)
-    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
-    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ae', 'vi-VN', 'en-US', NOW())
-    ON CONFLICT (user_id) DO NOTHING;
-
-
-    -- 3. Seed Users in auth.users
+    -- 2. Seed Users in auth.users first — migration 018 made user_settings the
+    -- dependent side of the FK (user_settings.user_id -> users.id), so users
+    -- must exist before their settings row can reference them.
     -- Demo User
     INSERT INTO auth.users (id, email, password_hash, full_name, preferred_language, timezone, is_active, email_verified, email_verified_at, created_at)
     VALUES (
@@ -133,10 +110,46 @@ BEGIN
     ON CONFLICT (email) DO NOTHING;
 
 
+    -- 3. Seed User Settings, now that all referenced users exist
+    -- Demo User
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), v_user_id, 'vi-VN', 'en-US', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
+
+    -- Alice Smith settings (Admin)
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ab', 'en-US', 'vi-VN', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
+
+    -- Bob Johnson settings (Member)
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ac', 'vi-VN', 'en-US', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
+
+    -- Charlie Brown settings (Member, FPT)
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ad', 'en-US', 'vi-VN', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
+
+    -- Diana Prince settings (Member, FPT)
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ae', 'vi-VN', 'en-US', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
+
+
     -- 4. Assign system role 'user' to all seeded users
     IF NOT EXISTS (SELECT 1 FROM auth.user_roles WHERE user_id = v_user_id AND role_id = v_system_user_role_id) THEN
         INSERT INTO auth.user_roles (id, user_id, role_id, assigned_at)
         VALUES (gen_random_uuid(), v_user_id, v_system_user_role_id, NOW());
+    END IF;
+
+    -- Grant the demo user (demo@enterprise.vn) the platform 'admin' system role too, so
+    -- ~/api/v1/admin/* endpoints (notifications, global-glossary) are reachable in the demo
+    -- environment without a separate admin-provisioning step.
+    IF v_system_admin_role_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM auth.user_roles WHERE user_id = v_user_id AND role_id = v_system_admin_role_id) THEN
+        INSERT INTO auth.user_roles (id, user_id, role_id, assigned_at)
+        VALUES (gen_random_uuid(), v_user_id, v_system_admin_role_id, NOW());
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM auth.user_roles WHERE user_id = '019ea677-6c84-7d7b-9f48-738b3cde41ab' AND role_id = v_system_user_role_id) THEN
@@ -190,8 +203,28 @@ BEGIN
 
         -- Memberships
         -- Demo User (Owner)
-        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, can_create_meetings, joined_at)
-        VALUES (gen_random_uuid(), v_workspace_id, v_user_id, v_owner_role_id, 'internal', 'active', true, NOW())
+        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, joined_at)
+        VALUES (gen_random_uuid(), v_workspace_id, v_user_id, v_owner_role_id, 'internal', 'active', NOW())
+        ON CONFLICT (workspace_id, user_id) DO NOTHING;
+
+        -- Alice Smith (Admin)
+        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, joined_at)
+        VALUES (gen_random_uuid(), v_workspace_id, '019ea677-6c84-7d7b-9f48-738b3cde41ab', v_admin_role_id, 'internal', 'active', NOW())
+        ON CONFLICT (workspace_id, user_id) DO NOTHING;
+
+        -- Bob Johnson (Member)
+        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, joined_at)
+        VALUES (gen_random_uuid(), v_workspace_id, '019ea677-6c84-7d7b-9f48-738b3cde41ac', v_member_role_id, 'internal', 'active', NOW())
+        ON CONFLICT (workspace_id, user_id) DO NOTHING;
+
+        -- Charlie Brown (Member)
+        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, joined_at)
+        VALUES (gen_random_uuid(), v_workspace_id, '019ea677-6c84-7d7b-9f48-738b3cde41ad', v_member_role_id, 'internal', 'active', NOW())
+        ON CONFLICT (workspace_id, user_id) DO NOTHING;
+
+        -- Diana Prince (Member)
+        INSERT INTO workspace.workspace_members (id, workspace_id, user_id, role_id, membership_type, status, joined_at)
+        VALUES (gen_random_uuid(), v_workspace_id, '019ea677-6c84-7d7b-9f48-738b3cde41ae', v_member_role_id, 'internal', 'active', NOW())
         ON CONFLICT (workspace_id, user_id) DO NOTHING;
 
 

@@ -1,56 +1,63 @@
 # ====================================================================
 # Prometheus Configuration for WarpTalk
-# Scrapes metrics from all .NET services
+# Scrapes OTLP-converted application metrics and core infrastructure exporters.
 # ====================================================================
 
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
 scrape_configs:
-  - job_name: 'gateway'
-    metrics_path: /metrics
+  - job_name: 'warptalk-applications'
     static_configs:
-      - targets: ['gateway:5200']
-        labels:
-          service: gateway
-
-  - job_name: 'auth-service'
-    metrics_path: /metrics
-    static_configs:
-      - targets: ['auth-service:5101']
-        labels:
-          service: auth
-
-  - job_name: 'meeting-service'
-    metrics_path: /metrics
-    static_configs:
-      - targets: ['meeting-service:5102']
-        labels:
-          service: meeting
-
-  - job_name: 'transcript-service'
-    metrics_path: /metrics
-    static_configs:
-      - targets: ['transcript-service:5103']
-        labels:
-          service: transcript
-
-  - job_name: 'notification-service'
-    metrics_path: /metrics
-    static_configs:
-      - targets: ['notification-service:5104']
-        labels:
-          service: notification
+      - targets: ['otel-collector:8889']
 
   - job_name: 'redis'
     static_configs:
-      - targets: ['redis:6379']
-        labels:
-          service: redis
+      - targets: ['redis-exporter:9121']
+
+  - job_name: 'warptalk-redis-streams'
+    static_configs:
+      - targets: ['metrics-exporter:9108']
 
   - job_name: 'postgres'
     static_configs:
-      - targets: ['postgres:5432']
-        labels:
-          service: postgres
+      - targets: ['postgres-exporter:9187']
+
+  - job_name: 'billing-cost'
+    static_configs:
+      - targets: ['billing-cost-exporter:9188']
+
+  - job_name: 'livekit-cost'
+    static_configs:
+      - targets: ['livekit-cost-exporter:9189']
+
+  - job_name: 'workspace-storage'
+    static_configs:
+      - targets: ['workspace-storage-exporter:9190']
+
+  - job_name: 'minio-buckets'
+    metrics_path: /minio/v2/metrics/bucket
+    static_configs:
+      - targets: ['data-host:9000']
+
+  - job_name: 'rabbitmq'
+    static_configs:
+      - targets: ['rabbitmq:15692']
+
+  - job_name: 'qdrant'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['data-host:6333']
+
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8888']

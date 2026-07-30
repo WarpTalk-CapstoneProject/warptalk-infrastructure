@@ -16,6 +16,11 @@ services:
     ports:
       - "6379:6379"
 
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
   auth-service:
     ports:
       - "5101:5101"
@@ -57,6 +62,23 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
 
+  billing-service:
+    ports:
+      - "5107:5107"
+      - "50057:50057"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
+  assistant-service:
+    ports:
+      - "5108:5108"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
+  frontend:
+    ports:
+      - "3000:3000"
+
   coturn-primary:
     ports:
       - "3478:3478/udp"
@@ -78,3 +100,11 @@ services:
   grafana:
     ports:
       - "3001:3000"   # 3001 to avoid conflict with NextJS on 3000
+
+  # Service defined in base compose; dev only exposes ports to the host so
+  # the browser can reach the SFU at ws://localhost:7880.
+  livekit:
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"

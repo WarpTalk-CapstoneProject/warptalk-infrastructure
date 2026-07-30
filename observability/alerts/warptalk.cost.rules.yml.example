@@ -1,0 +1,50 @@
+groups:
+  - name: warptalk-cost
+    rules:
+      - alert: WarpTalkAiMonthlyBudgetNearLimit
+        expr: max by (service) (warptalk_ai_cost_30d{metric="estimated_cost_usd"}) > max by (service) (warptalk_ai_cost_30d{metric="budget_usd"}) * 0.8
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI provider {{ $labels.service }} is above 80% of its monthly budget"
+
+      - alert: WarpTalkAiMonthlyBudgetExceeded
+        expr: max by (service) (warptalk_ai_cost_30d{metric="estimated_cost_usd"}) > max by (service) (warptalk_ai_cost_30d{metric="budget_usd"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AI provider {{ $labels.service }} exceeded its monthly budget"
+
+      - alert: WarpTalkLiveKitMonthlyBudgetNearLimit
+        expr: max(warptalk_livekit_cost_30d{metric="estimated_cost_usd"}) > max(warptalk_livekit_cost_30d{metric="budget_usd"}) * 0.8
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LiveKit estimated spend is above 80% of its monthly budget"
+
+      - alert: WarpTalkLiveKitMonthlyBudgetExceeded
+        expr: max(warptalk_livekit_cost_30d{metric="estimated_cost_usd"}) > max(warptalk_livekit_cost_30d{metric="budget_usd"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LiveKit estimated spend exceeded its monthly budget"
+
+      - alert: WarpTalkObjectStorageBudgetNearLimit
+        expr: sum(max by (source) (warptalk_object_storage_bytes)) > max(warptalk_object_storage_budget_bytes) * 0.8
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Object storage is above 80% of its configured capacity budget"
+
+      - alert: WarpTalkObjectStorageBudgetExceeded
+        expr: sum(max by (source) (warptalk_object_storage_bytes)) > max(warptalk_object_storage_budget_bytes)
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Object storage exceeded its configured capacity budget"

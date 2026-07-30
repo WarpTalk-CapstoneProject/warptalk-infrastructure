@@ -1,0 +1,38 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: warptalk-rabbitmq
+  namespace: {{ .Values.rabbitmq.namespace }}
+spec:
+  replicas: {{ .Values.rabbitmq.replicas }}
+  persistence:
+    storageClassName: {{ .Values.storageClass }}
+    storage: {{ .Values.rabbitmq.storageSize }}
+  resources:
+    requests:
+      cpu: 300m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 3Gi
+  rabbitmq:
+    additionalConfig: |
+      cluster_partition_handling = pause_minority
+      default_queue_type = quorum
+      quorum_queue.property_equivalence.relaxed_checks_on_redeclaration = true
+      consumer_timeout = 900000
+  override:
+    statefulSet:
+      spec:
+        template:
+          metadata:
+            labels:
+              warptalk.io/component: rabbitmq
+          spec:
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: kubernetes.io/hostname
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    warptalk.io/component: rabbitmq
