@@ -150,7 +150,7 @@ apply_service() {
       escaped_release="$(sql_literal "$RELEASE_ID")"
       escaped_applied_by="$(sql_literal "$MIGRATION_APPLIED_BY")"
       printf "SELECT EXISTS (SELECT 1 FROM public.service_schema_migrations WHERE service='%s' AND version='%s') AS applied, COALESCE((SELECT checksum FROM public.service_schema_migrations WHERE service='%s' AND version='%s'), '') AS applied_checksum \\gset\n" "$service" "$escaped" "$service" "$escaped"
-      printf "SELECT 1 / (NOT (:applied AND :'applied_checksum' <> '%s'))::integer;\n" "$checksum"
+      printf "SELECT 1 / (NOT (:'applied'::boolean AND :'applied_checksum' <> '%s'))::integer;\n" "$checksum"
       echo '\if :applied'
       printf '%s\n' "\\echo '  Skipping $filename (already applied, checksum verified)'"
       echo '\else'
