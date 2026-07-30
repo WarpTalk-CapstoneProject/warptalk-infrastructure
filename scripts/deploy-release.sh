@@ -6,6 +6,15 @@ set -eu
 : "${RELEASE_MANIFEST:?RELEASE_MANIFEST is required}"
 : "${PRODUCTION_ENV_FILE:?PRODUCTION_ENV_FILE is required}"
 
+SKIP_IMAGE_PULL="${SKIP_IMAGE_PULL:-false}"
+case "$SKIP_IMAGE_PULL" in
+  true|false) ;;
+  *)
+    echo "SKIP_IMAGE_PULL must be true or false" >&2
+    exit 1
+    ;;
+esac
+
 command -v docker >/dev/null 2>&1 || {
   echo "docker is required" >&2
   exit 1
@@ -82,7 +91,9 @@ compose() {
 }
 
 compose config --quiet
-compose pull
+if [ "$SKIP_IMAGE_PULL" != "true" ]; then
+  compose pull
+fi
 
 if [ "$DEPLOY_ROLE" = "app" ]; then
   compose run --rm migrator

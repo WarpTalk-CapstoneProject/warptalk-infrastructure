@@ -23,6 +23,10 @@ rg -q 'has\(\$image\.service\)' "$override_filter" ||
   fail "release override is not filtered to services on the selected host"
 rg -q 'compose run --rm migrator' "$script" ||
   fail "App migration gate is missing"
+rg -q 'SKIP_IMAGE_PULL' "$script" ||
+  fail "preloaded-image deployments cannot disable registry pulls"
+rg -q '\[ "\$SKIP_IMAGE_PULL" != "true" \]' "$script" ||
+  fail "registry pull is not guarded by the preloaded-image contract"
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
