@@ -169,6 +169,8 @@ apply_service() {
   } > "$tmp"
   if ! PGPASSWORD="$PGPASSWORD" psql -X -v ON_ERROR_STOP=1 \
       -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$database" -f "$tmp"; then
+    echo "Generated migration program (diagnostic):" >&2
+    nl -ba "$tmp" >&2
     rm -f "$tmp"
     trap - EXIT INT TERM
     return 1
