@@ -35,20 +35,8 @@ database_exists() {
   admin_psql -Atc "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = '$1')"
 }
 
-configure_migration_owner() {
-  database="$1"
-  schema="$2"
-  runtime_role="$3"
-
-  PGPASSWORD="$PGPASSWORD" psql \
-    -X \
-    -v ON_ERROR_STOP=1 \
-    -v "schema_name=$schema" \
-    -v "runtime_role=$runtime_role" \
-    -h "$PGHOST" \
-    -p "$PGPORT" \
-    -U "$PGUSER" \
-    -d "$database" <<'SQL'
+emit_migration_owner_sql() {
+  cat <<'SQL'
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -127,21 +115,22 @@ apply_service() {
     echo "Skipping $service: $database does not exist yet."
     return 0
   }
-  configure_migration_owner "$database" "$schema" "$runtime_role"
   files="$(find "$dir" -maxdepth 1 -type f -name '*.sql' -print | sort)"
-  [ -n "$files" ] || return 0
 
-  echo "Applying logical-database migrations for $service ($database)..."
+  if [ -n "$files" ]; then
+    echo "Applying logical-database migrations for $service ($database)..."
+  fi
   tmp="$(mktemp)"
   trap 'rm -f "$tmp"' EXIT INT TERM
   {
     printf '%s\n' '\set ON_ERROR_STOP on'
+    printf "SELECT pg_advisory_lock(hashtext('warptalk-service-migrations:%s'));\n" "$service"
+    emit_migration_owner_sql
     printf "CREATE TABLE IF NOT EXISTS public.service_schema_migrations (service text NOT NULL, version text NOT NULL, checksum text, execution_ms bigint, release text, applied_by text, applied_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(service, version));\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS checksum text;\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS execution_ms bigint;\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS release text;\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS applied_by text;\n"
-    printf "SELECT pg_advisory_lock(hashtext('warptalk-service-migrations:%s'));\n" "$service"
     printf "SET search_path TO %s, public;\n" "$schema"
     printf '%s\n' "$files" | while IFS= read -r path; do
       filename="$(basename "$path")"
@@ -168,6 +157,8 @@ apply_service() {
     printf "SELECT pg_advisory_unlock(hashtext('warptalk-service-migrations:%s'));\n" "$service"
   } > "$tmp"
   if ! PGPASSWORD="$PGPASSWORD" psql -X -v ON_ERROR_STOP=1 \
+      -v "schema_name=$schema" \
+      -v "runtime_role=$runtime_role" \
       -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$database" -f "$tmp"; then
     rm -f "$tmp"
     trap - EXIT INT TERM
