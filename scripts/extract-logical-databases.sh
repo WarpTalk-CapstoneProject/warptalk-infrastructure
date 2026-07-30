@@ -47,6 +47,27 @@ run_target() {
         -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$target" "$@"
 }
 
+install_source_extensions() {
+    target="$1"
+    extensions="$(
+        psql_admin -Atc \
+            "SELECT extname FROM pg_extension WHERE extname <> 'plpgsql' ORDER BY extname"
+    )"
+
+    for extension in $extensions; do
+        case "$extension" in
+            *[!A-Za-z0-9_-]*)
+                echo "Refusing unsafe PostgreSQL extension name: $extension" >&2
+                exit 1
+                ;;
+        esac
+        run_target "$target" -v "extension_name=$extension" <<'SQL'
+SELECT format('CREATE EXTENSION IF NOT EXISTS %I', :'extension_name')
+\gexec
+SQL
+    done
+}
+
 extract_context() {
     target="$1"
     schemas="$2"
@@ -62,6 +83,10 @@ extract_context() {
     fi
 
     create_database "$target"
+    # Extensions are database-scoped and are not recreated by a schema-filtered
+    # pg_dump. Install the source database's trusted extension set first so
+    # operator classes and extension-backed defaults exist during restore.
+    install_source_extensions "$target"
     schema_dump="$tmp_dir/$target-schema.sql"
     data_dump="$tmp_dir/$target-data.sql"
 

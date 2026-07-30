@@ -218,6 +218,10 @@ grep -q 'run-logical-database-migrations.sh' "$APP_COMPOSE" ||
   fail "production migrator must run service-owned logical database migrations"
 grep -q 'check-database-boundaries.sh' "$APP_COMPOSE" ||
   fail "production migrator must verify service boundaries before extraction"
+grep -q 'FROM pg_extension' "$LOGICAL_DATABASE_EXTRACTOR" ||
+  fail "logical database extraction must discover required source extensions"
+grep -q 'CREATE EXTENSION IF NOT EXISTS' "$LOGICAL_DATABASE_EXTRACTOR" ||
+  fail "logical database extraction must install extensions before schema restore"
 if grep -R -n --include='*.cs' --exclude-dir=Migrations \
   'workspace\.workspaces' "$BACKEND_DIR/billing/src" >/dev/null; then
   fail "billing-service source must not query workspace.workspaces directly"
