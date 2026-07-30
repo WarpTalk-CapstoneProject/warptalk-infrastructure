@@ -11,12 +11,13 @@ spec:
     customFrameOptionsValue: DENY
     contentSecurityPolicy: >-
       default-src 'self'; base-uri 'self'; frame-ancestors 'none';
+      frame-src https://accounts.google.com/gsi/;
       object-src 'none'; form-action 'self';
       img-src 'self' data: blob: https:;
       media-src 'self' blob: https:;
-      connect-src 'self' https: wss:;
-      script-src 'self' 'unsafe-inline';
-      style-src 'self' 'unsafe-inline';
+      connect-src 'self' https: wss: https://accounts.google.com/gsi/;
+      script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client;
+      style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style;
       font-src 'self' data: https:;
       worker-src 'self' blob:
     referrerPolicy: strict-origin-when-cross-origin
