@@ -545,7 +545,6 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?}
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
-      - /app/.cache:rw,nosuid,size=512m
     healthcheck: *ai-healthcheck
     deploy:
       resources:

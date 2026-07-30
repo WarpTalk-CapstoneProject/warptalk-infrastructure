@@ -48,6 +48,10 @@ printf '%s\n' "$app_json" | jq -e '
   | all(contains("10.20.0.30"))
 ' >/dev/null || fail "App dependencies do not route through INFRA_PRIVATE_IP"
 
+printf '%s\n' "$app_json" | jq -e '
+  all(.services["livekit-ingress-worker"].tmpfs[]; startswith("/app/.cache:") | not)
+' >/dev/null || fail "LiveKit ingress must not mask its image-baked Torch model cache"
+
 rg -q "data-host:9000" "$repo_root/observability/prometheus.yml" ||
   fail "Prometheus does not scrape remote Data host MinIO"
 rg -q "data-host:6333" "$repo_root/observability/prometheus.yml" ||
