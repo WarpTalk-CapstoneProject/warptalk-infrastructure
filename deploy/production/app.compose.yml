@@ -244,6 +244,8 @@ services:
       RabbitMQ__Username: ${RABBITMQ_USERNAME:?}
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:?}
       RESEND_API_KEY: ${RESEND_API_KEY:?}
+      Resend__FromEmail: ${RESEND_FROM_EMAIL:?}
+      Resend__FromName: ${RESEND_FROM_NAME:-WarpTalk}
     depends_on:
       migrator:
         condition: service_completed_successfully
