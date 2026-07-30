@@ -33,4 +33,25 @@ if grep -Fq 'release build: building ' "$tmp_dir/stdout.log"; then
 fi
 
 grep -Fq 'release build: building ' "$tmp_dir/stderr.log"
+
+rm -f "$tmp_dir/release-manifest.json"
+if PATH="$fixture_bin:$PATH" \
+  IMAGE_REGISTRY=example.invalid/warptalk \
+  IMAGE_TAG=test-release \
+  PUSH_IMAGES=false \
+  ALLOW_DIRTY_RELEASE=true \
+  ONLY_IMAGE=frontend \
+  RELEASE_MANIFEST_OUTPUT="$tmp_dir/release-manifest.json" \
+  "$repo_root/scripts/build-release.sh" \
+  >"$tmp_dir/missing-arg-stdout.log" \
+  2>"$tmp_dir/missing-arg-stderr.log"; then
+  echo "build-release output contract failed: missing build arg returned success" >&2
+  exit 1
+fi
+
+if [ -e "$tmp_dir/release-manifest.json" ]; then
+  echo "build-release output contract failed: incomplete manifest was written" >&2
+  exit 1
+fi
+
 echo "build-release output contract: PASS"
