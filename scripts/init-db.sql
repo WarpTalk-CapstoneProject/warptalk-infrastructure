@@ -2180,35 +2180,11 @@ ALTER TABLE auth.user_roles ADD FOREIGN KEY (assigned_by) REFERENCES auth.users 
 
 ALTER TABLE auth.user_roles ADD FOREIGN KEY (revoked_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE workspace.workspaces ADD FOREIGN KEY (owner_id) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE workspace.workspaces ADD FOREIGN KEY (created_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE workspace.workspaces ADD FOREIGN KEY (updated_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE workspace.workspaces ADD FOREIGN KEY (deleted_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
-
 ALTER TABLE workspace.workspace_members ADD FOREIGN KEY (workspace_id) REFERENCES workspace.workspaces (id) DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE workspace.workspace_members ADD FOREIGN KEY (user_id) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE workspace.workspace_members ADD FOREIGN KEY (role_id) REFERENCES auth.roles (id) DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE workspace.workspace_members ADD FOREIGN KEY (removed_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE workspace.workspace_invitations ADD FOREIGN KEY (workspace_id) REFERENCES workspace.workspaces (id) DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE workspace.workspace_invitations ADD FOREIGN KEY (role_id) REFERENCES auth.roles (id) DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE workspace.workspace_invitations ADD FOREIGN KEY (invited_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
-
 ALTER TABLE workspace.workspace_verified_domains ADD FOREIGN KEY (workspace_id) REFERENCES workspace.workspaces (id) DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE workspace.workspace_verified_domains ADD FOREIGN KEY (verified_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE workspace.workspace_verified_domains ADD FOREIGN KEY (created_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE workspace.workspace_verified_domains ADD FOREIGN KEY (updated_by) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE auth.refresh_tokens ADD FOREIGN KEY (user_id) REFERENCES auth.users (id) DEFERRABLE INITIALLY IMMEDIATE;
 

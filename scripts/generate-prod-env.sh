@@ -53,11 +53,11 @@ JWT_AUDIENCE=WarpTalk
 
 # ── Self-host fallback only ─────────────────────────────────────────
 TURN_SECRET=$(generate_secret)
-TURN_REALM=warptalk.vn
+TURN_REALM=warptalk.io.vn
 
 # ── CORS ─────────────────────────────────────────────────────────────
 # Update this with your actual production frontend URL
-ALLOWED_ORIGINS=https://warptalk.vn,https://admin.warptalk.vn
+ALLOWED_ORIGINS=https://app.warptalk.io.vn,https://warptalk.io.vn
 
 # ── Observability ────────────────────────────────────────────────────
 SEQ_API_KEY=$(generate_secret)
