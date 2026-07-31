@@ -3,6 +3,22 @@
 --   Implements Phase 2 P2.8 from credit-billing-master-plan.md.
 --   Adds the contract/default plan columns required by M2, disables legacy
 --   active plans, and upserts the single Enterprise plan template.
+--
+-- CUSTOMER-VISIBLE PRICING CHANGE — this is not a schema-only migration.
+--   Confirmed intended (Phase 2 moves to a single contract-based Enterprise plan).
+--   Two effects land on whatever database this runs against:
+--
+--   1. Every active plan whose slug is not 'enterprise' is set is_active = false.
+--      On production that retires "Startup" (190,000 VND), which disappears from
+--      /workspace/payment/plans. Rows are kept, not deleted, so historical
+--      subscriptions still resolve their plan.
+--   2. The Enterprise plan is upserted at price = 1,900,000 VND with
+--      credits_per_cycle = 700,000. Production currently carries Enterprise at
+--      490,000 VND, so this is roughly a 4x change to a live price.
+--
+--   Per-customer numbers are not meant to be edited here: contract-specific
+--   values belong in the subscription.subscriptions *_override columns added by
+--   this migration and by 041.
 
 BEGIN;
 
