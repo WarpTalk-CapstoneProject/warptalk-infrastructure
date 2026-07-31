@@ -35,20 +35,8 @@ database_exists() {
   admin_psql -Atc "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = '$1')"
 }
 
-configure_migration_owner() {
-  database="$1"
-  schema="$2"
-  runtime_role="$3"
-
-  PGPASSWORD="$PGPASSWORD" psql \
-    -X \
-    -v ON_ERROR_STOP=1 \
-    -v "schema_name=$schema" \
-    -v "runtime_role=$runtime_role" \
-    -h "$PGHOST" \
-    -p "$PGPORT" \
-    -U "$PGUSER" \
-    -d "$database" <<'SQL'
+emit_migration_owner_sql() {
+  cat <<'SQL'
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -60,6 +48,15 @@ BEGIN
 END
 $$;
 
+SELECT format(
+    'CREATE ROLE %I NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION',
+    :'runtime_role')
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_roles WHERE rolname = :'runtime_role'
+)
+\gexec
+
+CREATE SCHEMA IF NOT EXISTS :"schema_name";
 ALTER SCHEMA :"schema_name" OWNER TO warptalk_migrator;
 GRANT USAGE, CREATE ON SCHEMA :"schema_name" TO warptalk_migrator;
 
@@ -118,21 +115,22 @@ apply_service() {
     echo "Skipping $service: $database does not exist yet."
     return 0
   }
-  configure_migration_owner "$database" "$schema" "$runtime_role"
   files="$(find "$dir" -maxdepth 1 -type f -name '*.sql' -print | sort)"
-  [ -n "$files" ] || return 0
 
-  echo "Applying logical-database migrations for $service ($database)..."
+  if [ -n "$files" ]; then
+    echo "Applying logical-database migrations for $service ($database)..."
+  fi
   tmp="$(mktemp)"
   trap 'rm -f "$tmp"' EXIT INT TERM
   {
-    echo '\set ON_ERROR_STOP on'
+    printf '%s\n' '\set ON_ERROR_STOP on'
+    printf "SELECT pg_advisory_lock(hashtext('warptalk-service-migrations:%s'));\n" "$service"
+    emit_migration_owner_sql
     printf "CREATE TABLE IF NOT EXISTS public.service_schema_migrations (service text NOT NULL, version text NOT NULL, checksum text, execution_ms bigint, release text, applied_by text, applied_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(service, version));\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS checksum text;\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS execution_ms bigint;\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS release text;\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS applied_by text;\n"
-    printf "SELECT pg_advisory_lock(hashtext('warptalk-service-migrations:%s'));\n" "$service"
     printf "SET search_path TO %s, public;\n" "$schema"
     printf '%s\n' "$files" | while IFS= read -r path; do
       filename="$(basename "$path")"
@@ -141,15 +139,10 @@ apply_service() {
       escaped_release="$(sql_literal "$RELEASE_ID")"
       escaped_applied_by="$(sql_literal "$MIGRATION_APPLIED_BY")"
       printf "SELECT EXISTS (SELECT 1 FROM public.service_schema_migrations WHERE service='%s' AND version='%s') AS applied, COALESCE((SELECT checksum FROM public.service_schema_migrations WHERE service='%s' AND version='%s'), '') AS applied_checksum \\gset\n" "$service" "$escaped" "$service" "$escaped"
-      echo '\if :applied'
-      printf "SELECT :'applied_checksum' = '%s' AS checksum_matches \\gset\n" "$checksum"
-      echo '\if :checksum_matches'
+      printf "SELECT 1 / (NOT (:'applied'::boolean AND :'applied_checksum' <> '%s'))::integer;\n" "$checksum"
+      printf '%s\n' '\if :applied'
       printf '%s\n' "\\echo '  Skipping $filename (already applied, checksum verified)'"
-      echo '\else'
-      printf '%s\n' "\\echo 'ERROR: checksum mismatch for $filename'"
-      echo 'SELECT 1 / 0;'
-      echo '\endif'
-      echo '\else'
+      printf '%s\n' '\else'
       printf '%s\n' "\\echo '  Applying $filename...'"
       echo 'SELECT clock_timestamp() AS migration_started_at \gset'
       echo 'BEGIN;'
@@ -159,11 +152,13 @@ apply_service() {
       echo 'RESET ROLE;'
       printf "INSERT INTO public.service_schema_migrations(service, version, checksum, execution_ms, release, applied_by) VALUES ('%s','%s','%s', GREATEST(0, ROUND(EXTRACT(EPOCH FROM (clock_timestamp() - :'migration_started_at'::timestamptz)) * 1000)::bigint), '%s', '%s');\n" "$service" "$escaped" "$checksum" "$escaped_release" "$escaped_applied_by"
       echo 'COMMIT;'
-      echo '\endif'
+      printf '%s\n' '\endif'
     done
     printf "SELECT pg_advisory_unlock(hashtext('warptalk-service-migrations:%s'));\n" "$service"
   } > "$tmp"
   if ! PGPASSWORD="$PGPASSWORD" psql -X -v ON_ERROR_STOP=1 \
+      -v "schema_name=$schema" \
+      -v "runtime_role=$runtime_role" \
       -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$database" -f "$tmp"; then
     rm -f "$tmp"
     trap - EXIT INT TERM

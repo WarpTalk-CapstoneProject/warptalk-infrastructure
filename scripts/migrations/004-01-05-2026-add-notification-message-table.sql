@@ -1,5 +1,5 @@
 -- Migration: 004-01-05-2026-add-notification-message-table
--- Description: Create the notification_messages table with partitions, composite indexes and grants
+-- Description: Create the notification_messages table with partitions and composite indexes
 
 CREATE SCHEMA IF NOT EXISTS notification;
 
@@ -35,4 +35,3 @@ BEGIN
         GRANT SELECT, INSERT, UPDATE, DELETE ON notification.notification_messages TO notif_svc;
     END IF;
 END $$;
-

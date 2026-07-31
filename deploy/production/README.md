@@ -1,82 +1,119 @@
 # WarpTalk production deployment
 
-This directory is the provider-neutral deployment target for the agreed
-Enterprise Cloud resource pool:
+The Vietnix resource pool is deployed as three independently managed VMs:
 
-| VM | Capacity | Workload | Declared memory limits |
-|---|---:|---|---:|
-| App VM | 8 vCPU, 17 GB RAM, 60 GB NVMe | Caddy, frontend, gateway, .NET services, AI workers | 15.25 GB |
-| Data VM | 4 vCPU, 13 GB RAM, 90 GB NVMe | PostgreSQL, PgBouncer, Redis, RabbitMQ, MinIO, Qdrant | 9.75 GB |
+| VM | Capacity | Storage | Workload |
+|---|---:|---:|---|
+| App | 8 vCPU / 16 GiB | 60 GiB root | Caddy, web, gateway, .NET services, AI workers |
+| Data | 2 vCPU / 8 GiB | 20 GiB root + 35 GiB durable | PostgreSQL, PgBouncer, MinIO, Qdrant |
+| Infra | 2 vCPU / 4 GiB | 20 GiB root + 15 GiB durable | Redis, RabbitMQ, telemetry and dashboards |
 
-CPU limits are contention ceilings, not reservations, so their sum may exceed
-the VM's physical CPU count. Memory limits deliberately leave capacity for the
-host OS and Docker.
+Only App has the Floating IP. Data and Infra are reached through App as the
+SSH jump host. Docker state on Data and Infra lives under
+`/srv/warptalk/docker` on their durable volumes.
 
 ## Network contract
 
-- Only the App VM receives the floating/public IP.
-- Public inbound: TCP 80 and TCP/UDP 443 to the App VM.
-- SSH is restricted to the operator's fixed IP or provider VPN.
-- Data VM ports `5432`, `6432`, `6379`, `5672`, `15672`, `9000`, `9001`,
-  `6333`, and `6334` bind only to `DATA_PRIVATE_IP`.
-- The provider firewall must allow those Data VM ports only from
-  `APP_PRIVATE_IP`. They must never be opened to `0.0.0.0/0`.
+- Public inbound to App: TCP 80, TCP/UDP 443.
+- SSH to App: the current operator `/32` only.
+- Data ingress from App: TCP 22, 5432, 6432, 9000, 9001, 6333 and 6334.
+- Data ingress from Infra: TCP 5432, 9000, 6333 and 6334.
+- Infra ingress from App: TCP 22, 6379, 5672, 15672, 15692, 4317, 4318,
+  5341, 9090, 9093 and 3001.
+- No Data or Infra port is public.
 
-## Prepare a release
+Provider security groups and UFW enforce the same boundary.
 
-Bootstrap each clean Ubuntu host before copying release artifacts:
+## Host preparation
+
+Bootstrap a clean Ubuntu 24.04 host before deploying containers:
 
 ```sh
 sudo ROLE=app \
   ADMIN_CIDR=203.0.113.10/32 \
+  DEPLOY_USER=cloud-user \
   ./scripts/bootstrap-production-host.sh
 
 sudo ROLE=data \
   ADMIN_CIDR=203.0.113.10/32 \
-  APP_PRIVATE_IP=10.20.0.10 \
+  APP_PRIVATE_IP=10.20.0.200 \
+  INFRA_PRIVATE_IP=10.20.0.30 \
+  DEPLOY_USER=cloud-user \
+  ./scripts/bootstrap-production-host.sh
+
+sudo ROLE=infra \
+  ADMIN_CIDR=203.0.113.10/32 \
+  APP_PRIVATE_IP=10.20.0.200 \
+  DATA_PRIVATE_IP=10.20.0.20 \
+  DEPLOY_USER=cloud-user \
   ./scripts/bootstrap-production-host.sh
 ```
 
-Use `DRY_RUN=true` first. The script rejects a world-open SSH CIDR, installs
-Docker from its signed apt repository, enables security updates and fail2ban,
-sets bounded daemon logging, and applies the role-specific UFW policy. Keep the
-provider firewall in front of UFW with the same allow-list.
+On Data and Infra, format a newly attached empty durable disk only after
+confirming its size and device mapping:
 
-1. Build and push every image named in `app.compose.yml` with one immutable
-   Git SHA tag.
-2. Copy `.env.example` to `.env.production` on both VMs and replace all
-   `CHANGE_ME` values.
-3. Set file permissions:
+```sh
+sudo ROLE=data DEVICE=/dev/vdb ./scripts/mount-production-data-volume.sh
+sudo ROLE=infra DEVICE=/dev/vdb ./scripts/mount-production-data-volume.sh
+
+sudo ROLE=data ./scripts/configure-production-docker-root.sh
+sudo ROLE=infra ./scripts/configure-production-docker-root.sh
+```
+
+Both scripts are fail-closed and idempotent. The mount script rejects an
+unexpected device size, partition table, filesystem, label or conflicting
+`fstab` entry.
+
+## Prepare a release
+
+1. Build and push every image in `image-matrix.json` with one immutable Git SHA
+   tag.
+2. Copy `.env.example` to `.env.production` on all three VMs.
+3. Replace every `CHANGE_ME` value and set mode `0600`.
+4. Keep `APP_PRIVATE_IP`, `DATA_PRIVATE_IP` and `INFRA_PRIVATE_IP` identical on
+   all hosts.
+5. Validate locally:
 
    ```sh
-   chmod 600 .env.production
-   ```
-
-4. Point the `APP_DOMAIN` and `API_DOMAIN` DNS records to the floating IP.
-5. Validate the release artifacts from the infrastructure repository:
-
-   ```sh
+   ./scripts/test-three-host-compose-contract.sh
    ./scripts/check-production-deployment.sh
    ```
 
-For a single-host demo deployment, set `APP_PRIVATE_IP` and `DATA_PRIVATE_IP`
-to the same private interface and compose all three manifests:
+6. Package the non-secret deployment tree and verify its checksum before
+   extracting it under `/opt/warptalk/releases/<release-id>`:
+
+   ```sh
+   OUTPUT=/absolute/path/warptalk-deployment.tar.gz \
+     ./scripts/package-production-deployment.sh
+   ```
+
+`NEXT_PUBLIC_*` frontend values must be present during image build; changing
+them only in `.env.production` does not alter an already-built Next.js bundle.
+
+## Deploy Data
+
+From `deploy/production` on Data:
 
 ```sh
-docker compose \
-  --env-file .env.production \
-  -f data.compose.yml \
-  -f app.compose.yml \
-  -f single-host.compose.yml \
-  config --quiet
+docker compose --env-file .env.production -f data.compose.yml pull
+docker compose --env-file .env.production -f data.compose.yml up -d
 ```
 
-The split-host deployment uses the same app/data manifests and only changes
-the two inventory addresses. Templates are under `inventory/`.
+For an immutable image manifest, the equivalent guarded command is:
 
-## Deploy Data VM
+```sh
+DEPLOY_ROLE=data \
+RELEASE_MANIFEST=/etc/warptalk/release-manifest.json \
+PRODUCTION_ENV_FILE=/etc/warptalk/.env.production \
+  /opt/warptalk/current/scripts/deploy-release.sh
+```
 
-From `deploy/production`:
+Wait for PostgreSQL, PgBouncer and MinIO health. `minio-init` is a successful
+one-shot container that creates the private buckets.
+
+## Deploy Infra
+
+Render the alert and cost files first:
 
 ```sh
 sudo ALERT_WEBHOOK_URL="$ALERT_WEBHOOK_URL" \
@@ -88,79 +125,47 @@ set -a
 set +a
 ../../scripts/render-cost-observability.sh
 
-docker compose \
-  --env-file .env.production \
-  -f data.compose.yml \
-  pull
-
-docker compose \
-  --env-file .env.production \
-  -f data.compose.yml \
-  up -d
+docker compose --env-file .env.production -f infra.compose.yml pull
+docker compose --env-file .env.production -f infra.compose.yml up -d
 ```
 
-Confirm PostgreSQL, Redis, RabbitMQ and MinIO are healthy before deploying the
-App VM. `minio-init` is a successful one-shot container and creates the private
-workspace document bucket. Prometheus forwards SLO, queue, worker-heartbeat,
-dead-letter, dependency and cost-budget alerts through the rendered
-Alertmanager webhook. The dedicated `metrics-exporter` reads Redis Streams and
-heartbeat keys directly; it is an immutable release image and remains private
-on the Data network. Contract rates, metric definitions and monthly review
-steps are documented in `observability/COST-GOVERNANCE.md`.
+Use `DEPLOY_ROLE=infra` with `deploy-release.sh` for the immutable release.
 
-## Deploy App VM
+Prometheus reaches MinIO and Qdrant through the private `data-host` mapping and
+reaches PostgreSQL through the least-privilege monitor account.
 
-Run the migration as a one-shot release gate before changing long-running
-containers:
+## Deploy App
+
+The migration is a blocking release gate:
 
 ```sh
-docker compose \
-  --env-file .env.production \
-  -f app.compose.yml \
-  pull
-
-docker compose \
-  --env-file .env.production \
-  -f app.compose.yml \
-  run --rm migrator
-
-docker compose \
-  --env-file .env.production \
-  -f app.compose.yml \
-  up -d --no-deps \
-  auth-service workspace-service translation-room-service \
-  transcript-service notification-service meeting-service \
-  assistant-service billing-service gateway frontend \
-  stt-worker translation-worker tts-worker assistant-worker \
-  embedding-worker billing-worker livekit-ingress-worker \
-  security-worker caddy
+docker compose --env-file .env.production -f app.compose.yml pull
+docker compose --env-file .env.production -f app.compose.yml run --rm migrator
+docker compose --env-file .env.production -f app.compose.yml up -d
 ```
 
-The migration runner uses `ON_ERROR_STOP` and a PostgreSQL advisory lock, so a
-failed migration stops the release and concurrent deploys cannot race.
+Use `DEPLOY_ROLE=app` with `deploy-release.sh`; only the App role executes the
+migration gate. Release overrides are filtered to services that exist on the
+selected host, so the Infra metrics image cannot be accidentally started on
+App.
 
-## Backups and restore drills
+The migration runner uses `ON_ERROR_STOP` and a PostgreSQL advisory lock.
+Application services use Data for PostgreSQL/MinIO/Qdrant and Infra for
+Redis/RabbitMQ/OTLP.
 
-Install `age`, PostgreSQL client tools, `curl`, `jq` and AWS CLI on the Data VM.
-Copy `backup.env.example` to `/etc/warptalk/backup.env`, install the two units
-from `systemd/`, then enable `warptalk-backup.timer`. Backups are encrypted
-before offsite upload and the job refuses an offsite bucket without versioning.
+## DNS, acceptance and rollback
 
-Run a restore drill after setup and at least monthly:
+Point `APP_DOMAIN` and `API_DOMAIN` to `45.115.16.201`, then verify DNS and
+public TLS before executing functional, billing, media and load acceptance.
+A healthy container or HTTP health endpoint alone is not production
+acceptance.
 
-```sh
-BACKUP_SET=/var/backups/warptalk/daily/<timestamp> \
-AGE_IDENTITY_FILE=/run/secrets/warptalk-backup.agekey \
-./scripts/restore-drill.sh
-```
+Rollback application code by setting `IMAGE_TAG` to the previous immutable
+release and re-running `pull` plus `up -d`. Database rollback is
+restore-forward: take a verified backup before destructive migrations, then
+use a compensating migration or restore. Never automate down migrations.
 
-The full incident procedure and recovery completion checklist are in
-`DR-RUNBOOK.md`.
-
-## Rollback
-
-Images are immutable by `IMAGE_TAG`. To roll back application code, set
-`IMAGE_TAG` to the previous known-good Git SHA and run the App VM `pull` and
-`up -d` commands again. Database rollback is restore-forward: take a verified
-backup before a destructive migration and apply a compensating migration or
-restore that backup. Do not automatically run down migrations in production.
+Provider backup storage is not purchased. Before production data is accepted,
+install verified AWS CLI v2 tooling and enable the encrypted offsite backup
+timer from `systemd/`; otherwise the deployment has no acceptable database
+recovery path.

@@ -1,0 +1,9 @@
+# Replace with the current trusted operator public IP as a /32.
+admin_cidr = "203.0.113.10/32"
+
+# Set true to create the catalog-compatible three-host topology.
+create_compute = false
+
+app_flavor_id   = "4ba53b56-41e7-4bee-baca-7c9a68ff4844" # 8 vCPU / 16 GiB
+data_flavor_id  = "1dcc625e-78c0-432c-89ca-e53b61934820" # 2 vCPU / 8 GiB
+infra_flavor_id = "468c0c15-08bd-4e1d-8564-5053ce12966b" # 2 vCPU / 4 GiB

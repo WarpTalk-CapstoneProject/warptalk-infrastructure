@@ -2,7 +2,7 @@
 
 ## Targets and ownership
 
-Initial two-VM production targets an RPO of 24 hours and an RTO of 4 hours.
+Initial three-VM production targets an RPO of 24 hours and an RTO of 4 hours.
 Daily backups contain eight independent PostgreSQL dumps plus one Qdrant
 snapshot per collection. Every payload is encrypted with `age` before it is
 uploaded to a versioned offsite S3/R2 bucket.
@@ -17,7 +17,7 @@ validate it, then switch the App inventory/private address.
 ## Before an incident
 
 1. Keep `/etc/warptalk/backup.env` mode `0600` and owned by `warptalk`.
-2. Keep the `age` private identity outside both production VMs.
+2. Keep the `age` private identity outside all production VMs.
 3. Enable versioning and retention/lifecycle rules on the offsite bucket.
 4. Enable and inspect the timer:
 
@@ -47,9 +47,9 @@ No data restore is required because the App node is stateless.
 
 ## Loss of the Data node
 
-1. Fence the failed node so two PostgreSQL/RabbitMQ instances cannot accept
-   writes simultaneously.
-2. Provision a clean Data VM and attach a new encrypted volume.
+1. Fence the failed node so two PostgreSQL, MinIO or Qdrant instances cannot
+   accept writes simultaneously.
+2. Provision a clean Data VM and attach a new durable volume.
 3. Download one complete backup set from the versioned offsite bucket and
    verify `encrypted-files.sha256`.
 4. Run the disposable restore drill before touching the replacement services:
@@ -64,13 +64,27 @@ No data restore is required because the App node is stateless.
 5. Start the replacement Data stack, restore the same dumps into its eight
    logical databases, and upload each Qdrant collection snapshot with
    `priority=snapshot`.
-6. Recreate RabbitMQ exchanges/queues by starting the application against an
-   empty broker. Replay Billing outbox records and inspect every DLQ.
-7. Point the App inventory at the replacement private IP, then run full smoke
-   and settlement checks before reopening traffic.
+6. Point the App and Infra inventory at the replacement private IP.
+7. Run full smoke, object consistency, database-boundary and settlement checks
+   before reopening traffic.
 
 Redis is treated as rebuildable cache/stream state. PostgreSQL outbox/inbox and
 source media are the durable recovery sources.
+
+## Loss of the Infra node
+
+1. Fence the failed Infra VM so a stale RabbitMQ or Redis cannot rejoin.
+2. Provision and bootstrap a replacement with the Infra security group.
+3. Attach and mount a new durable volume, then configure Docker data-root.
+4. Deploy the exact release manifest with `DEPLOY_ROLE=infra`.
+5. Start Redis and RabbitMQ empty; preserve the failed durable volume for
+   forensics instead of importing unverified broker/cache state.
+6. Let applications recreate durable RabbitMQ topology, replay unpublished
+   PostgreSQL outbox records and inspect DLQs.
+7. Rebuild Redis projections from source services/events. In-flight meeting
+   audio streams are not reconstructable and affected rooms must restart.
+8. Verify OTLP ingestion, dashboards, alerts, queue lag and worker heartbeat
+   before closing the incident.
 
 ## Loss or corruption of one PostgreSQL database
 

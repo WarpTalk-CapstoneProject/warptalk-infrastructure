@@ -50,13 +50,13 @@ x-dotnet-environment: &dotnet-environment
   Jwt__Issuer: ${JWT_ISSUER:?}
   Jwt__Audience: ${JWT_AUDIENCE:?}
   Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?}
-  Redis__ConnectionString: ${DATA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
+  Redis__ConnectionString: ${INFRA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
   Observability__Enabled: "true"
-  OTEL_EXPORTER_OTLP_ENDPOINT: http://${DATA_PRIVATE_IP:?}:4317
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://${INFRA_PRIVATE_IP:?}:4317
   OTEL_EXPORTER_OTLP_PROTOCOL: grpc
 
 x-ai-environment: &ai-environment
-  REDIS_URL: redis://:${REDIS_PASSWORD:?}@${DATA_PRIVATE_IP:?}:6379
+  REDIS_URL: redis://:${REDIS_PASSWORD:?}@${INFRA_PRIVATE_IP:?}:6379
   OPENAI_API_KEY: ${OPENAI_API_KEY:?}
   LOG_LEVEL: INFO
   REDIS_MAX_CONNECTIONS: "10"
@@ -98,10 +98,12 @@ services:
       - >-
         tr -d '\r' < /scripts/run-migrations.sh > /tmp/run-migrations.sh &&
         tr -d '\r' < /scripts/provision-service-db-users.sh > /tmp/provision-service-db-users.sh &&
+        tr -d '\r' < /scripts/check-database-boundaries.sh > /tmp/check-database-boundaries.sh &&
         tr -d '\r' < /scripts/extract-logical-databases.sh > /tmp/extract-logical-databases.sh &&
         tr -d '\r' < /scripts/run-logical-database-migrations.sh > /tmp/run-logical-database-migrations.sh &&
         sh /tmp/run-migrations.sh &&
         sh /tmp/provision-service-db-users.sh &&
+        sh /tmp/check-database-boundaries.sh &&
         sh /tmp/extract-logical-databases.sh &&
         sh /tmp/run-logical-database-migrations.sh &&
         exec sh /scripts/enable-postgres-performance-observability.sh
@@ -114,6 +116,7 @@ services:
       <<: *dotnet-environment
       HEALTH_PORT: "5101"
       AppBaseUrl: https://${APP_DOMAIN:?}
+      Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID:?}
       Resend__ApiKey: ${RESEND_API_KEY:?}
       Resend__FromEmail: ${RESEND_FROM_EMAIL:?}
       Resend__FromName: ${RESEND_FROM_NAME:-WarpTalk}
@@ -144,7 +147,7 @@ services:
       ConnectionStrings__WorkspaceDb: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_workspace;Username=warptalk_workspace;Password=${WORKSPACE_DB_PASSWORD:?};Search Path=workspace,public;GSS Encryption Mode=Disable
       GrpcSettings__AuthServiceUrl: http://auth-service:50051
       GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
-      RabbitMQ__Host: ${DATA_PRIVATE_IP:?}
+      RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
       RabbitMQ__Username: ${RABBITMQ_USERNAME:?}
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:?}
@@ -168,7 +171,7 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: 768M
+          memory: 640M
 
   translation-room-service:
     <<: *service-defaults
@@ -200,7 +203,7 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: 768M
+          memory: 640M
 
   transcript-service:
     <<: *service-defaults
@@ -227,7 +230,7 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: 768M
+          memory: 640M
 
   notification-service:
     <<: *service-defaults
@@ -236,11 +239,13 @@ services:
       <<: *dotnet-environment
       HEALTH_PORT: "5104"
       ConnectionStrings__DefaultConnection: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_notification;Username=warptalk_notification;Password=${NOTIFICATION_DB_PASSWORD:?};Search Path=notification,public;GSS Encryption Mode=Disable
-      RabbitMQ__Host: ${DATA_PRIVATE_IP:?}
+      RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
       RabbitMQ__Username: ${RABBITMQ_USERNAME:?}
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:?}
       RESEND_API_KEY: ${RESEND_API_KEY:?}
+      Resend__FromEmail: ${RESEND_FROM_EMAIL:?}
+      Resend__FromName: ${RESEND_FROM_NAME:-WarpTalk}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -249,7 +254,7 @@ services:
       resources:
         limits:
           cpus: "0.40"
-          memory: 512M
+          memory: 384M
 
   meeting-service:
     <<: *service-defaults
@@ -294,7 +299,7 @@ services:
       resources:
         limits:
           cpus: "1.00"
-          memory: 1G
+          memory: 768M
 
   assistant-service:
     <<: *service-defaults
@@ -307,7 +312,7 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:?}
       Jwt__Audience: ${JWT_AUDIENCE:?}
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?}
-      Redis__ConnectionString: ${DATA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
+      Redis__ConnectionString: ${INFRA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -316,7 +321,7 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: 768M
+          memory: 640M
 
   billing-service:
     <<: *service-defaults
@@ -325,8 +330,8 @@ services:
       <<: *dotnet-environment
       HEALTH_PORT: "5107"
       ConnectionStrings__BillingDb: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_billing;Username=warptalk_billing;Password=${SUBSCRIPTION_DB_PASSWORD:?};Search Path=subscription,public;GSS Encryption Mode=Disable
-      ConnectionStrings__Redis: ${DATA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
-      RabbitMQ__Host: ${DATA_PRIVATE_IP:?}
+      ConnectionStrings__Redis: ${INFRA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
+      RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
       RabbitMQ__Username: ${RABBITMQ_USERNAME:?}
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:?}
@@ -354,7 +359,7 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: 768M
+          memory: 640M
 
   gateway:
     <<: *service-defaults
@@ -403,7 +408,7 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: 768M
+          memory: 512M
 
   frontend:
     <<: *service-defaults
@@ -427,7 +432,7 @@ services:
       resources:
         limits:
           cpus: "0.50"
-          memory: 768M
+          memory: 512M
 
   stt-worker:
     <<: *service-defaults
@@ -530,7 +535,7 @@ services:
       resources:
         limits:
           cpus: "0.40"
-          memory: 512M
+          memory: 384M
 
   livekit-ingress-worker:
     <<: *service-defaults
@@ -543,13 +548,12 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?}
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
-      - /app/.cache:rw,nosuid,size=512m
     healthcheck: *ai-healthcheck
     deploy:
       resources:
         limits:
           cpus: "0.75"
-          memory: 768M
+          memory: 640M
 
   security-worker:
     <<: *service-defaults
@@ -562,7 +566,7 @@ services:
       resources:
         limits:
           cpus: "0.40"
-          memory: 512M
+          memory: 384M
 
   caddy:
     <<: *service-defaults
@@ -589,7 +593,7 @@ services:
       resources:
         limits:
           cpus: "0.25"
-          memory: 256M
+          memory: 192M
 
 volumes:
   caddy-data:

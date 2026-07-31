@@ -46,7 +46,12 @@ render() {
     sed "s|$token|$value|g" "$temporary" > "${temporary}.next"
     mv "${temporary}.next" "$temporary"
   done
-  chmod 600 "$temporary"
+  # Prometheus and sql_exporter run as nobody (65534). The files contain no
+  # database passwords, but should remain unreadable to unrelated host users.
+  chmod 640 "$temporary"
+  if [ "$(id -u)" -eq 0 ]; then
+    chown 0:65534 "$temporary"
+  fi
   mv "$temporary" "$output"
 }
 

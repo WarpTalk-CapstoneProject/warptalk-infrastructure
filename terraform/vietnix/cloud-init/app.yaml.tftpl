@@ -1,0 +1,16 @@
+#cloud-config
+package_update: false
+package_upgrade: false
+
+write_files:
+  - path: /usr/local/sbin/warptalk-bootstrap
+    owner: root:root
+    permissions: "0750"
+    encoding: b64
+    content: ${bootstrap_script_b64}
+
+runcmd:
+  - ["/usr/bin/env", "ROLE=app", "ADMIN_CIDR=${admin_cidr}", "/usr/local/sbin/warptalk-bootstrap"]
+  - ["cloud-init-per", "once", "warptalk-bootstrap-marker", "touch", "/var/lib/warptalk-bootstrap-complete"]
+
+final_message: "WarpTalk App host bootstrap completed after $UPTIME seconds"

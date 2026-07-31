@@ -17,4 +17,11 @@ sed "s|__ALERT_WEBHOOK_URL__|$escaped_url|" "$template" >"$ALERTMANAGER_CONFIG_P
 grep -q '__ALERT_WEBHOOK_URL__' "$ALERTMANAGER_CONFIG_PATH" &&
   { echo "failed to render alertmanager config" >&2; exit 1; }
 
+# Alertmanager runs as nobody (65534). Keep the rendered webhook URL hidden
+# from other host users while allowing the container process to read it.
+chmod 640 "$ALERTMANAGER_CONFIG_PATH"
+if [ "$(id -u)" -eq 0 ]; then
+  chown 0:65534 "$ALERTMANAGER_CONFIG_PATH"
+fi
+
 echo "Alertmanager configuration rendered: $ALERTMANAGER_CONFIG_PATH"

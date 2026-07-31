@@ -581,7 +581,7 @@ services:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
     environment:
       TURN_SECRET: ${TURN_SECRET}
-      TURN_REALM: ${TURN_REALM:-warptalk.vn}
+      TURN_REALM: ${TURN_REALM:-warptalk.io.vn}
     networks:
       - warptalk-net
 
@@ -594,7 +594,7 @@ services:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
     environment:
       TURN_SECRET: ${TURN_SECRET}
-      TURN_REALM: ${TURN_REALM:-warptalk.vn}
+      TURN_REALM: ${TURN_REALM:-warptalk.io.vn}
     networks:
       - warptalk-net
 

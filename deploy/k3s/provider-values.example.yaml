@@ -1,7 +1,7 @@
 # Copy outside the repository, replace every CHANGE_ME value and pass the copy
 # as K3S_VALUES_FILE. Runtime credentials remain in the external secret store.
 global:
-  domain: CHANGE_ME.warptalk.vn
+  domain: CHANGE_ME.warptalk.io.vn
 
 secret:
   externalSecret:

@@ -1,0 +1,16 @@
+#cloud-config
+package_update: false
+package_upgrade: false
+
+write_files:
+  - path: /usr/local/sbin/warptalk-bootstrap
+    owner: root:root
+    permissions: "0750"
+    encoding: b64
+    content: ${bootstrap_script_b64}
+
+runcmd:
+  - ["/usr/bin/env", "ROLE=infra", "ADMIN_CIDR=${admin_cidr}", "APP_PRIVATE_IP=${app_private_ip}", "DATA_PRIVATE_IP=${data_private_ip}", "/usr/local/sbin/warptalk-bootstrap"]
+  - ["cloud-init-per", "once", "warptalk-bootstrap-marker", "touch", "/var/lib/warptalk-bootstrap-complete"]
+
+final_message: "WarpTalk Infra host bootstrap completed after $UPTIME seconds"
