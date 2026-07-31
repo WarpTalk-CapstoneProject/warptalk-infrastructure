@@ -37,6 +37,7 @@ ALTER TABLE subscription.subscriptions
     DROP COLUMN IF EXISTS contract_price_vnd,
     DROP COLUMN IF EXISTS overage_cap_credits_override,
     DROP COLUMN IF EXISTS overage_price_per_credit_override,
+    DROP COLUMN IF EXISTS low_balance_threshold_credits_override,
     DROP COLUMN IF EXISTS invoice_terms_days_override,
     DROP COLUMN IF EXISTS billing_contact_email,
     DROP COLUMN IF EXISTS overage_credits_this_cycle,

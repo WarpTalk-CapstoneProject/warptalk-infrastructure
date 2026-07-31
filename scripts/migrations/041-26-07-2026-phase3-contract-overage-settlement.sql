@@ -11,6 +11,11 @@ ALTER TABLE subscription.subscriptions
     ADD COLUMN IF NOT EXISTS contract_price_vnd numeric(14, 2),
     ADD COLUMN IF NOT EXISTS overage_cap_credits_override int,
     ADD COLUMN IF NOT EXISTS overage_price_per_credit_override numeric(12, 4),
+    -- Must be overridable alongside credits_per_cycle_override: settle_usage_charge compares
+    -- the remaining balance directly against this threshold, so a contract that overrides the
+    -- cycle allowance down (say 10k credits) while inheriting the plan-wide threshold (140k for
+    -- Enterprise) would start below it and sit in 'low_balance' forever, making the warning noise.
+    ADD COLUMN IF NOT EXISTS low_balance_threshold_credits_override int,
     ADD COLUMN IF NOT EXISTS invoice_terms_days_override int,
     ADD COLUMN IF NOT EXISTS billing_contact_email varchar(255),
     ADD COLUMN IF NOT EXISTS overage_credits_this_cycle int NOT NULL DEFAULT 0,
@@ -88,7 +93,7 @@ AS $$
         s.contract_price_vnd,
         COALESCE(s.overage_cap_credits_override, p.overage_cap_credits),
         COALESCE(s.overage_price_per_credit_override, p.overage_price_per_credit),
-        p.low_balance_threshold_credits,
+        COALESCE(s.low_balance_threshold_credits_override, p.low_balance_threshold_credits),
         p.rollover_cap_credits,
         COALESCE(s.invoice_terms_days_override, p.invoice_terms_days),
         p.invoice_grace_hours,
@@ -144,27 +149,11 @@ BEGIN
         RAISE EXCEPTION 'credits_consumed must be positive';
     END IF;
 
-    IF p_idempotency_key IS NOT NULL THEN
-        SELECT *
-        INTO v_existing
-        FROM subscription.credit_transactions
-        WHERE idempotency_key = p_idempotency_key
-        LIMIT 1;
-
-        IF FOUND THEN
-            RETURN QUERY
-            SELECT
-                false,
-                v_existing.id,
-                v_existing.usage_record_id,
-                v_existing.balance_after,
-                s.service_state,
-                s.suspended_reason
-            FROM subscription.subscriptions s
-            WHERE s.id = v_existing.subscription_id;
-            RETURN;
-        END IF;
-    END IF;
+    -- The idempotency replay check deliberately lives *after* the FOR UPDATE below.
+    -- Checking before the lock cannot be authoritative: two concurrent calls carrying the
+    -- same key would both miss, both block on the lock, and only the post-lock check would
+    -- stop the second one. An extra pre-lock probe would just add a race-y round trip that
+    -- reads as if it were the guard.
 
     SELECT *
     INTO v_subscription
@@ -206,8 +195,16 @@ BEGIN
         END IF;
     END IF;
 
+    -- STRICT is defence-in-depth, not a fix for a reachable bug today: subscriptions.plan_id is
+    -- NOT NULL and subscriptions_plan_id_fkey still guarantees the JOIN inside
+    -- resolve_contract_terms matches, so it cannot currently return zero rows.
+    -- It matters if that ever stops holding (this repo does drop cross-service FKs — see
+    -- 043-30-07-2026-drop-cross-service-workspace-foreign-keys). A non-STRICT SELECT would leave
+    -- every v_terms field NULL, overage_cap would COALESCE to 0, and the first overage credit
+    -- would suspend the workspace with a misleading 'overage_cap' reason. Failing loudly beats
+    -- silently suspending a paying customer.
     SELECT *
-    INTO v_terms
+    INTO STRICT v_terms
     FROM subscription.resolve_contract_terms(p_subscription_id);
 
     v_new_balance := v_subscription.credits_remaining - p_credits_consumed;

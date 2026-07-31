@@ -1,5 +1,23 @@
 -- Migration: 039-26-07-2026-seed-phase2-billing-rate-card
 -- Description: Seed Phase 2 billing rate card for current production models.
+--
+-- UNITS — read this before touching any number below.
+--   provider_unit_cost is USD per unit, as published by the provider.
+--   unit_price is CREDITS per unit, NOT currency, even though `currency` reads 'VND'.
+--     `currency` records which currency the credit conversion was priced in; it does not
+--     mean unit_price is denominated in it.
+--
+--   Each unit_price was derived as:
+--       provider_unit_cost * markup_multiplier * FX_USD_VND / CREDIT_VALUE_VND
+--     with FX_USD_VND = 26300 and CREDIT_VALUE_VND = 4
+--     e.g. STT/second: 0.0001 * 2.5 * 26300 / 4 = 1.643750
+--
+--   Both constants also live in subscription.billing_pricing_config (migration 042) as
+--   admin-editable rows ('fx_rate_usd_vnd', 'credit_value_vnd'). They are baked into the
+--   literals here on purpose: settlement snapshots an immutable rate, so repricing must not
+--   retroactively change what past usage cost. The consequence is that editing either config
+--   row does NOT reprice these seeded rows — a repricing needs a new migration that closes
+--   the current rows (effective_to = now()) and inserts recomputed ones.
 
 BEGIN;
 
@@ -107,5 +125,14 @@ WHERE NOT EXISTS (
       AND existing.is_active = true
       AND existing.effective_to IS NULL
 );
+
+COMMENT ON COLUMN subscription.usage_rate_card.unit_price IS
+    'CREDITS per unit, not currency. Derived as provider_unit_cost * markup_multiplier * fx_rate_usd_vnd / credit_value_vnd. Editing billing_pricing_config does not reprice existing rows — close them with effective_to and insert recomputed ones.';
+
+COMMENT ON COLUMN subscription.usage_rate_card.provider_unit_cost IS
+    'USD per unit, as published by the provider.';
+
+COMMENT ON COLUMN subscription.usage_rate_card.currency IS
+    'Currency the credit conversion was priced in. unit_price is still expressed in credits, not in this currency.';
 
 COMMIT;
