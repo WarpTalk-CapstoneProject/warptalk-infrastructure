@@ -56,13 +56,13 @@ services:
       RELEASE_ID: ${IMAGE_TAG:-local-compose}
       MIGRATION_APPLIED_BY: local-compose-migrator
       SUBSCRIPTION_DB_PASSWORD: ${SUBSCRIPTION_DB_PASSWORD}
-      WORKSPACE_DB_PASSWORD: ${WORKSPACE_DB_PASSWORD:-warptalk-workspace-dev}
+      WORKSPACE_DB_PASSWORD: ${WORKSPACE_DB_PASSWORD:-warptalk-workspace-dev} # gitleaks:allow
       NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD}
-      TRANSLATION_ROOM_DB_PASSWORD: ${TRANSLATION_ROOM_DB_PASSWORD:-warptalk-translation-room-dev}
+      TRANSLATION_ROOM_DB_PASSWORD: ${TRANSLATION_ROOM_DB_PASSWORD:-warptalk-translation-room-dev} # gitleaks:allow
       TRANSCRIPT_DB_PASSWORD: ${TRANSCRIPT_DB_PASSWORD}
       MEETING_DB_PASSWORD: ${MEETING_DB_PASSWORD}
-      ASSISTANT_DB_PASSWORD: ${ASSISTANT_DB_PASSWORD:-warptalk-assistant-dev}
+      ASSISTANT_DB_PASSWORD: ${ASSISTANT_DB_PASSWORD:-warptalk-assistant-dev} # gitleaks:allow
       MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD:?Set MONITOR_DB_PASSWORD in .env}
     volumes:
       - ./scripts:/scripts:ro
@@ -165,7 +165,7 @@ services:
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-warptalk-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey} # gitleaks:allow
       MINIO_PROMETHEUS_AUTH_TYPE: public
     volumes:
       - minio-data:/data
@@ -198,7 +198,7 @@ services:
         mc anonymous set none "local/$${MINIO_VOICE_SAMPLES_BUCKET:-warptalk-voice-samples}"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-warptalk-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey} # gitleaks:allow
       MINIO_WORKSPACE_DOCUMENTS_BUCKET: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}
       MINIO_MEETING_CHAT_BUCKET: ${MINIO_MEETING_CHAT_BUCKET:-warptalk-meeting-chat}
       MINIO_VOICE_SAMPLES_BUCKET: ${MINIO_VOICE_SAMPLES_BUCKET:-warptalk-voice-samples}
@@ -219,12 +219,12 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID}
-      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
       Storage__Provider: ${AUTH_STORAGE_PROVIDER:-MinIO}
       Storage__S3__ServiceUrl: ${AUTH_STORAGE_S3_ENDPOINT:-http://minio:9000}
       Storage__S3__AccessKey: ${MINIO_ROOT_USER:-warptalk-admin}
-      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey} # gitleaks:allow
       Storage__S3__BucketName: ${MINIO_VOICE_SAMPLES_BUCKET:-warptalk-voice-samples}
       Storage__S3__EnsureBucketExists: ${AUTH_STORAGE_ENSURE_BUCKET:-false}
     depends_on:
@@ -253,7 +253,7 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
       RabbitMQ__Host: "rabbitmq"
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
@@ -263,7 +263,7 @@ services:
       Storage__MasterKey: ${WORKSPACE_STORAGE_MASTER_KEY:-warptalk-local-storage-master-key-change-for-shared-environments}
       Storage__S3__ServiceUrl: ${WORKSPACE_STORAGE_S3_ENDPOINT:-http://minio:9000}
       Storage__S3__AccessKey: ${WORKSPACE_STORAGE_S3_ACCESS_KEY:-${MINIO_ROOT_USER:-warptalk-admin}}
-      Storage__S3__SecretKey: ${WORKSPACE_STORAGE_S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}}
+      Storage__S3__SecretKey: ${WORKSPACE_STORAGE_S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}} # gitleaks:allow
       Storage__S3__BucketName: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}
       Storage__S3__EnsureBucketExists: ${WORKSPACE_STORAGE_ENSURE_BUCKET:-false}
     depends_on:
@@ -296,7 +296,7 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
       Smtp__Host: ${SMTP_HOST}
       Smtp__Port: ${SMTP_PORT:-587}
@@ -332,7 +332,7 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
       migrator:
@@ -362,7 +362,7 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
       RabbitMQ__Host: "rabbitmq"
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
@@ -394,7 +394,7 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       LiveKit__Url: ${LIVEKIT_URL:?Set LIVEKIT_URL to the LiveKit Cloud project URL}
       LiveKit__ApiKey: ${LIVEKIT_API_KEY}
       LiveKit__ApiSecret: ${LIVEKIT_API_SECRET}
@@ -415,7 +415,7 @@ services:
       Storage__Provider: ${MEETING_CHAT_STORAGE_PROVIDER:-MinIO}
       Storage__S3__ServiceUrl: ${MEETING_CHAT_STORAGE_S3_ENDPOINT:-http://minio:9000}
       Storage__S3__AccessKey: ${MINIO_ROOT_USER:-warptalk-admin}
-      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey} # gitleaks:allow
       Storage__S3__BucketName: ${MINIO_MEETING_CHAT_BUCKET:-warptalk-meeting-chat}
       Storage__S3__EnsureBucketExists: ${MEETING_CHAT_STORAGE_ENSURE_BUCKET:-false}
     depends_on:
@@ -444,7 +444,7 @@ services:
       Jwt__SecretKey: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
       migrator:
@@ -470,7 +470,7 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       ReverseProxy__Clusters__auth-cluster__Destinations__auth-service__Address: "http://auth-service:5101"
       ReverseProxy__Clusters__translation-room-cluster__Destinations__translation-room-service__Address: "http://translation-room-service:5102"
       ReverseProxy__Clusters__transcript-cluster__Destinations__transcript-service__Address: "http://transcript-service:5103"
@@ -527,7 +527,7 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Grpc__InternalSecret: ${INTERNAL_GRPC_SECRET:?Set INTERNAL_GRPC_SECRET in .env}
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}

@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+# CI-only ephemeral credentials — not used in any real environment. gitleaks:allow
+env:
+  CI_POSTGRES_PASSWORD: ci-only-not-a-real-secret # gitleaks:allow
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -18,7 +22,7 @@ jobs:
         env:
           POSTGRES_DB: warptalk
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ci-postgres-only
+          POSTGRES_PASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
         ports:
           - 5432:5432
         options: >-
@@ -80,7 +84,7 @@ jobs:
           PGHOST: 127.0.0.1
           PGPORT: 5432
           PGUSER: postgres
-          PGPASSWORD: ci-postgres-only
+          PGPASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
           PGDATABASE: warptalk
         run: ./scripts/test-logical-database-migrations.sh
       - name: Production deployment contracts
