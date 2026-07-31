@@ -69,6 +69,7 @@ config:
   ASSISTANT_CHAT_TRANSCRIPT_SERVICE_URL: http://transcript-service:5103
   ASSISTANT_CHAT_TRANSLATION_ROOM_SERVICE_URL: http://translation-room-service:5102
   GrpcSettings__AuthServiceUrl: http://auth-service:50051
+  GrpcSettings__BillingServiceUrl: http://billing-service:50057
   GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
   GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
   GrpcSettings__TranscriptServiceUrl: http://transcript-service:50053

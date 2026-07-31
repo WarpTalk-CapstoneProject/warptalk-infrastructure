@@ -2016,55 +2016,65 @@ ON CONFLICT (segment_id, target_language) DO NOTHING;
     (gen_random_uuid(), 'azure', 'translator', 'translation')
     ON CONFLICT DO NOTHING;
 
-    -- Seed billing plans
+    -- Seed billing plan template
     INSERT INTO subscription.plans (
         id, name, slug, tier, price, currency, billing_cycle, credits_per_cycle, 
         max_participants, max_languages, voice_clone_enabled, ai_assistant_enabled, 
-        glossary_enabled, dedicated_gpu, features, sort_order, is_active, created_at, updated_at
+        glossary_enabled, dedicated_gpu, features, sort_order, is_active,
+        overage_cap_credits, overage_price_per_credit, low_balance_threshold_credits,
+        rollover_cap_credits, invoice_terms_days, invoice_grace_hours,
+        created_at, updated_at
     ) VALUES 
-    (
-        '019ec641-9776-7d50-b2b9-9edb93a46d23', 
-        'Startup', 
-        'startup', 
-        'Startup', 
-        190000, 
-        'VND', 
-        'monthly', 
-        30000, 
-        15, 
-        2, 
-        true, 
-        true, 
-        false, 
-        false, 
-        '{"voice_clone_limit_mins": 120}'::jsonb, 
-        1, 
-        true, 
-        NOW(), 
-        NOW()
-    ),
     (
         '019ec641-9776-7d50-b2b9-9edb93a46d24', 
         'Enterprise', 
         'enterprise', 
         'Enterprise', 
-        490000, 
+        1900000, 
         'VND', 
         'monthly', 
-        100000, 
-        100, 
-        10, 
+        700000, 
+        500, 
+        3, 
         true, 
         true, 
         true, 
         true, 
-        '{"voice_clone_limit_mins": -1}'::jsonb, 
-        2, 
+        '{"voice_clone_limit_mins": -1, "billing_model": "contract_template", "overage_policy": "invoice_after_cap"}'::jsonb, 
+        1, 
         true, 
+        105000,
+        4.0000,
+        140000,
+        700000,
+        15,
+        360,
         NOW(), 
         NOW()
     )
-    ON CONFLICT (slug) DO NOTHING;
+    ON CONFLICT (slug) DO UPDATE SET
+        name = EXCLUDED.name,
+        tier = EXCLUDED.tier,
+        price = EXCLUDED.price,
+        currency = EXCLUDED.currency,
+        billing_cycle = EXCLUDED.billing_cycle,
+        credits_per_cycle = EXCLUDED.credits_per_cycle,
+        max_participants = EXCLUDED.max_participants,
+        max_languages = EXCLUDED.max_languages,
+        voice_clone_enabled = EXCLUDED.voice_clone_enabled,
+        ai_assistant_enabled = EXCLUDED.ai_assistant_enabled,
+        glossary_enabled = EXCLUDED.glossary_enabled,
+        dedicated_gpu = EXCLUDED.dedicated_gpu,
+        features = EXCLUDED.features,
+        sort_order = EXCLUDED.sort_order,
+        is_active = EXCLUDED.is_active,
+        overage_cap_credits = EXCLUDED.overage_cap_credits,
+        overage_price_per_credit = EXCLUDED.overage_price_per_credit,
+        low_balance_threshold_credits = EXCLUDED.low_balance_threshold_credits,
+        rollover_cap_credits = EXCLUDED.rollover_cap_credits,
+        invoice_terms_days = EXCLUDED.invoice_terms_days,
+        invoice_grace_hours = EXCLUDED.invoice_grace_hours,
+        updated_at = NOW();
 
     -- Seed active subscriptions for workspaces
     INSERT INTO subscription.subscriptions (
@@ -2077,7 +2087,7 @@ ON CONFLICT (segment_id, target_language) DO NOTHING;
         '019ec641-97a7-78c9-8f18-000000000000', 
         '019ec641-9776-7d50-b2b9-9edb93a46d24', 
         'active', 
-        100000, 
+        700000, 
         0, 
         NOW() - INTERVAL '10 days', 
         NOW() + INTERVAL '20 days', 

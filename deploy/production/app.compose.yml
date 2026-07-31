@@ -146,6 +146,7 @@ services:
       AppBaseUrl: https://${APP_DOMAIN:?}
       ConnectionStrings__WorkspaceDb: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_workspace;Username=warptalk_workspace;Password=${WORKSPACE_DB_PASSWORD:?};Search Path=workspace,public;GSS Encryption Mode=Disable
       GrpcSettings__AuthServiceUrl: http://auth-service:50051
+      GrpcSettings__BillingServiceUrl: http://billing-service:50057
       GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
       RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}

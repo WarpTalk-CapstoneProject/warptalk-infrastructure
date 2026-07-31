@@ -1157,7 +1157,7 @@ CREATE TABLE notification.schema_migrations (
 CREATE TABLE integration.external_platform_accounts (
   id UUID PRIMARY KEY DEFAULT (uuidv7()),
   user_id UUID NOT NULL,
-  provider VARCHAR(30) NOT NULL,
+  provider VARCHAR(30) NOT NULL CHECK (lower(provider) = 'google_meet'),
   provider_account_id VARCHAR(255),
   access_token_ref VARCHAR(500),
   refresh_token_ref VARCHAR(500),
@@ -1175,7 +1175,7 @@ CREATE TABLE integration.external_platform_accounts (
 CREATE TABLE integration.external_meeting_sessions (
   id UUID PRIMARY KEY DEFAULT (uuidv7()),
   translation_room_id UUID NOT NULL,
-  provider VARCHAR(30) NOT NULL,
+  provider VARCHAR(30) NOT NULL CHECK (lower(provider) = 'google_meet'),
   external_meeting_id VARCHAR(255),
   meeting_url VARCHAR(500),
   capture_mode VARCHAR(30) NOT NULL,
