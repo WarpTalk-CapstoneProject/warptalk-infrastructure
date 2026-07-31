@@ -182,6 +182,9 @@ services:
       App__FrontendBaseUrl: https://${APP_DOMAIN:?}
       ConnectionStrings__TranslationRoomDb: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_translation_room;Username=warptalk_translation_room;Password=${TRANSLATION_ROOM_DB_PASSWORD:?};Search Path=translation_room,public;GSS Encryption Mode=Disable
       GrpcSettings__AuthServiceUrl: http://auth-service:50051
+      # WT-188: resolves the caller's workspace role so a workspace Owner/Admin can admit
+      # participants into rooms they do not personally host.
+      GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
       LiveKit__Egress__S3__AccessKey: ${LIVEKIT_EGRESS_S3_ACCESS_KEY:?}
       LiveKit__Egress__S3__Secret: ${LIVEKIT_EGRESS_S3_SECRET:?}
       LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:?}
