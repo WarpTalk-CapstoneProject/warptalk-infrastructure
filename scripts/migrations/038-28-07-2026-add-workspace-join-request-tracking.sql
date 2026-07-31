@@ -9,26 +9,18 @@ ALTER TABLE workspace.workspace_invitations
   ADD COLUMN IF NOT EXISTS reviewed_by uuid,
   ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'workspace_invitations_requested_by_fkey'
-  ) THEN
-    ALTER TABLE workspace.workspace_invitations
-      ADD CONSTRAINT workspace_invitations_requested_by_fkey
-      FOREIGN KEY (requested_by) REFERENCES auth.users(id) ON DELETE SET NULL;
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'workspace_invitations_reviewed_by_fkey'
-  ) THEN
-    ALTER TABLE workspace.workspace_invitations
-      ADD CONSTRAINT workspace_invitations_reviewed_by_fkey
-      FOREIGN KEY (reviewed_by) REFERENCES auth.users(id) ON DELETE SET NULL;
-  END IF;
-END $$;
+-- requested_by / reviewed_by are AuthService user ids and deliberately carry NO
+-- physical foreign key. This block previously added
+-- workspace_invitations_requested_by_fkey and workspace_invitations_reviewed_by_fkey
+-- pointing at auth.users, which are precisely the cross-service links
+-- 043-30-07-2026-drop-cross-service-workspace-foreign-keys.sql removes ahead of the
+-- logical-database split. Because this file's embedded date (28-07) sorts before
+-- 043's (30-07) while having been authored later, any database that already ran 043
+-- kept the constraints and then failed check-database-boundaries.sh, which aborts the
+-- whole migrator chain. See 044-31-07-2026-drop-workspace-join-request-cross-service-fkeys.sql
+-- for the cleanup applied to databases that already took the old version of this file.
+COMMENT ON COLUMN workspace.workspace_invitations.requested_by IS 'External AuthService user id. No physical FK.';
+COMMENT ON COLUMN workspace.workspace_invitations.reviewed_by IS 'External AuthService user id. No physical FK.';
 
 UPDATE workspace.workspace_invitations
 SET requested_by = invited_by
