@@ -57,7 +57,11 @@ TURN_REALM=warptalk.io.vn
 
 # ── CORS ─────────────────────────────────────────────────────────────
 # Update this with your actual production frontend URL
+<<<<<<< HEAD
+ALLOWED_ORIGINS=https://app.warptalk.io.vn,https://warptalk.io.vn
+=======
 ALLOWED_ORIGINS=https://warptalk.io.vn,https://admin.warptalk.io.vn
+>>>>>>> origin/development
 
 # ── Observability ────────────────────────────────────────────────────
 SEQ_API_KEY=$(generate_secret)

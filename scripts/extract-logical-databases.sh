@@ -99,7 +99,30 @@ extract_context() {
     # logical database, then copy only the bounded-context data.
     pg_dump --format=plain --no-owner --no-acl --schema-only \
         -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
-        $dump_args | sed '/^CREATE SCHEMA public;$/d' > "$schema_dump"
+        $dump_args | sed '/^CREATE SCHEMA public;$/d' > "$schema_dump.raw"
+
+    CURRENT_SCHEMAS="$schemas" awk '
+    BEGIN { RS=";\n"; ORS=";\n" }
+    {
+        if ($0 ~ /REFERENCES[ \t]+[a-zA-Z0-9_]+\./) {
+            match($0, /REFERENCES[ \t]+([a-zA-Z0-9_]+)\./, m)
+            ref_schema = m[1]
+            split(ENVIRON["CURRENT_SCHEMAS"], sch_arr, " ")
+            allowed = 0
+            for (i in sch_arr) {
+                if (sch_arr[i] == ref_schema) { allowed = 1; break }
+            }
+            if (!allowed) next
+        }
+        print $0
+    }' "$schema_dump.raw" > "$schema_dump.raw2"
+
+    {
+        echo 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'
+        echo 'CREATE EXTENSION IF NOT EXISTS "pg_trgm";'
+        cat "$schema_dump.raw2"
+    } > "$schema_dump"
+
     # data_dump_args intentionally expands into multiple --schema arguments.
     # shellcheck disable=SC2046
     pg_dump --format=plain --no-owner --no-acl --data-only --disable-triggers \
