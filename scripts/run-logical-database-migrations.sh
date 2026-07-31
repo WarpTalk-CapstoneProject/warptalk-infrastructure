@@ -116,10 +116,9 @@ apply_service() {
     return 0
   }
   files="$(find "$dir" -maxdepth 1 -type f -name '*.sql' -print | sort)"
+  [ -n "$files" ] || return 0
 
-  if [ -n "$files" ]; then
-    echo "Applying logical-database migrations for $service ($database)..."
-  fi
+  echo "Applying logical-database migrations for $service ($database)..."
   tmp="$(mktemp)"
   trap 'rm -f "$tmp"' EXIT INT TERM
   {
