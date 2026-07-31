@@ -132,8 +132,9 @@ grep -q 'pg_advisory_lock' "$MIGRATION_RUNNER" ||
   fail "migration runner must serialize concurrent deploys with an advisory lock"
 grep -q 'subscription.outbox_messages' "$OUTBOX_MIGRATION" ||
   fail "Billing outbox migration is missing"
-if grep -q 'notif_svc' "$NOTIFICATION_MESSAGES_MIGRATION"; then
-  fail "historical Notification migration must not grant to the removed notif_svc role"
+if grep -q 'GRANT.*TO notif_svc' "$NOTIFICATION_MESSAGES_MIGRATION"; then
+  grep -q "WHERE rolname = 'notif_svc'" "$NOTIFICATION_MESSAGES_MIGRATION" ||
+    fail "historical Notification migration must guard its notif_svc grant with a role-existence check"
 fi
 grep -Eq 'CREATE EXTENSION IF NOT EXISTS pg_trgm' "$ADMIN_NOTIFICATIONS_MIGRATION" ||
   fail "Admin Notification migration must provision pg_trgm before gin_trgm_ops"
