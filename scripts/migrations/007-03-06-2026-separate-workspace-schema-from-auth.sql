@@ -1,7 +1,8 @@
 -- Migration: Separate Workspace Schema from Auth Schema
 -- Created At: 2026-06-03
 
--- 1. Create the workspace schema if it doesn't exist
+-- 1. Create the auth and workspace schemas if they don't exist
+CREATE SCHEMA IF NOT EXISTS auth;
 CREATE SCHEMA IF NOT EXISTS workspace;
 
 -- 2. Safely move or drop workspace tables from auth schema to workspace schema
@@ -38,7 +39,12 @@ BEGIN
 END $$;
 
 -- 3. Drop obsolete workspace_id column from user_roles
-ALTER TABLE auth.user_roles DROP COLUMN IF EXISTS workspace_id;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'user_roles') THEN
+        ALTER TABLE auth.user_roles DROP COLUMN IF EXISTS workspace_id;
+    END IF;
+END $$;
 
 -- 4. Create workspace_verified_domains table if it doesn't exist
 CREATE TABLE IF NOT EXISTS workspace.workspace_verified_domains (

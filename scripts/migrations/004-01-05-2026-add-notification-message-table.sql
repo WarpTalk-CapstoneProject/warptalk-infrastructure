@@ -28,3 +28,10 @@ CREATE TABLE IF NOT EXISTS notification.notification_messages_default PARTITION 
 CREATE INDEX IF NOT EXISTS idx_notif_msgs_user_unread ON notification.notification_messages (user_id, created_at DESC) WHERE is_read = FALSE;
 CREATE INDEX IF NOT EXISTS idx_notif_msgs_created_at ON notification.notification_messages (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notif_msgs_user ON notification.notification_messages (user_id);
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'notif_svc') THEN
+        GRANT SELECT, INSERT, UPDATE, DELETE ON notification.notification_messages TO notif_svc;
+    END IF;
+END $$;
