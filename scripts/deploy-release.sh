@@ -6,6 +6,15 @@ set -eu
 : "${RELEASE_MANIFEST:?RELEASE_MANIFEST is required}"
 : "${PRODUCTION_ENV_FILE:?PRODUCTION_ENV_FILE is required}"
 
+SKIP_IMAGE_PULL="${SKIP_IMAGE_PULL:-false}"
+case "$SKIP_IMAGE_PULL" in
+  true|false) ;;
+  *)
+    echo "SKIP_IMAGE_PULL must be true or false" >&2
+    exit 1
+    ;;
+esac
+
 command -v docker >/dev/null 2>&1 || {
   echo "docker is required" >&2
   exit 1
@@ -26,6 +35,7 @@ test -r "$PRODUCTION_ENV_FILE" || {
 script_dir="$(CDPATH='' cd -- "$(dirname "$0")" && pwd)"
 production_dir="$script_dir/../deploy/production"
 matrix_file="$production_dir/image-matrix.json"
+override_filter="$production_dir/release-override.jq"
 
 PRODUCTION_ENV_FILE="$PRODUCTION_ENV_FILE" \
   "$script_dir/validate-production-env.sh"
@@ -40,7 +50,7 @@ case "$DEPLOY_ROLE" in
     ;;
 esac
 
-for required_file in "$matrix_file" "$compose_file"; do
+for required_file in "$matrix_file" "$override_filter" "$compose_file"; do
   test -r "$required_file" || {
     echo "Cannot read deployment artifact: $required_file" >&2
     exit 1
@@ -68,14 +78,9 @@ docker compose \
   config \
   --format json >"$base_config"
 
-jq --slurpfile base "$base_config" '{
-  services: reduce .images[] as $image ({};
-    if ($base[0].services | has($image.service))
-    then .[$image.service] = {image: ($image.ref + "@" + $image.digest)}
-    else .
-    end
-  )
-}' "$RELEASE_MANIFEST" >"$override"
+jq --slurpfile base "$base_config" \
+  -f "$override_filter" \
+  "$RELEASE_MANIFEST" >"$override"
 
 compose() {
   docker compose \
@@ -86,7 +91,9 @@ compose() {
 }
 
 compose config --quiet
-compose pull
+if [ "$SKIP_IMAGE_PULL" != "true" ]; then
+  compose pull
+fi
 
 if [ "$DEPLOY_ROLE" = "app" ]; then
   compose run --rm migrator

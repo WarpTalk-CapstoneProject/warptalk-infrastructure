@@ -65,7 +65,7 @@ uuid="$(blkid -s UUID -o value "$device")"
 install -d -m 0750 -o root -g docker "$MOUNTPOINT"
 
 fstab_line="UUID=$uuid $MOUNTPOINT ext4 defaults,nofail 0 2"
-if grep -Eq "^[^#]+[[:space:]]+$MOUNTPOINT[[:space:]]+" "$FSTAB_PATH"; then
+if grep -Eq "^[^#]+[[:space:]]+${MOUNTPOINT}[[:space:]]+" "$FSTAB_PATH"; then
   grep -Fq "$fstab_line" "$FSTAB_PATH" ||
     fail "$FSTAB_PATH already contains a conflicting $MOUNTPOINT entry"
 else

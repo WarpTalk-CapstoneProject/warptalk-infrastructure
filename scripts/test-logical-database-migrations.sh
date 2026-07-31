@@ -35,7 +35,6 @@ admin_psql -c "CREATE DATABASE \"$test_database\";" >/dev/null
 mkdir -p "$fixture_root/auth"
 
 cat > "$fixture_root/auth/001_empty_state.sql" <<'SQL'
-CREATE SCHEMA IF NOT EXISTS auth;
 CREATE TABLE auth.migration_probe (
   id integer PRIMARY KEY,
   value text NOT NULL

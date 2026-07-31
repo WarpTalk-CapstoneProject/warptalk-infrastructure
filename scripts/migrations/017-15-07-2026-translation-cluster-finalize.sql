@@ -18,22 +18,14 @@
 --   that way — "billing" is only the informal/spoken name for it, not the schema name.
 --   No RENAME SCHEMA is performed by this migration.
 --
--- Fixes a pre-existing bug found during this audit:
---   Migration 016-03-07-2026-enforce-single-active-subscription.sql references
---   `billing.subscriptions.end_date`, but the live schema is `subscription.subscriptions`
---   with `is_active` / `current_period_end` (no `end_date`, no `billing` schema — that
---   migration's author appears to have used the informal name by mistake). As written,
---   016 cannot succeed against the real database (unknown schema "billing"). Step 0 below
---   creates the index 016 intended, directly against the real `subscription.subscriptions`
---   table and its real `is_active` column, instead of renaming anything to match 016.
+-- Migration 016 now creates the active-subscription index against the canonical
+-- `subscription.subscriptions.is_active` model. Step 0 intentionally repeats the
+-- idempotent definition so databases created from older migration bundles converge.
 
 BEGIN;
 
 -- ============================================================================
--- STEP 0 — Supersede the broken index in migration 016.
--- 016 targets a schema/column that do not exist (`billing.subscriptions.end_date`);
--- it cannot have succeeded, so there is nothing to drop. This creates the equivalent
--- constraint against the real table.
+-- STEP 0 — Converge the active-subscription uniqueness index.
 -- ============================================================================
 
 CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_one_active_per_workspace_idx

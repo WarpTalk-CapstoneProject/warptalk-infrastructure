@@ -17,6 +17,10 @@ MIGRATION_RUNNER="$ROOT_DIR/scripts/run-migrations.sh"
 IMAGE_MATRIX="$DEPLOY_DIR/image-matrix.json"
 BACKEND_DIR="$ROOT_DIR/../warptalk-backend"
 OUTBOX_MIGRATION="$ROOT_DIR/scripts/migrations/029-27-07-2026-add-billing-outbox-inbox.sql"
+NOTIFICATION_MESSAGES_MIGRATION="$ROOT_DIR/scripts/migrations/004-01-05-2026-add-notification-message-table.sql"
+ADMIN_NOTIFICATIONS_MIGRATION="$ROOT_DIR/scripts/migrations/005-09-05-2026-add-admin-notifications-table.sql"
+TRANSLATION_AUDIO_RENAME_MIGRATION="$ROOT_DIR/scripts/migrations/006-15-05-2026-rename-participant-is-translation-audio-enabled.sql"
+ACTIVE_SUBSCRIPTION_MIGRATION="$ROOT_DIR/scripts/migrations/016-03-07-2026-enforce-single-active-subscription.sql"
 DEAD_LETTER_MIGRATION="$ROOT_DIR/scripts/migrations/030-27-07-2026-add-billing-outbox-dead-letter.sql"
 NOTIFICATION_INBOX_MIGRATION="$ROOT_DIR/scripts/migrations/031-27-07-2026-add-notification-inbox.sql"
 BILLING_RUNTIME_ROLE_MIGRATION="$ROOT_DIR/scripts/migrations/032-27-07-2026-add-billing-runtime-role.sql"
@@ -29,6 +33,7 @@ TRANSCRIPT_RUNTIME_ROLE_MIGRATION="$ROOT_DIR/scripts/migrations/038-27-07-2026-a
 MEETING_RUNTIME_ROLE_MIGRATION="$ROOT_DIR/scripts/migrations/039-27-07-2026-add-meeting-runtime-role.sql"
 ASSISTANT_RUNTIME_ROLE_MIGRATION="$ROOT_DIR/scripts/migrations/040-27-07-2026-add-assistant-runtime-role.sql"
 WORKSPACE_OUTBOX_MIGRATION="$ROOT_DIR/scripts/migrations/042-28-07-2026-add-workspace-outbox.sql"
+CROSS_SERVICE_FK_MIGRATION="$ROOT_DIR/scripts/migrations/043-30-07-2026-drop-cross-service-workspace-foreign-keys.sql"
 WORKSPACE_SERVICE_OUTBOX_MIGRATION="$ROOT_DIR/../warptalk-backend/workspace/database/migrations/20260728142000_add_workspace_outbox.sql"
 SERVICE_DB_USER_PROVISIONER="$ROOT_DIR/scripts/provision-service-db-users.sh"
 DATABASE_BOUNDARY_CHECK="$ROOT_DIR/scripts/check-database-boundaries.sh"
@@ -61,7 +66,7 @@ for dependency in docker jq; do
   command -v "$dependency" >/dev/null 2>&1 || fail "missing dependency: $dependency"
 done
 
-for required_file in "$LOCAL_COMPOSE" "$LOCAL_ENV_FILE" "$ENV_FILE" "$DATA_COMPOSE" "$INFRA_COMPOSE" "$APP_COMPOSE" "$SINGLE_HOST_COMPOSE" "$SINGLE_HOST_INVENTORY" "$SPLIT_HOST_INVENTORY" "$HOST_BOOTSTRAP" "$IMAGE_MATRIX" "$OUTBOX_MIGRATION" "$DEAD_LETTER_MIGRATION" "$NOTIFICATION_INBOX_MIGRATION" "$BILLING_RUNTIME_ROLE_MIGRATION" "$WORKSPACE_RUNTIME_ROLE_MIGRATION" "$NOTIFICATION_RUNTIME_ROLE_MIGRATION" "$AUTH_RUNTIME_ROLE_MIGRATION" "$TRANSLATION_REFERENCE_MIGRATION" "$TRANSLATION_RUNTIME_ROLE_MIGRATION" "$TRANSCRIPT_RUNTIME_ROLE_MIGRATION" "$MEETING_RUNTIME_ROLE_MIGRATION" "$ASSISTANT_RUNTIME_ROLE_MIGRATION" "$SERVICE_DB_USER_PROVISIONER" "$DATABASE_BOUNDARY_CHECK" "$LOGICAL_DATABASE_EXTRACTOR" "$LOGICAL_DATABASE_CHECK" "$LOGICAL_DATABASE_BACKUP" "$SOURCE_READONLY_WINDOW" "$LOGICAL_MIGRATION_RUNNER" "$COST_RENDERER" "$BILLING_COST_TEMPLATE" "$LIVEKIT_COST_TEMPLATE" "$WORKSPACE_STORAGE_TEMPLATE" "$COST_RULES_TEMPLATE" "$COST_GOVERNANCE" "$LOCAL_PROMETHEUS_CONFIG" "$LOCAL_ALERT_RULES" "$LOCAL_ALERTMANAGER_CONFIG" "$DEPENDENCY_READINESS_DRILL"; do
+for required_file in "$LOCAL_COMPOSE" "$LOCAL_ENV_FILE" "$ENV_FILE" "$DATA_COMPOSE" "$INFRA_COMPOSE" "$APP_COMPOSE" "$SINGLE_HOST_COMPOSE" "$SINGLE_HOST_INVENTORY" "$SPLIT_HOST_INVENTORY" "$HOST_BOOTSTRAP" "$IMAGE_MATRIX" "$NOTIFICATION_MESSAGES_MIGRATION" "$ADMIN_NOTIFICATIONS_MIGRATION" "$TRANSLATION_AUDIO_RENAME_MIGRATION" "$ACTIVE_SUBSCRIPTION_MIGRATION" "$OUTBOX_MIGRATION" "$DEAD_LETTER_MIGRATION" "$NOTIFICATION_INBOX_MIGRATION" "$BILLING_RUNTIME_ROLE_MIGRATION" "$WORKSPACE_RUNTIME_ROLE_MIGRATION" "$NOTIFICATION_RUNTIME_ROLE_MIGRATION" "$AUTH_RUNTIME_ROLE_MIGRATION" "$TRANSLATION_REFERENCE_MIGRATION" "$TRANSLATION_RUNTIME_ROLE_MIGRATION" "$TRANSCRIPT_RUNTIME_ROLE_MIGRATION" "$MEETING_RUNTIME_ROLE_MIGRATION" "$ASSISTANT_RUNTIME_ROLE_MIGRATION" "$WORKSPACE_OUTBOX_MIGRATION" "$CROSS_SERVICE_FK_MIGRATION" "$SERVICE_DB_USER_PROVISIONER" "$DATABASE_BOUNDARY_CHECK" "$LOGICAL_DATABASE_EXTRACTOR" "$LOGICAL_DATABASE_CHECK" "$LOGICAL_DATABASE_BACKUP" "$SOURCE_READONLY_WINDOW" "$LOGICAL_MIGRATION_RUNNER" "$COST_RENDERER" "$BILLING_COST_TEMPLATE" "$LIVEKIT_COST_TEMPLATE" "$WORKSPACE_STORAGE_TEMPLATE" "$COST_RULES_TEMPLATE" "$COST_GOVERNANCE" "$LOCAL_PROMETHEUS_CONFIG" "$LOCAL_ALERT_RULES" "$LOCAL_ALERTMANAGER_CONFIG" "$DEPENDENCY_READINESS_DRILL"; do
   [ -f "$required_file" ] || fail "missing file: $required_file"
 done
 for required_directory in "$LOCAL_GRAFANA_PROVISIONING" "$LOCAL_GRAFANA_DASHBOARDS"; do
@@ -127,8 +132,43 @@ grep -q 'pg_advisory_lock' "$MIGRATION_RUNNER" ||
   fail "migration runner must serialize concurrent deploys with an advisory lock"
 grep -q 'subscription.outbox_messages' "$OUTBOX_MIGRATION" ||
   fail "Billing outbox migration is missing"
+if grep -q 'notif_svc' "$NOTIFICATION_MESSAGES_MIGRATION"; then
+  fail "historical Notification migration must not grant to the removed notif_svc role"
+fi
+grep -Eq 'CREATE EXTENSION IF NOT EXISTS pg_trgm' "$ADMIN_NOTIFICATIONS_MIGRATION" ||
+  fail "Admin Notification migration must provision pg_trgm before gin_trgm_ops"
+grep -Eq 'CREATE TABLE IF NOT EXISTS notification\.admin_notifications' "$ADMIN_NOTIFICATIONS_MIGRATION" ||
+  fail "Admin Notification migration must recover safely after a partial run"
+if grep -E '^CREATE INDEX ' "$ADMIN_NOTIFICATIONS_MIGRATION" |
+  grep -Ev '^CREATE INDEX IF NOT EXISTS '; then
+  fail "Admin Notification indexes must be idempotent after a partial run"
+fi
+grep -q 'information_schema.columns' "$TRANSLATION_AUDIO_RENAME_MIGRATION" ||
+  fail "Translation audio rename must inspect the live column state"
+grep -q "column_name = 'is_muted'" "$TRANSLATION_AUDIO_RENAME_MIGRATION" ||
+  fail "Translation audio rename must only invert data when the legacy column exists"
+grep -q 'ON subscription.subscriptions (workspace_id)' "$ACTIVE_SUBSCRIPTION_MIGRATION" ||
+  fail "active subscription uniqueness must target the canonical subscription schema"
+grep -q 'WHERE is_active = true AND workspace_id IS NOT NULL' "$ACTIVE_SUBSCRIPTION_MIGRATION" ||
+  fail "active subscription uniqueness must use the live is_active model"
 grep -q 'workspace.outbox_messages' "$WORKSPACE_OUTBOX_MIGRATION" ||
   fail "Workspace outbox migration is missing"
+for legacy_constraint in \
+  workspace_invitations_invited_by_fkey \
+  workspace_invitations_role_id_fkey \
+  workspace_members_removed_by_fkey \
+  workspace_members_role_id_fkey \
+  workspace_members_user_id_fkey \
+  workspace_verified_domains_created_by_fkey \
+  workspace_verified_domains_updated_by_fkey \
+  workspace_verified_domains_verified_by_fkey \
+  workspaces_created_by_fkey \
+  workspaces_deleted_by_fkey \
+  workspaces_owner_id_fkey \
+  workspaces_updated_by_fkey; do
+  grep -q "DROP CONSTRAINT IF EXISTS $legacy_constraint" "$CROSS_SERVICE_FK_MIGRATION" ||
+    fail "cross-service FK migration is missing $legacy_constraint"
+done
 grep -q 'workspace.outbox_messages' "$WORKSPACE_SERVICE_OUTBOX_MIGRATION" ||
   fail "Workspace logical-database outbox migration is missing"
 grep -q 'FOR UPDATE SKIP LOCKED' \
@@ -176,6 +216,12 @@ grep -q 'extract-logical-databases.sh' "$APP_COMPOSE" ||
   fail "production migrator must create or verify logical databases"
 grep -q 'run-logical-database-migrations.sh' "$APP_COMPOSE" ||
   fail "production migrator must run service-owned logical database migrations"
+grep -q 'check-database-boundaries.sh' "$APP_COMPOSE" ||
+  fail "production migrator must verify service boundaries before extraction"
+grep -q 'FROM pg_extension' "$LOGICAL_DATABASE_EXTRACTOR" ||
+  fail "logical database extraction must discover required source extensions"
+grep -q 'CREATE EXTENSION IF NOT EXISTS' "$LOGICAL_DATABASE_EXTRACTOR" ||
+  fail "logical database extraction must install extensions before schema restore"
 if grep -R -n --include='*.cs' --exclude-dir=Migrations \
   'workspace\.workspaces' "$BACKEND_DIR/billing/src" >/dev/null; then
   fail "billing-service source must not query workspace.workspaces directly"
@@ -491,6 +537,12 @@ echo "$APP_JSON" | jq -e '
 ' >/dev/null || fail "auth-service must use its least-privilege database login"
 
 echo "$APP_JSON" | jq -e '
+  .services["auth-service"].environment
+  | has("Authentication__Google__ClientId")
+    and (.["Authentication__Google__ClientId"] | length > 0)
+' >/dev/null || fail "auth-service must receive the Google OAuth client ID"
+
+echo "$APP_JSON" | jq -e '
   .services["workspace-service"].environment
   | (.["ConnectionStrings__WorkspaceDb"] | contains("Database=warptalk_workspace"))
     and (.["ConnectionStrings__WorkspaceDb"] | contains("Search Path=workspace,public"))
@@ -529,6 +581,10 @@ echo "$APP_JSON" | jq -e '
     and has("RabbitMQ__Username")
     and has("RabbitMQ__Password")
     and has("RESEND_API_KEY")
+    and has("Resend__FromEmail")
+    and has("Resend__FromName")
+    and (.["Resend__FromEmail"] | length > 0)
+    and (.["Resend__FromName"] | length > 0)
     and has("Grpc__InternalSecret")
     and (.["ConnectionStrings__DefaultConnection"] | contains("Database=warptalk_notification"))
     and (.["ConnectionStrings__DefaultConnection"] | contains("Username=warptalk_notification"))

@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+case "$*" in
+  buildx\ build*)
+    exit 0
+    ;;
+  image\ inspect*)
+    printf '%s\n' 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    ;;
+  *)
+    echo "unexpected docker invocation: $*" >&2
+    exit 1
+    ;;
+esac

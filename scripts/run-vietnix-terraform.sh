@@ -26,12 +26,13 @@ esac
 export OS_AUTH_URL="https://api.vietnix.cloud/v3"
 export OS_AUTH_TYPE="v3applicationcredential"
 export OS_APPLICATION_CREDENTIAL_ID="$application_credential_id"
-export OS_APPLICATION_CREDENTIAL_SECRET="$(
+OS_APPLICATION_CREDENTIAL_SECRET="$(
   security find-generic-password \
     -s "$keychain_service" \
     -a "$keychain_account" \
     -w
 )"
+export OS_APPLICATION_CREDENTIAL_SECRET
 export OS_REGION_NAME="RegionOne"
 
 trap 'unset OS_APPLICATION_CREDENTIAL_SECRET' EXIT

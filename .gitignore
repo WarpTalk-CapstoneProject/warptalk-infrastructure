@@ -8,6 +8,9 @@ Thumbs.db
 .vscode/
 *.swp
 data/
+!deploy/k3s/data/
+!deploy/k3s/data/redis-values.yaml
+!deploy/k3s/data/qdrant-values.yaml
 pgdata/
 redis-data/
 qdrant-data/

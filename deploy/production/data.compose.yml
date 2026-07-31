@@ -131,6 +131,7 @@ services:
       minio:
         condition: service_healthy
     environment:
+      MC_CONFIG_DIR: /tmp/.mc
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
       MINIO_WORKSPACE_DOCUMENTS_BUCKET: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:?}

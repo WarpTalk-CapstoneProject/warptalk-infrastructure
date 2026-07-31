@@ -38,7 +38,9 @@ done
 platform="$(jq -r '.platform' "$MATRIX_FILE")"
 metadata_tmp="$(mktemp)"
 images_tmp="$(mktemp)"
-trap 'rm -f "$metadata_tmp" "$images_tmp"' EXIT
+image_entries_tmp="$(mktemp)"
+image_records_tmp="$(mktemp)"
+trap 'rm -f "$metadata_tmp" "$images_tmp" "$image_entries_tmp" "$image_records_tmp"' EXIT
 
 jq -n \
   --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -73,7 +75,10 @@ for repo_name in warptalk-backend warptalk-web warptalk-ai warptalk-infrastructu
   mv "$images_tmp" "$metadata_tmp"
 done
 
-jq -c '.images[]' "$MATRIX_FILE" | while IFS= read -r image_entry; do
+jq -c '.images[]' "$MATRIX_FILE" >"$image_entries_tmp"
+: >"$image_records_tmp"
+
+while IFS= read -r image_entry; do
   image_name="$(echo "$image_entry" | jq -r '.name')"
   if [ -n "$ONLY_IMAGE" ] && [ "$image_name" != "$ONLY_IMAGE" ]; then
     continue
@@ -111,7 +116,7 @@ jq -c '.images[]' "$MATRIX_FILE" | while IFS= read -r image_entry; do
     set -- "$@" --load
   fi
 
-  echo "release build: building $image_ref for $platform"
+  echo "release build: building $image_ref for $platform" >&2
   "$@" "$context_dir"
 
   if [ "$PUSH_IMAGES" = "true" ]; then
@@ -128,8 +133,11 @@ jq -c '.images[]' "$MATRIX_FILE" | while IFS= read -r image_entry; do
     --arg service "$service_name" \
     --arg ref "$image_ref" \
     --arg digest "$digest" \
-    '{name: $name, service: $service, ref: $ref, digest: $digest}'
-done | jq -s '.' > "$images_tmp"
+    '{name: $name, service: $service, ref: $ref, digest: $digest}' \
+    >>"$image_records_tmp"
+done <"$image_entries_tmp"
+
+jq -s '.' "$image_records_tmp" >"$images_tmp"
 
 jq --slurpfile images "$images_tmp" '.images = $images[0]' "$metadata_tmp" > "$MANIFEST_OUTPUT"
 echo "release build: manifest written to $MANIFEST_OUTPUT"
