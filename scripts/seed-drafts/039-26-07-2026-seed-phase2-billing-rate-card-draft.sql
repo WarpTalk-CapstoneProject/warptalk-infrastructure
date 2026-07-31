@@ -1,0 +1,60 @@
+-- Phase 2 rate-card seed draft.
+-- This file is intentionally disabled: every INSERT is commented out.
+-- It is kept outside scripts/migrations so run-migrations.sh does not mark a draft seed as applied.
+-- Review model choices, provider prices, USD/VND, markup, and unit_price before applying.
+
+-- Assumptions for draft review:
+-- - currency = VND
+-- - 1 WarpTalk credit = 4 VND
+-- - USD/VND = 26,300
+-- - unit_price = provider_unit_cost_usd * 26,300 * markup / 4
+-- - Voice clone enrollment uses Cartesia Localizing a voice = 225 Cartesia credits/profile.
+
+-- INSERT INTO subscription.usage_rate_card
+-- (id, charge_type, unit, currency, provider, model, provider_unit_cost, markup_multiplier,
+--  unit_price, source_language_code, target_language_code, effective_from, is_active, notes)
+-- VALUES
+-- (uuidv7(), 'STT', 'second', 'VND', 'openai', 'gpt-4o-transcribe',
+--  0.0001000000, 2.5000, 1.643750, NULL, NULL, now(), true,
+--  'OpenAI STT current model, priced per actual audio second.'),
+--
+-- (uuidv7(), 'TRANSLATION', 'token_in', 'VND', 'openai', 'gpt-4.1-mini',
+--  0.0000004000, 2.5000, 0.006575, NULL, NULL, now(), true,
+--  'Translation uncached input tokens.'),
+-- (uuidv7(), 'TRANSLATION', 'token_in_cached', 'VND', 'openai', 'gpt-4.1-mini',
+--  0.0000001000, 2.5000, 0.001644, NULL, NULL, now(), true,
+--  'Translation cached input tokens.'),
+-- (uuidv7(), 'TRANSLATION', 'token_out', 'VND', 'openai', 'gpt-4.1-mini',
+--  0.0000016000, 2.5000, 0.026300, NULL, NULL, now(), true,
+--  'Translation output tokens.'),
+--
+-- (uuidv7(), 'AUDIO_DUBBING_STANDARD', 'character', 'VND', 'cartesia', 'sonic-3.5',
+--  0.0000392000, 3.0000, 0.773220, NULL, NULL, now(), true,
+--  'Cartesia Sonic 3.5 standard TTS, priced per generated character.'),
+-- (uuidv7(), 'AUDIO_DUBBING_VOICE_CLONE', 'character', 'VND', 'cartesia', 'sonic-3.5-clone',
+--  0.0000588000, 3.5000, 1.353135, NULL, NULL, now(), true,
+--  'Cartesia voice clone TTS runtime, priced per generated character.'),
+--
+-- (uuidv7(), 'VOICE_CLONE_ENROLLMENT', 'profile', 'VND', 'cartesia', 'cartesia-localizing-voice',
+--  0.0088200000, 3.5000, 202.970250, NULL, NULL, now(), true,
+--  'Cartesia Localizing a voice = 225 Cartesia credits/profile; draft maps to one enrollment event.'),
+--
+-- (uuidv7(), 'AI_ASSISTANT', 'token_in', 'VND', 'openai', 'gpt-4.1',
+--  0.0000020000, 2.5000, 0.032875, NULL, NULL, now(), true,
+--  'AI Assistant uncached input tokens.'),
+-- (uuidv7(), 'AI_ASSISTANT', 'token_in_cached', 'VND', 'openai', 'gpt-4.1',
+--  0.0000005000, 2.5000, 0.008219, NULL, NULL, now(), true,
+--  'AI Assistant cached input tokens.'),
+-- (uuidv7(), 'AI_ASSISTANT', 'token_out', 'VND', 'openai', 'gpt-4.1',
+--  0.0000080000, 2.5000, 0.131500, NULL, NULL, now(), true,
+--  'AI Assistant output tokens.'),
+--
+-- (uuidv7(), 'AI_SUMMARY', 'token_in', 'VND', 'openai', 'gpt-4o-mini',
+--  0.0000001500, 2.5000, 0.002466, NULL, NULL, now(), true,
+--  'AI Summary uncached input tokens.'),
+-- (uuidv7(), 'AI_SUMMARY', 'token_in_cached', 'VND', 'openai', 'gpt-4o-mini',
+--  0.0000000750, 2.5000, 0.001233, NULL, NULL, now(), true,
+--  'AI Summary cached input tokens.'),
+-- (uuidv7(), 'AI_SUMMARY', 'token_out', 'VND', 'openai', 'gpt-4o-mini',
+--  0.0000006000, 2.5000, 0.009863, NULL, NULL, now(), true,
+--  'AI Summary output tokens.');

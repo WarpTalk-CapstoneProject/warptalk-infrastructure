@@ -3,11 +3,13 @@
 -- Seeds a clean workspace-less user for testing/demo flows
 -- Email: demo@enterprise.vn
 -- Password: Password123
+-- System admin only: system.admin@warptalk.local / Password123
 -- ====================================================================
 
 DO $$ 
 DECLARE
     v_user_id uuid := '019ea677-6c84-7d7b-9f48-738b3cde41a9';
+    v_system_admin_user_id uuid := '019fa320-1111-7000-9000-000000000001';
     v_system_user_role_id uuid;
     v_system_admin_role_id uuid;
 BEGIN
@@ -41,6 +43,23 @@ BEGIN
         true, 
         true, 
         NOW(), 
+        NOW()
+    )
+    ON CONFLICT (email) DO NOTHING;
+
+    -- System Admin Only
+    -- This user intentionally has only platform roles and no workspace membership.
+    INSERT INTO auth.users (id, email, password_hash, full_name, preferred_language, timezone, is_active, email_verified, email_verified_at, created_at)
+    VALUES (
+        v_system_admin_user_id,
+        'system.admin@warptalk.local',
+        'v2$SHA512$100000$16$jTFWzSKOXyuo/xZ+StGHwQ==$77jDm7DDcuTF57fhqikvLFBJhjrwoGuni8WcPdOhpAc=',
+        'System Admin',
+        'en-US',
+        'Asia/Ho_Chi_Minh',
+        true,
+        true,
+        NOW(),
         NOW()
     )
     ON CONFLICT (email) DO NOTHING;
@@ -116,6 +135,11 @@ BEGIN
     VALUES (gen_random_uuid(), v_user_id, 'vi-VN', 'en-US', NOW())
     ON CONFLICT (user_id) DO NOTHING;
 
+    -- System Admin Only settings
+    INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
+    VALUES (gen_random_uuid(), v_system_admin_user_id, 'en-US', 'vi-VN', NOW())
+    ON CONFLICT (user_id) DO NOTHING;
+
     -- Alice Smith settings (Admin)
     INSERT INTO auth.user_settings (id, user_id, default_speak_language, default_listen_language, updated_at)
     VALUES (gen_random_uuid(), '019ea677-6c84-7d7b-9f48-738b3cde41ab', 'en-US', 'vi-VN', NOW())
@@ -150,6 +174,18 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM auth.user_roles WHERE user_id = v_user_id AND role_id = v_system_admin_role_id) THEN
         INSERT INTO auth.user_roles (id, user_id, role_id, assigned_at)
         VALUES (gen_random_uuid(), v_user_id, v_system_admin_role_id, NOW());
+    END IF;
+
+    -- Grant system.admin@warptalk.local only platform roles, no workspace membership.
+    IF NOT EXISTS (SELECT 1 FROM auth.user_roles WHERE user_id = v_system_admin_user_id AND role_id = v_system_user_role_id) THEN
+        INSERT INTO auth.user_roles (id, user_id, role_id, assigned_at)
+        VALUES (gen_random_uuid(), v_system_admin_user_id, v_system_user_role_id, NOW());
+    END IF;
+
+    IF v_system_admin_role_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM auth.user_roles WHERE user_id = v_system_admin_user_id AND role_id = v_system_admin_role_id) THEN
+        INSERT INTO auth.user_roles (id, user_id, role_id, assigned_at)
+        VALUES (gen_random_uuid(), v_system_admin_user_id, v_system_admin_role_id, NOW());
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM auth.user_roles WHERE user_id = '019ea677-6c84-7d7b-9f48-738b3cde41ab' AND role_id = v_system_user_role_id) THEN
