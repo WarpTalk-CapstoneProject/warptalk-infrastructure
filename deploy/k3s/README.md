@@ -114,7 +114,8 @@ estimates only and never customer billing.
    waits for the database cluster, pooler, RabbitMQ quorum and generated
    credentials.
 
-5. Build and push the 20 release images, including the migration and Redis
+5. Build and push the 21 release images, including the on-demand health
+   inspector, migration, and Redis
    stream metrics images:
 
    ```sh
@@ -140,7 +141,8 @@ estimates only and never customer billing.
    ./scripts/deploy-k3s-release.sh
    ```
 
-   The release is rejected unless all 20 release images have registry digests
+   The release is rejected unless all 21 release images have registry digests;
+   20 are rendered into K3s while the host-only health inspector is excluded
    and all four platform image occurrences match their locked digests. The
    pre-upgrade Job applies the shared migration history, provisions service
    roles, extracts the eight logical databases when needed, applies

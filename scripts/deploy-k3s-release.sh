@@ -59,7 +59,8 @@ override_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-images.XXXXXX")"
 rendered_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-release.XXXXXX")"
 trap 'rm -f "$override_file" "$rendered_file"' EXIT INT TERM
 
-jq '
+jq --slurpfile matrix "$matrix_file" '
+  ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
   {
     global: {
       production: true,
@@ -76,6 +77,7 @@ jq '
       reduce (
         .images[]
         | select(.service != "migrator")
+        | select(.service as $service | $k3s_services | index($service))
       ) as $image ({};
         .[$image.service] = {imageRef: ($image.ref + "@" + $image.digest)}
       )
@@ -104,7 +106,7 @@ if grep -Eiq 'CHANGE_ME|replace-with|example\.com|:latest([@"[:space:]]|$)' "$re
 fi
 
 image_count="$(grep -Ec '^[[:space:]]+image: ".+@sha256:[a-f0-9]{64}"$' "$rendered_file")"
-expected_image_count="$(jq '.images | length' "$RELEASE_MANIFEST")"
+expected_image_count="$(jq '[.images[] | select(.k3s != false)] | length' "$matrix_file")"
 otel_image_count="$(grep -Fc "$OTEL_COLLECTOR_IMAGE_DIGEST" "$rendered_file")"
 sql_exporter_image_count="$(grep -Fc "$SQL_EXPORTER_IMAGE_DIGEST" "$rendered_file")"
 [ "$otel_image_count" -eq 1 ] ||
@@ -115,7 +117,12 @@ platform_image_count=$((otel_image_count + sql_exporter_image_count))
 expected_total_image_count=$((expected_image_count + platform_image_count))
 [ "$image_count" -eq "$expected_total_image_count" ] ||
   fail "rendered $image_count immutable images; expected $expected_image_count release plus $platform_image_count locked platform images"
-jq -r '.images[] | .ref + "@" + .digest' "$RELEASE_MANIFEST" |
+jq -r --slurpfile matrix "$matrix_file" '
+  ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
+  .images[] |
+  select(.service as $service | $k3s_services | index($service)) |
+  .ref + "@" + .digest
+' "$RELEASE_MANIFEST" |
   while IFS= read -r image_ref; do
     [ "$(grep -Fc "$image_ref" "$rendered_file")" -eq 1 ] ||
       fail "release image must appear exactly once: $image_ref"
