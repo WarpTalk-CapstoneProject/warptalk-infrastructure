@@ -5,6 +5,23 @@ case "$*" in
   buildx\ build*)
     exit 0
     ;;
+  buildx\ imagetools\ inspect*)
+    [ -n "${BUILD_RELEASE_INSPECT_STATE:-}" ] || {
+      echo "BUILD_RELEASE_INSPECT_STATE is required" >&2
+      exit 1
+    }
+    attempt=0
+    if [ -f "$BUILD_RELEASE_INSPECT_STATE" ]; then
+      attempt="$(cat "$BUILD_RELEASE_INSPECT_STATE")"
+    fi
+    attempt=$((attempt + 1))
+    printf '%s\n' "$attempt" >"$BUILD_RELEASE_INSPECT_STATE"
+    if [ "$attempt" -lt 3 ]; then
+      echo "transient registry read failure" >&2
+      exit 1
+    fi
+    printf '%s\n' '{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+    ;;
   image\ inspect*)
     printf '%s\n' 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     ;;

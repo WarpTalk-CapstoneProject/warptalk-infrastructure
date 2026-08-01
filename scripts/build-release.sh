@@ -17,6 +17,25 @@ fail() {
   exit 1
 }
 
+inspect_remote_digest() {
+  image_ref="$1"
+  attempt=1
+  while [ "$attempt" -le 5 ]; do
+    if manifest_json="$(docker buildx imagetools inspect "$image_ref" --format '{{json .Manifest}}')" &&
+      digest="$(printf '%s\n' "$manifest_json" | jq -er '.digest')" &&
+      echo "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'; then
+      printf '%s\n' "$digest"
+      return 0
+    fi
+    if [ "$attempt" -eq 5 ]; then
+      return 1
+    fi
+    echo "release build: digest lookup failed for $image_ref; retrying ($attempt/5)" >&2
+    sleep "$attempt"
+    attempt=$((attempt + 1))
+  done
+}
+
 for dependency in docker jq git; do
   command -v "$dependency" >/dev/null 2>&1 || fail "missing dependency: $dependency"
 done
@@ -120,8 +139,7 @@ while IFS= read -r image_entry; do
   "$@" "$context_dir"
 
   if [ "$PUSH_IMAGES" = "true" ]; then
-    digest="$(docker buildx imagetools inspect "$image_ref" --format '{{json .Manifest}}' | jq -r '.digest')"
-    echo "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$' ||
+    digest="$(inspect_remote_digest "$image_ref")" ||
       fail "registry did not return an immutable digest for $image_ref"
   else
     digest="$(docker image inspect "$image_ref" --format '{{.Id}}')"

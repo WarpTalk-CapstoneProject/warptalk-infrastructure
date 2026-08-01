@@ -34,6 +34,31 @@ fi
 
 grep -Fq 'release build: building ' "$tmp_dir/stderr.log"
 
+if ! PATH="$fixture_bin:$PATH" \
+  IMAGE_REGISTRY=example.invalid/warptalk \
+  IMAGE_TAG=test-release \
+  PUSH_IMAGES=true \
+  ALLOW_DIRTY_RELEASE=true \
+  ONLY_IMAGE=auth-service \
+  BUILD_RELEASE_INSPECT_STATE="$tmp_dir/inspect-attempts" \
+  RELEASE_MANIFEST_OUTPUT="$tmp_dir/pushed-release-manifest.json" \
+  "$repo_root/scripts/build-release.sh" \
+  >"$tmp_dir/pushed-stdout.log" \
+  2>"$tmp_dir/pushed-stderr.log"; then
+  echo "build-release output contract failed: transient digest lookup was not retried" >&2
+  exit 1
+fi
+
+[ "$(cat "$tmp_dir/inspect-attempts")" -eq 3 ] || {
+  echo "build-release output contract failed: unexpected digest lookup attempt count" >&2
+  exit 1
+}
+
+jq -e '
+  (.images | length) == 1 and
+  .images[0].digest == "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+' "$tmp_dir/pushed-release-manifest.json" >/dev/null
+
 rm -f "$tmp_dir/release-manifest.json"
 if PATH="$fixture_bin:$PATH" \
   IMAGE_REGISTRY=example.invalid/warptalk \
