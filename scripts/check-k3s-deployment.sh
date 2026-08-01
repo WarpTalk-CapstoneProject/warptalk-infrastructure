@@ -215,6 +215,10 @@ if grep -Fq "hook-succeeded" "$CHART_DIR/templates/migration-job.yaml"; then
 fi
 grep -Fq 'ENTRYPOINT ["/scripts/run-k3s-migrations.sh"]' \
   "$ROOT_DIR/deploy/k3s/migrator.Dockerfile"
+grep -Fq 'FROM postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15' \
+  "$ROOT_DIR/deploy/k3s/migrator.Dockerfile"
+grep -Fq 'apk upgrade --no-cache' "$ROOT_DIR/deploy/k3s/migrator.Dockerfile"
+grep -Fq 'rm -f /usr/local/bin/gosu' "$ROOT_DIR/deploy/k3s/migrator.Dockerfile"
 grep -Fq "check-k3s-runtime-secret.sh" "$ROOT_DIR/scripts/deploy-k3s-release.sh"
 grep -Fq "servicemonitors.monitoring.coreos.com" \
   "$ROOT_DIR/scripts/deploy-k3s-release.sh"
