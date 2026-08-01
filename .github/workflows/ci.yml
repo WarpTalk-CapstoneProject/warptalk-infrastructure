@@ -93,6 +93,9 @@ jobs:
       - name: Production deployment contracts
         working-directory: warptalk-infrastructure
         run: ./scripts/check-production-deployment.sh
+      - name: Health inspector runtime contract
+        working-directory: warptalk-infrastructure
+        run: sh scripts/test-health-inspector-image-security-contract.sh
       - name: Performance workload contract
         working-directory: warptalk-infrastructure
         run: ./scripts/check-performance-contract.sh
