@@ -7,6 +7,8 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+__pycache__/
+*.py[cod]
 data/
 !deploy/k3s/data/
 !deploy/k3s/data/redis-values.yaml
