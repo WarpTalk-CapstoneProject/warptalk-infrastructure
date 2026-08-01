@@ -339,17 +339,27 @@ jobs:
           deploy_host() {
             role="$1"
             host="$2"
-            {
-              printf '%s\n' "$GHCR_TOKEN"
-              cat <<'REMOTE'
+            remote_token_file="/tmp/warptalk-ghcr-$RELEASE_TAG-$GITHUB_RUN_ID.token"
+            printf '%s' "$GHCR_TOKEN" | ssh "$host" \
+              "umask 077; cat > '$remote_token_file'; chmod 0600 '$remote_token_file'"
+            cat <<'REMOTE' | ssh "$host" \
+              "sudo env DEPLOY_ROLE='$role' \
+               RELEASE_DIR='$release_dir' \
+               RELEASE_MANIFEST='$remote_manifest' \
+               GHCR_USER='$GHCR_USER' \
+               TOKEN_FILE='$remote_token_file' sh -s"
           set -eu
-          IFS= read -r ghcr_token
-          docker_config="$(mktemp -d /run/warptalk-ghcr.XXXXXX)"
+          docker_config=""
           cleanup() {
-            docker --config "$docker_config" logout ghcr.io >/dev/null 2>&1 || true
-            rm -rf "$docker_config"
+            if [ -n "$docker_config" ]; then
+              docker --config "$docker_config" logout ghcr.io >/dev/null 2>&1 || true
+              rm -rf "$docker_config"
+            fi
+            rm -f "$TOKEN_FILE"
           }
           trap cleanup EXIT INT TERM
+          ghcr_token="$(cat "$TOKEN_FILE")"
+          docker_config="$(mktemp -d /run/warptalk-ghcr.XXXXXX)"
           printf '%s' "$ghcr_token" |
             docker --config "$docker_config" login \
               --username "$GHCR_USER" --password-stdin ghcr.io
@@ -360,11 +370,6 @@ jobs:
             "$RELEASE_DIR/scripts/deploy-release.sh"
           ln -sfn "$RELEASE_DIR" /opt/warptalk/current
           REMOTE
-            } | ssh "$host" \
-              "sudo env DEPLOY_ROLE='$role' \
-               RELEASE_DIR='$release_dir' \
-               RELEASE_MANIFEST='$remote_manifest' \
-               GHCR_USER='$GHCR_USER' sh -s"
           }
 
           stage_host production-data

@@ -65,4 +65,14 @@ if grep -Eq 'SKIP_IMAGE_PULL=true' "$workflow"; then
   fail "GitHub releases must pull the newly built immutable images"
 fi
 
+grep -Eq 'remote_token_file=.*GITHUB_RUN_ID.*\.token' "$workflow" ||
+  fail "GHCR token must use a per-run remote token file"
+grep -Eq 'chmod 0600.*remote_token_file' "$workflow" ||
+  fail "remote GHCR token file must be restricted to its owner"
+grep -Eq 'rm -f.*TOKEN_FILE' "$workflow" ||
+  fail "remote GHCR token file is not cleaned up"
+if grep -Fq "printf '%s\\n' \"\$GHCR_TOKEN\"" "$workflow"; then
+  fail "GHCR token must not be prepended to the remote shell program"
+fi
+
 echo "GitHub production release contract: PASS"
