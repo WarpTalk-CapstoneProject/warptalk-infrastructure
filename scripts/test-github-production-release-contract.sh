@@ -30,6 +30,13 @@ grep -Eq 'tags: tag:github-actions' "$workflow" ||
 grep -Eq 'ping:.*PRODUCTION_APP_HOST' "$workflow" ||
   fail "tailnet connectivity is not gated before deployment"
 
+grep -Eq 'trivy_archive="trivy_\$\{trivy_version\}_Linux-64bit\.tar\.gz"' "$workflow" ||
+  fail "Trivy archive must retain the checksum manifest filename"
+grep -Eq -- '--output "\$trivy_archive"' "$workflow" ||
+  fail "Trivy download filename does not match its checksum manifest"
+grep -Eq 'tar -xzf "\$trivy_archive" trivy' "$workflow" ||
+  fail "Trivy extraction does not use the verified archive"
+
 grep -Eq 'warptalk-deployment\.tar\.gz' "$workflow" ||
   fail "the selected infrastructure release is not packaged"
 grep -Eq 'package-production-deployment\.sh' "$workflow" ||
