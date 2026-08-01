@@ -86,7 +86,13 @@ for stateful_set in warptalk-redis-node warptalk-qdrant; do
     ' >/dev/null || fail "$stateful_set does not have all replicas ready"
 done
 
-jq -r '.images[] | select(.service != "migrator") | [.service, (.ref + "@" + .digest)] | @tsv' \
+jq -r --slurpfile matrix "$matrix" '
+  ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
+  .images[] |
+  select(.service != "migrator") |
+  select(.service as $service | $k3s_services | index($service)) |
+  [.service, (.ref + "@" + .digest)] | @tsv
+' \
   "$RELEASE_MANIFEST" |
   while IFS="$(printf '\t')" read -r service expected_image; do
     deployment="$(kubectl get deployment "$service" --namespace "$NAMESPACE" -o json)"
