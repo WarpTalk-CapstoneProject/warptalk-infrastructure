@@ -95,6 +95,20 @@ jobs:
       - name: Generate SBOMs, scan and keylessly sign every digest
         working-directory: warptalk-infrastructure
         run: |
+          retry_sigstore() {
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                return 1
+              fi
+              echo "Sigstore request failed (attempt $attempt/5); retrying..."
+              sleep $((attempt * 5))
+            done
+          }
+
           mkdir -p deploy/production/sbom
           jq -c '.images[]' deploy/production/release-manifest.json |
           while IFS= read -r image; do
@@ -111,8 +125,8 @@ jobs:
               --format spdx-json \
               --output "deploy/production/sbom/$name.spdx.json" \
               "$subject"
-            cosign sign --yes "$subject"
-            cosign attest --yes \
+            retry_sigstore cosign sign --yes "$subject"
+            retry_sigstore cosign attest --yes \
               --predicate "deploy/production/sbom/$name.spdx.json" \
               --type spdxjson \
               "$subject"
