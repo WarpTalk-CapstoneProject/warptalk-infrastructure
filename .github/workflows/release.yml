@@ -66,6 +66,16 @@ jobs:
       - name: Build and push immutable images
         working-directory: warptalk-infrastructure
         run: ./scripts/build-release.sh
+      - name: Package the selected infrastructure release
+        working-directory: warptalk-infrastructure
+        env:
+          OUTPUT: ${{ runner.temp }}/warptalk-deployment.tar.gz
+        run: |
+          ./scripts/package-production-deployment.sh
+          (
+            cd "$(dirname "$OUTPUT")"
+            sha256sum "$(basename "$OUTPUT")" >"$(basename "$OUTPUT").sha256"
+          )
       - name: Install trusted scanning and signing tools
         run: |
           trivy_version=0.70.0
@@ -112,6 +122,8 @@ jobs:
           path: |
             warptalk-infrastructure/deploy/production/release-manifest.json
             warptalk-infrastructure/deploy/production/sbom
+            ${{ runner.temp }}/warptalk-deployment.tar.gz
+            ${{ runner.temp }}/warptalk-deployment.tar.gz.sha256
 
   staging:
     needs: build-scan-sign
@@ -170,7 +182,10 @@ jobs:
   production:
     needs: build-scan-sign
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    concurrency:
+      group: warptalk-production
+      cancel-in-progress: false
     # Gated by the "production" GitHub Environment's required reviewers — the
     # job pauses here until someone with access clicks Approve in the Actions
     # run, then deploys the exact digests build-scan-sign just scanned/signed.
@@ -180,23 +195,78 @@ jobs:
         with:
           name: release-${{ inputs.release_tag }}
           path: release
+      - name: Join the production tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:github-actions
+          ping: ${{ vars.PRODUCTION_APP_HOST }}
       - name: Install SSH identity
         env:
           PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
           PRODUCTION_KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
+          PRODUCTION_APP_HOST: ${{ vars.PRODUCTION_APP_HOST }}
+          PRODUCTION_DATA_HOST: ${{ vars.PRODUCTION_DATA_HOST }}
+          PRODUCTION_INFRA_HOST: ${{ vars.PRODUCTION_INFRA_HOST }}
+          PRODUCTION_USER: ${{ vars.PRODUCTION_USER }}
         run: |
+          for address in \
+            "$PRODUCTION_APP_HOST" \
+            "$PRODUCTION_DATA_HOST" \
+            "$PRODUCTION_INFRA_HOST"; do
+            case "$address" in
+              ""|*[!A-Za-z0-9.:-]*)
+                echo "Unsafe production host address" >&2
+                exit 1
+                ;;
+            esac
+          done
+          case "$PRODUCTION_USER" in
+            ""|*[!A-Za-z0-9._-]*)
+              echo "Unsafe production SSH user" >&2
+              exit 1
+              ;;
+          esac
           install -d -m 0700 ~/.ssh
           printf '%s\n' "$PRODUCTION_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 0600 ~/.ssh/id_ed25519
           printf '%s\n' "$PRODUCTION_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+          cat >~/.ssh/config <<EOF
+          Host production-app
+            HostName $PRODUCTION_APP_HOST
+            User $PRODUCTION_USER
+            IdentityFile ~/.ssh/id_ed25519
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+
+          Host production-data
+            HostName $PRODUCTION_DATA_HOST
+            User $PRODUCTION_USER
+            IdentityFile ~/.ssh/id_ed25519
+            IdentitiesOnly yes
+            ProxyJump production-app
+            StrictHostKeyChecking yes
+
+          Host production-infra
+            HostName $PRODUCTION_INFRA_HOST
+            User $PRODUCTION_USER
+            IdentityFile ~/.ssh/id_ed25519
+            IdentitiesOnly yes
+            ProxyJump production-app
+            StrictHostKeyChecking yes
+          EOF
+          chmod 0600 ~/.ssh/config
       - name: Deploy the same digests to production
         env:
-          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
-          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
           APP_BASE_URL: ${{ vars.PRODUCTION_APP_BASE_URL }}
           API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         run: |
+          set -eu
           case "$RELEASE_TAG" in
             ""|*[!A-Za-z0-9._-]*)
               echo "Unsafe release tag" >&2
@@ -205,13 +275,90 @@ jobs:
           esac
           manifest="$(find release -type f -name release-manifest.json -print -quit)"
           test -n "$manifest"
-          scp "$manifest" \
-            "$PRODUCTION_USER@$PRODUCTION_HOST:/opt/warptalk/releases/$RELEASE_TAG.json"
-          ssh "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            "DEPLOY_ROLE=app \
-             RELEASE_MANIFEST=/opt/warptalk/releases/$RELEASE_TAG.json \
-             PRODUCTION_ENV_FILE=/etc/warptalk/production.env \
-             /opt/warptalk/current/scripts/deploy-release.sh"
+          bundle="$(find release -type f -name warptalk-deployment.tar.gz -print -quit)"
+          checksum="$(find release -type f -name warptalk-deployment.tar.gz.sha256 -print -quit)"
+          test -n "$bundle"
+          test -n "$checksum"
+          (
+            cd "$(dirname "$bundle")"
+            sha256sum --check "$(basename "$checksum")"
+          )
+
+          release_dir="/opt/warptalk/releases/$RELEASE_TAG"
+          remote_manifest="$release_dir/deploy/production/release-manifest.json"
+
+          stage_host() {
+            host="$1"
+            remote_bundle="/tmp/warptalk-$RELEASE_TAG-$GITHUB_RUN_ID.tar.gz"
+            remote_manifest_tmp="/tmp/warptalk-$RELEASE_TAG-$GITHUB_RUN_ID.json"
+            scp "$bundle" "$host:$remote_bundle"
+            scp "$manifest" "$host:$remote_manifest_tmp"
+            ssh "$host" \
+              "sudo env RELEASE_DIR='$release_dir' \
+               REMOTE_BUNDLE='$remote_bundle' \
+               REMOTE_MANIFEST='$remote_manifest_tmp' sh -s" <<'REMOTE'
+          set -eu
+          test ! -e "$RELEASE_DIR" || {
+            echo "Immutable release directory already exists: $RELEASE_DIR" >&2
+            exit 1
+          }
+          incoming="$(mktemp -d /opt/warptalk/releases/.incoming.XXXXXX)"
+          cleanup() {
+            if [ -n "$incoming" ]; then
+              rm -rf "$incoming"
+            fi
+            rm -f "$REMOTE_BUNDLE" "$REMOTE_MANIFEST"
+          }
+          trap cleanup EXIT INT TERM
+          tar -xzf "$REMOTE_BUNDLE" -C "$incoming"
+          install -m 0640 -o root -g docker \
+            "$REMOTE_MANIFEST" \
+            "$incoming/deploy/production/release-manifest.json"
+          chown -R root:docker "$incoming"
+          chmod -R g+rX "$incoming"
+          mv "$incoming" "$RELEASE_DIR"
+          incoming=""
+          REMOTE
+          }
+
+          deploy_host() {
+            role="$1"
+            host="$2"
+            {
+              printf '%s\n' "$GHCR_TOKEN"
+              cat <<'REMOTE'
+          set -eu
+          IFS= read -r ghcr_token
+          docker_config="$(mktemp -d /run/warptalk-ghcr.XXXXXX)"
+          cleanup() {
+            docker --config "$docker_config" logout ghcr.io >/dev/null 2>&1 || true
+            rm -rf "$docker_config"
+          }
+          trap cleanup EXIT INT TERM
+          printf '%s' "$ghcr_token" |
+            docker --config "$docker_config" login \
+              --username "$GHCR_USER" --password-stdin ghcr.io
+          DOCKER_CONFIG="$docker_config" \
+          DEPLOY_ROLE="$DEPLOY_ROLE" \
+          RELEASE_MANIFEST="$RELEASE_MANIFEST" \
+          PRODUCTION_ENV_FILE=/etc/warptalk/.env.production \
+            "$RELEASE_DIR/scripts/deploy-release.sh"
+          ln -sfn "$RELEASE_DIR" /opt/warptalk/current
+          REMOTE
+            } | ssh "$host" \
+              "sudo env DEPLOY_ROLE='$role' \
+               RELEASE_DIR='$release_dir' \
+               RELEASE_MANIFEST='$remote_manifest' \
+               GHCR_USER='$GHCR_USER' sh -s"
+          }
+
+          stage_host production-data
+          stage_host production-infra
+          stage_host production-app
+          deploy_host data production-data
+          deploy_host infra production-infra
+          deploy_host app production-app
+
           case "$APP_BASE_URL $API_BASE_URL" in
             *"'"*|*[\;\&\|]*)
               echo "Unsafe production URL" >&2
@@ -219,6 +366,6 @@ jobs:
               ;;
           esac
           # shellcheck disable=SC2029
-          ssh "$PRODUCTION_USER@$PRODUCTION_HOST" \
+          ssh production-app \
             "APP_BASE_URL='$APP_BASE_URL' API_BASE_URL='$API_BASE_URL' \
-             /opt/warptalk/current/scripts/smoke-production.sh"
+             '$release_dir/scripts/smoke-production.sh'"

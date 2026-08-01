@@ -65,6 +65,9 @@ jobs:
               exit 1
             fi
           done
+      - name: Approval-gated GitHub production release contract
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-github-production-release-contract.sh
       - name: Shell lint
         working-directory: warptalk-infrastructure
         run: |
