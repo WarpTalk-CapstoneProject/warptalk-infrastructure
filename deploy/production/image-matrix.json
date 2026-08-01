@@ -11,6 +11,7 @@
     { "name": "assistant-service", "service": "assistant-service", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "assistant/Dockerfile" },
     { "name": "billing-service", "service": "billing-service", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "billing/Dockerfile" },
     { "name": "gateway", "service": "gateway", "repository": "warptalk-backend", "context": "warptalk-backend", "dockerfile": "gateway/src/WarpTalk.Gateway/Dockerfile" },
+    { "name": "health-inspector", "service": "health-inspector", "repository": "warptalk-infrastructure", "context": "warptalk-infrastructure", "dockerfile": "health-inspector/Dockerfile", "compose": false },
     { "name": "migrator", "service": "migrator", "repository": "warptalk-infrastructure", "context": "warptalk-infrastructure", "dockerfile": "deploy/k3s/migrator.Dockerfile", "compose": false },
     {
       "name": "frontend",

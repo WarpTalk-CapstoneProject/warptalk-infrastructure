@@ -6,6 +6,19 @@
 
 services:
 
+  # On-demand operations image. It is excluded from normal startup and runs only
+  # with: docker compose --profile tools run --rm health-inspector
+  health-inspector:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: health-inspector/Dockerfile
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - warptalk-net
+
+
   # ── PostgreSQL ────────────────────────────────────────────────────
   postgres:
     image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15

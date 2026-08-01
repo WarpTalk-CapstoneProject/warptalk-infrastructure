@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+
+image="warptalk-health-inspector:20260801"
+network="$({ docker network ls --format '{{.Name}}' || true; } | awk '/^warptalk_.*-net$/ { print; exit }')"
+project="$({ docker ps --format '{{.Label "com.docker.compose.project"}}' || true; } | awk 'NF { print; exit }')"
+
+[ -n "$network" ] || {
+  echo "warptalk-health-check: WarpTalk Docker network was not found" >&2
+  exit 2
+}
+[ -n "$project" ] || {
+  echo "warptalk-health-check: running WarpTalk Compose project was not found" >&2
+  exit 2
+}
+docker image inspect "$image" >/dev/null 2>&1 || {
+  echo "warptalk-health-check: image $image is not installed" >&2
+  exit 2
+}
+
+if [ "$#" -eq 0 ]; then
+  set -- --since 2h
+fi
+
+exec docker run --rm \
+  --pull never \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --network "$network" \
+  -e "INSPECTOR_PROJECT=$project" \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  "$image" "$@"
