@@ -548,7 +548,7 @@ services:
       Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
       Stripe__SuccessUrl: ${STRIPE_SUCCESS_URL:-http://localhost:3000/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}}
-      Stripe__CancelUrl: ${STRIPE_CANCEL_URL:-http://localhost:3000/payment-cancelled}
+      Stripe__CancelUrl: ${STRIPE_CANCEL_URL:-http://localhost:3000/workspace/payment/plans}
     depends_on:
       migrator:
         condition: service_completed_successfully
