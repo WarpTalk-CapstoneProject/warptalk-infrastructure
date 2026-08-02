@@ -30,6 +30,7 @@
     { "name": "ai-translation", "service": "translation-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "translation" },
     { "name": "ai-tts", "service": "tts-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "tts" },
     { "name": "ai-assistant", "service": "assistant-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "assistant" },
+    { "name": "ai-suggestion", "service": "suggestion-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "suggestion" },
     { "name": "ai-embedding", "service": "embedding-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "embedding" },
     { "name": "ai-billing", "service": "billing-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "billing" },
     { "name": "ai-livekit-ingress", "service": "livekit-ingress-worker", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "livekit-ingress" },
