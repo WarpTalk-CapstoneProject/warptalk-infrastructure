@@ -47,6 +47,7 @@ PRODUCTION_AI_SERVICES = {
     "translation-worker",
     "tts-worker",
     "assistant-worker",
+    "suggestion-worker",
     "embedding-worker",
     "billing-worker",
     "livekit-ingress-worker",

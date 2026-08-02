@@ -301,7 +301,7 @@ assert_services "$APP_JSON" \
   migrator auth-service workspace-service translation-room-service \
   transcript-service notification-service meeting-service assistant-service \
   billing-service gateway frontend stt-worker translation-worker tts-worker \
-  assistant-worker embedding-worker billing-worker livekit-ingress-worker \
+  assistant-worker suggestion-worker embedding-worker billing-worker livekit-ingress-worker \
   security-worker caddy
 
 assert_services "$SINGLE_HOST_JSON" \

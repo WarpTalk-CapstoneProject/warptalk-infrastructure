@@ -361,6 +361,25 @@ workloads:
     secretEnv:
       REDIS_PASSWORD: REDIS_PASSWORD
       OPENAI_API_KEY: OPENAI_API_KEY
+  suggestion-worker:
+    image: ai-suggestion
+    workerHealthName: suggestion
+    # Pinned to a single replica, and no autoscaling, unlike its neighbours. The cooldown
+    # and per-meeting budget are enforced in Redis so they would survive a fan-out, but the
+    # rolling transcript window the decide stage reasons over is per-process: with N
+    # replicas the consumer group splits one room's segments N ways and each replica sees a
+    # fraction of the conversation, which degrades the decision quality this feature exists
+    # for. It is also not on the latency path — nothing waits on a suggestion.
+    replicas: 1
+    cpu: 100m
+    memory: 256Mi
+    cpuLimit: "500m"
+    memoryLimit: 512Mi
+    autoscaling: {enabled: false}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
+
   embedding-worker:
     image: ai-embedding
     workerHealthName: embedding,embedding-search
