@@ -263,10 +263,12 @@ services:
       ConnectionStrings__WorkspaceDb: "Host=pgbouncer;Port=6432;Database=warptalk_workspace;Username=warptalk_workspace;Password=${WORKSPACE_DB_PASSWORD:-warptalk-workspace-dev};Search Path=workspace,public;GSS Encryption Mode=Disable"
       AppBaseUrl: ${APP_BASE_URL:-http://localhost:3000}
       GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
+      GrpcSettings__BillingServiceUrl: "http://billing-service:50057"
+      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
-      Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
+
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
       RabbitMQ__Host: "rabbitmq"
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
@@ -546,7 +548,7 @@ services:
       Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
       Stripe__SuccessUrl: ${STRIPE_SUCCESS_URL:-http://localhost:3000/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}}
-      Stripe__CancelUrl: ${STRIPE_CANCEL_URL:-http://localhost:3000/workspace/payment/plans}
+      Stripe__CancelUrl: ${STRIPE_CANCEL_URL:-http://localhost:3000/payment-cancelled}
     depends_on:
       migrator:
         condition: service_completed_successfully

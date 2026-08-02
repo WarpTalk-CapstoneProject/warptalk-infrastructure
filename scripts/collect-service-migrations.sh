@@ -28,8 +28,16 @@ stage_service() {
   }
 
   mkdir -p "$destination_dir"
+  source_files="$(find "$source_dir" -maxdepth 1 -type f -name '*.sql' -print)"
+  [ -n "$source_files" ] || {
+    echo "Skipping $service: no service-owned migrations found in $source_dir."
+    return 0
+  }
+
   find "$destination_dir" -maxdepth 1 -type f -name '*.sql' -delete
-  find "$source_dir" -maxdepth 1 -type f -name '*.sql' -exec cp '{}' "$destination_dir/" ';'
+  printf '%s\n' "$source_files" | while IFS= read -r migration; do
+    cp "$migration" "$destination_dir/"
+  done
 }
 
 stage_service auth
