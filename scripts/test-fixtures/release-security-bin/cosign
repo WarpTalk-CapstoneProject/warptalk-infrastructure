@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+: "${RELEASE_SECURITY_LOG:?RELEASE_SECURITY_LOG is required}"
+printf 'cosign %s\n' "$*" >>"$RELEASE_SECURITY_LOG"
+
+command_name="${1:-}"
+arguments="$*"
+subject=""
+for argument in "$@"; do
+  subject="$argument"
+done
+
+if [ "$command_name" = "verify-attestation" ] &&
+  printf '%s' "$arguments" | grep -Fq -- '--type custom'; then
+  if [ "${RELEASE_SECURITY_BAD_PROVENANCE:-false}" = "true" ]; then
+    predicate='{"predicate":{"sourceRepository":"wrong-repository","sourceCommit":"0000000000000000000000000000000000000000","buildFingerprint":"0000000000000000000000000000000000000000000000000000000000000000"}}'
+  else
+    case "$subject" in
+      *new-image*)
+        predicate='{"predicate":{"sourceRepository":"repo-new","sourceCommit":"1111111111111111111111111111111111111111","buildFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'
+        ;;
+      *reused-image*)
+        predicate='{"predicate":{"sourceRepository":"repo-reused","sourceCommit":"2222222222222222222222222222222222222222","buildFingerprint":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}'
+        ;;
+      *) exit 1 ;;
+    esac
+  fi
+  payload="$(printf '%s' "$predicate" | base64 | tr -d '\n')"
+  printf '{"payload":"%s"}\n' "$payload"
+fi

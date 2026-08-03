@@ -18,14 +18,21 @@ on:
       release_tag:
         description: Immutable release identifier
         required: true
+      force_full_deploy:
+        description: Redeploy every role (required after runtime secret or host environment changes)
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
 
 jobs:
   build-scan-sign:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 180
     environment: release
@@ -36,6 +43,10 @@ jobs:
       NEXT_PUBLIC_SIGNALR_URL: ${{ vars.NEXT_PUBLIC_SIGNALR_URL }}
       NEXT_PUBLIC_LIVEKIT_URL: ${{ vars.NEXT_PUBLIC_LIVEKIT_URL }}
       NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
+      VERIFY_REUSED_IMAGES: "true"
+      BUILD_PARALLELISM: "4"
+      COSIGN_CERTIFICATE_IDENTITY_REGEXP: ^https://github.com/WarpTalk-CapstoneProject/warptalk-infrastructure/.github/workflows/release.yml@refs/(heads|tags)/.+$
+      COSIGN_CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -56,13 +67,14 @@ jobs:
         with:
           ref: ${{ inputs.infrastructure_ref }}
           path: warptalk-infrastructure
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
       - name: Build and push immutable images
         working-directory: warptalk-infrastructure
         run: ./scripts/build-release.sh
@@ -90,53 +102,21 @@ jobs:
             sha256sum --check
           tar -xzf "$trivy_archive" trivy
           sudo install -m 0755 trivy /usr/local/bin/trivy
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
-      - name: Generate SBOMs, scan and keylessly sign every digest
+      - name: Generate SBOMs, scan and verify every digest
         working-directory: warptalk-infrastructure
+        env:
+          RELEASE_MANIFEST: deploy/production/release-manifest.json
+          SBOM_OUTPUT_DIR: deploy/production/sbom
+          SECURITY_PARALLELISM: "4"
         run: |
-          retry_sigstore() {
-            local attempt
-            for attempt in 1 2 3 4 5; do
-              if "$@"; then
-                return 0
-              fi
-              if [ "$attempt" -eq 5 ]; then
-                return 1
-              fi
-              echo "Sigstore request failed (attempt $attempt/5); retrying..."
-              sleep $((attempt * 5))
-            done
-          }
-
-          mkdir -p deploy/production/sbom
-          jq -c '.images[]' deploy/production/release-manifest.json |
-          while IFS= read -r image; do
-            name="$(printf '%s' "$image" | jq -r '.name')"
-            ref="$(printf '%s' "$image" | jq -r '.ref')"
-            digest="$(printf '%s' "$image" | jq -r '.digest')"
-            subject="$ref@$digest"
-            trivy image \
-              --exit-code 1 \
-              --severity HIGH,CRITICAL \
-              --ignore-unfixed \
-              "$subject"
-            trivy image \
-              --format spdx-json \
-              --output "deploy/production/sbom/$name.spdx.json" \
-              "$subject"
-            retry_sigstore cosign sign --yes "$subject"
-            retry_sigstore cosign attest --yes \
-              --predicate "deploy/production/sbom/$name.spdx.json" \
-              --type spdxjson \
-              "$subject"
-          done
+          ./scripts/secure-release-images.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-${{ inputs.release_tag }}
           path: |
             warptalk-infrastructure/deploy/production/release-manifest.json
             warptalk-infrastructure/deploy/production/sbom
+            warptalk-infrastructure/scripts/plan-release-deployment.sh
             ${{ runner.temp }}/warptalk-deployment.tar.gz
             ${{ runner.temp }}/warptalk-deployment.tar.gz.sha256
 
@@ -196,6 +176,9 @@ jobs:
 
   production:
     needs: build-scan-sign
+    permissions:
+      contents: read
+      packages: read
     runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
@@ -216,6 +199,8 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:github-actions
+          timeout: 45s
+          retry: "3"
           ping: ${{ vars.PRODUCTION_APP_HOST }}
       - name: Install SSH identity
         env:
@@ -278,6 +263,7 @@ jobs:
           APP_BASE_URL: ${{ vars.PRODUCTION_APP_BASE_URL }}
           API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          FORCE_FULL_DEPLOY: ${{ inputs.force_full_deploy }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
         run: |
@@ -301,6 +287,24 @@ jobs:
 
           release_dir="/opt/warptalk/releases/$RELEASE_TAG"
           remote_manifest="$release_dir/deploy/production/release-manifest.json"
+          planner="$(find release -type f -name plan-release-deployment.sh -print -quit)"
+          test -n "$planner"
+          current_manifest="$RUNNER_TEMP/current-release-manifest.json"
+          deployment_plan="$RUNNER_TEMP/deployment-plan.json"
+          if ! scp \
+            production-app:/opt/warptalk/current/deploy/production/release-manifest.json \
+            "$current_manifest"; then
+            printf '{}\n' >"$current_manifest"
+          fi
+          FORCE_FULL_DEPLOY="$FORCE_FULL_DEPLOY" \
+            sh "$planner" "$current_manifest" "$manifest" >"$deployment_plan"
+          jq . "$deployment_plan"
+          {
+            echo '### Production deployment plan'
+            echo '```json'
+            jq . "$deployment_plan"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
 
           stage_host() {
             host="$1"
@@ -336,18 +340,47 @@ jobs:
           REMOTE
           }
 
+          stage_role() {
+            role="$1"
+            host="$2"
+            should_deploy="$(jq -r --arg role "$role" '.roles[$role].deploy' "$deployment_plan")"
+            if [ "$should_deploy" != "true" ]; then
+              echo "release staging: skipping unchanged $role role"
+              return 0
+            fi
+            stage_host "$host"
+          }
+
           deploy_host() {
             role="$1"
             host="$2"
+            should_deploy="$(jq -r --arg role "$role" '.roles[$role].deploy' "$deployment_plan")"
+            if [ "$should_deploy" != "true" ]; then
+              echo "release deploy: skipping unchanged $role role"
+              return 0
+            fi
+            full_deploy="$(jq -r --arg role "$role" '.roles[$role].fullDeploy' "$deployment_plan")"
+            run_migrations="$(jq -r --arg role "$role" '.roles[$role].runMigrations' "$deployment_plan")"
+            if [ "$full_deploy" = "true" ]; then
+              deploy_mode=full
+              deploy_services=""
+            else
+              deploy_mode=selective
+              deploy_services="$(jq -r --arg role "$role" \
+                '.roles[$role].changedServices | join(" ")' "$deployment_plan")"
+            fi
             remote_token_file="/tmp/warptalk-ghcr-$RELEASE_TAG-$GITHUB_RUN_ID.token"
             printf '%s' "$GHCR_TOKEN" | ssh "$host" \
               "umask 077; cat > '$remote_token_file'; chmod 0600 '$remote_token_file'"
-            cat <<'REMOTE' | ssh "$host" \
+            ssh "$host" \
               "sudo env DEPLOY_ROLE='$role' \
                RELEASE_DIR='$release_dir' \
                RELEASE_MANIFEST='$remote_manifest' \
+               DEPLOY_MODE='$deploy_mode' \
+               DEPLOY_SERVICES='$deploy_services' \
+               RUN_MIGRATIONS='$run_migrations' \
                GHCR_USER='$GHCR_USER' \
-               TOKEN_FILE='$remote_token_file' sh -s"
+               TOKEN_FILE='$remote_token_file' sh -s" <<'REMOTE'
           set -eu
           docker_config=""
           cleanup() {
@@ -366,15 +399,28 @@ jobs:
           DOCKER_CONFIG="$docker_config" \
           DEPLOY_ROLE="$DEPLOY_ROLE" \
           RELEASE_MANIFEST="$RELEASE_MANIFEST" \
+          DEPLOY_MODE="$DEPLOY_MODE" \
+          DEPLOY_SERVICES="$DEPLOY_SERVICES" \
+          RUN_MIGRATIONS="$RUN_MIGRATIONS" \
           PRODUCTION_ENV_FILE=/etc/warptalk/.env.production \
             "$RELEASE_DIR/scripts/deploy-release.sh"
           ln -sfn "$RELEASE_DIR" /opt/warptalk/current
           REMOTE
           }
 
-          stage_host production-data
-          stage_host production-infra
-          stage_host production-app
+          stage_role data production-data & data_stage_pid=$!
+          stage_role infra production-infra & infra_stage_pid=$!
+          stage_role app production-app & app_stage_pid=$!
+          stage_failed=false
+          for stage_pid in "$data_stage_pid" "$infra_stage_pid" "$app_stage_pid"; do
+            if ! wait "$stage_pid"; then
+              stage_failed=true
+            fi
+          done
+          [ "$stage_failed" = "false" ] || {
+            echo "Failed to stage the immutable release on selected production hosts" >&2
+            exit 1
+          }
           deploy_host data production-data
           deploy_host infra production-infra
           deploy_host app production-app
@@ -388,4 +434,4 @@ jobs:
           # shellcheck disable=SC2029
           ssh production-app \
             "APP_BASE_URL='$APP_BASE_URL' API_BASE_URL='$API_BASE_URL' \
-             '$release_dir/scripts/smoke-production.sh'"
+             /opt/warptalk/current/scripts/smoke-production.sh"
