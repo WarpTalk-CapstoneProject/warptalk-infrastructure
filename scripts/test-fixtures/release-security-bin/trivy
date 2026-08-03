@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+: "${RELEASE_SECURITY_LOG:?RELEASE_SECURITY_LOG is required}"
+printf 'trivy %s\n' "$*" >>"$RELEASE_SECURITY_LOG"
+
+output=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    output="$1"
+  fi
+  shift
+done
+
+if [ -n "$output" ]; then
+  printf '{"spdxVersion":"SPDX-2.3"}\n' >"$output"
+fi

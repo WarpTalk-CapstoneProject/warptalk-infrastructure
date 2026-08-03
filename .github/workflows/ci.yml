@@ -68,6 +68,9 @@ jobs:
       - name: Approval-gated GitHub production release contract
         working-directory: warptalk-infrastructure
         run: ./scripts/test-github-production-release-contract.sh
+      - name: Optimized release and supply-chain contract
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-release-optimization-contract.sh
       - name: Shell lint
         working-directory: warptalk-infrastructure
         run: |
