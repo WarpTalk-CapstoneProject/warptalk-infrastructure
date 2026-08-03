@@ -175,10 +175,29 @@ grep -Eq 'plan-release-deployment\.sh' "$workflow" ||
   fail "workflow does not calculate a deployment diff"
 grep -Eq 'force_full_deploy:' "$workflow" ||
   fail "workflow lacks an explicit full-deploy path for runtime config changes"
+grep -Eq 'timeout:[[:space:]]*["'\'']?45s' "$workflow" ||
+  fail "Tailscale connection attempts are not bounded below the previous two-minute timeout"
+grep -Eq 'retry:[[:space:]]*["'\'']?3["'\'']?' "$workflow" ||
+  fail "Tailscale retry count is not explicitly bounded"
 grep -Eq '^    permissions:$' "$workflow" ||
   fail "job-level least-privilege permissions are missing"
 grep -Eq 'test-release-optimization-contract\.sh' "$ci_workflow" ||
   fail "release optimization regressions are not enforced by infrastructure CI"
+grep -Eq 'stage_role\(\)' "$workflow" ||
+  fail "workflow cannot skip staging unchanged production roles"
+awk '
+  /^[[:space:]]*stage_host\(\)/ { inside_stage_host = 1 }
+  inside_stage_host && /^[[:space:]]*REMOTE$/ { remote_payload_closed = 1 }
+  remote_payload_closed && /^[[:space:]]*stage_role\(\)/ { stage_role_is_local = 1 }
+  END { exit(stage_role_is_local ? 0 : 1) }
+' "$workflow" || fail "stage_role is defined inside the remote staging payload"
+grep -Eq '\.roles\[\$role\]\.deploy' "$workflow" ||
+  fail "production staging is not controlled by the deployment plan"
+if grep -Eq '^[[:space:]]+stage_host production-(data|infra|app)' "$workflow"; then
+  fail "workflow still stages every production host unconditionally"
+fi
+grep -Fq "/opt/warptalk/current/scripts/smoke-production.sh" "$workflow" ||
+  fail "smoke checks do not use the active release when the app role is unchanged"
 
 duplicate_staging_destination="$({
   sed -n '/scp "\$manifest"/,/ssh "\$STAGING_USER/p' "$workflow" || true

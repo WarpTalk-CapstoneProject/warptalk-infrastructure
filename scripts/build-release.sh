@@ -3,7 +3,7 @@ set -eu
 
 INFRA_ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 WORKSPACE_ROOT="$(CDPATH='' cd -- "$INFRA_ROOT/.." && pwd)"
-MATRIX_FILE="$INFRA_ROOT/deploy/production/image-matrix.json"
+MATRIX_FILE="${RELEASE_IMAGE_MATRIX:-$INFRA_ROOT/deploy/production/image-matrix.json}"
 
 REGISTRY="${IMAGE_REGISTRY:-}"
 RELEASE_TAG="${IMAGE_TAG:-}"
@@ -13,6 +13,7 @@ ONLY_IMAGE="${ONLY_IMAGE:-}"
 REUSE_IMAGES="${REUSE_IMAGES:-$PUSH_IMAGES}"
 VERIFY_REUSED_IMAGES="${VERIFY_REUSED_IMAGES:-false}"
 CACHE_REGISTRY="${BUILD_CACHE_REGISTRY:-$REGISTRY/build-cache}"
+BUILD_PARALLELISM="${BUILD_PARALLELISM:-4}"
 MANIFEST_OUTPUT="${RELEASE_MANIFEST_OUTPUT:-$INFRA_ROOT/deploy/production/release-manifest.json}"
 
 fail() {
@@ -105,6 +106,9 @@ case "$VERIFY_REUSED_IMAGES" in
   true|false) ;;
   *) fail "VERIFY_REUSED_IMAGES must be true or false" ;;
 esac
+case "$BUILD_PARALLELISM" in
+  ''|*[!0-9]*|0) fail "BUILD_PARALLELISM must be a positive integer" ;;
+esac
 if [ "$VERIFY_REUSED_IMAGES" = "true" ]; then
   command -v cosign >/dev/null 2>&1 || fail "cosign is required to verify reusable images"
   : "${COSIGN_CERTIFICATE_IDENTITY_REGEXP:?COSIGN_CERTIFICATE_IDENTITY_REGEXP is required}"
@@ -123,8 +127,8 @@ platform="$(jq -r '.platform' "$MATRIX_FILE")"
 metadata_tmp="$(mktemp)"
 images_tmp="$(mktemp)"
 image_entries_tmp="$(mktemp)"
-image_records_tmp="$(mktemp)"
-trap 'rm -f "$metadata_tmp" "$images_tmp" "$image_entries_tmp" "$image_records_tmp"' EXIT
+image_records_dir="$(mktemp -d)"
+trap 'rm -f "$metadata_tmp" "$images_tmp" "$image_entries_tmp"; rm -rf "$image_records_dir"' EXIT
 
 jq -n \
   --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -160,14 +164,11 @@ for repo_name in warptalk-backend warptalk-web warptalk-ai warptalk-infrastructu
 done
 
 jq -c '.images[]' "$MATRIX_FILE" >"$image_entries_tmp"
-: >"$image_records_tmp"
 
-while IFS= read -r image_entry; do
+process_image() {
+  image_entry="$1"
+  image_record="$2"
   image_name="$(echo "$image_entry" | jq -r '.name')"
-  if [ -n "$ONLY_IMAGE" ] && [ "$image_name" != "$ONLY_IMAGE" ]; then
-    continue
-  fi
-
   context_rel="$(echo "$image_entry" | jq -r '.context')"
   dockerfile_rel="$(echo "$image_entry" | jq -r '.dockerfile')"
   target="$(echo "$image_entry" | jq -r '.target // empty')"
@@ -260,10 +261,49 @@ while IFS= read -r image_entry; do
       buildFingerprint: $build_fingerprint,
       reused: $reused
     }' \
-    >>"$image_records_tmp"
+    >"$image_record"
+}
+
+wait_for_batch() {
+  batch_failed=false
+  for worker_pid in $batch_pids; do
+    if ! wait "$worker_pid"; then
+      batch_failed=true
+    fi
+  done
+  [ "$batch_failed" = "false" ] || fail "one or more image builds failed"
+}
+
+batch_pids=""
+batch_count=0
+image_index=0
+while IFS= read -r image_entry; do
+  image_name="$(echo "$image_entry" | jq -r '.name')"
+  if [ -n "$ONLY_IMAGE" ] && [ "$image_name" != "$ONLY_IMAGE" ]; then
+    continue
+  fi
+
+  image_index=$((image_index + 1))
+  image_record="$(printf '%s/%04d.json' "$image_records_dir" "$image_index")"
+  process_image "$image_entry" "$image_record" &
+  batch_pids="$batch_pids $!"
+  batch_count=$((batch_count + 1))
+  if [ "$batch_count" -eq "$BUILD_PARALLELISM" ]; then
+    wait_for_batch
+    batch_pids=""
+    batch_count=0
+  fi
 done <"$image_entries_tmp"
 
-jq -s '.' "$image_records_tmp" >"$images_tmp"
+if [ "$batch_count" -gt 0 ]; then
+  wait_for_batch
+fi
+
+if [ "$image_index" -eq 0 ]; then
+  printf '[]\n' >"$images_tmp"
+else
+  jq -s '.' "$image_records_dir"/*.json >"$images_tmp"
+fi
 
 jq --slurpfile images "$images_tmp" '.images = $images[0]' "$metadata_tmp" > "$MANIFEST_OUTPUT"
 echo "release build: manifest written to $MANIFEST_OUTPUT"

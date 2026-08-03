@@ -3,6 +3,11 @@ set -eu
 
 case "$*" in
   buildx\ build*)
+    if [ -n "${BUILD_RELEASE_PARALLEL_LOG:-}" ]; then
+      printf 'start %s\n' "$*" >>"$BUILD_RELEASE_PARALLEL_LOG"
+      sleep "${BUILD_RELEASE_PARALLEL_DELAY:-1}"
+      printf 'end %s\n' "$*" >>"$BUILD_RELEASE_PARALLEL_LOG"
+    fi
     exit 0
     ;;
   buildx\ imagetools\ inspect*)

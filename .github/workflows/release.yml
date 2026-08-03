@@ -44,6 +44,7 @@ jobs:
       NEXT_PUBLIC_LIVEKIT_URL: ${{ vars.NEXT_PUBLIC_LIVEKIT_URL }}
       NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
       VERIFY_REUSED_IMAGES: "true"
+      BUILD_PARALLELISM: "4"
       COSIGN_CERTIFICATE_IDENTITY_REGEXP: ^https://github.com/WarpTalk-CapstoneProject/warptalk-infrastructure/.github/workflows/release.yml@refs/(heads|tags)/.+$
       COSIGN_CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
     steps:
@@ -198,6 +199,8 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:github-actions
+          timeout: 45s
+          retry: "3"
           ping: ${{ vars.PRODUCTION_APP_HOST }}
       - name: Install SSH identity
         env:
@@ -337,6 +340,17 @@ jobs:
           REMOTE
           }
 
+          stage_role() {
+            role="$1"
+            host="$2"
+            should_deploy="$(jq -r --arg role "$role" '.roles[$role].deploy' "$deployment_plan")"
+            if [ "$should_deploy" != "true" ]; then
+              echo "release staging: skipping unchanged $role role"
+              return 0
+            fi
+            stage_host "$host"
+          }
+
           deploy_host() {
             role="$1"
             host="$2"
@@ -394,9 +408,9 @@ jobs:
           REMOTE
           }
 
-          stage_host production-data & data_stage_pid=$!
-          stage_host production-infra & infra_stage_pid=$!
-          stage_host production-app & app_stage_pid=$!
+          stage_role data production-data & data_stage_pid=$!
+          stage_role infra production-infra & infra_stage_pid=$!
+          stage_role app production-app & app_stage_pid=$!
           stage_failed=false
           for stage_pid in "$data_stage_pid" "$infra_stage_pid" "$app_stage_pid"; do
             if ! wait "$stage_pid"; then
@@ -404,7 +418,7 @@ jobs:
             fi
           done
           [ "$stage_failed" = "false" ] || {
-            echo "Failed to stage the immutable release on every production host" >&2
+            echo "Failed to stage the immutable release on selected production hosts" >&2
             exit 1
           }
           deploy_host data production-data
@@ -420,4 +434,4 @@ jobs:
           # shellcheck disable=SC2029
           ssh production-app \
             "APP_BASE_URL='$APP_BASE_URL' API_BASE_URL='$API_BASE_URL' \
-             '$release_dir/scripts/smoke-production.sh'"
+             /opt/warptalk/current/scripts/smoke-production.sh"
