@@ -104,7 +104,10 @@ fi
 
 MANIFEST="${RELEASE_MANIFEST:-}"
 SBOM_DIR="${SBOM_OUTPUT_DIR:-}"
-SECURITY_PARALLELISM="${SECURITY_PARALLELISM:-4}"
+# Trivy shares a process-wide cache lock and keyless Cosign obtains a GitHub
+# OIDC token for every signing operation. The release workflow intentionally
+# keeps this at one unless callers provide isolated caches and token handling.
+SECURITY_PARALLELISM="${SECURITY_PARALLELISM:-1}"
 : "${COSIGN_CERTIFICATE_IDENTITY_REGEXP:?COSIGN_CERTIFICATE_IDENTITY_REGEXP is required}"
 : "${COSIGN_CERTIFICATE_OIDC_ISSUER:?COSIGN_CERTIFICATE_OIDC_ISSUER is required}"
 
