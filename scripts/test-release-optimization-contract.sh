@@ -169,6 +169,8 @@ if grep -Eq 'docker/setup-qemu-action@' "$workflow"; then
 fi
 grep -Eq 'secure-release-images\.sh' "$workflow" ||
   fail "workflow does not use the secure parallel image gate"
+grep -Eq 'SECURITY_PARALLELISM:[[:space:]]*["'\'']?1["'\'']?' "$workflow" ||
+  fail "workflow permits concurrent Trivy cache and keyless OIDC access"
 grep -Eq 'VERIFY_REUSED_IMAGES: "true"' "$workflow" ||
   fail "workflow does not fail closed when a cached image is unsigned"
 grep -Eq 'plan-release-deployment\.sh' "$workflow" ||

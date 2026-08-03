@@ -107,7 +107,10 @@ jobs:
         env:
           RELEASE_MANIFEST: deploy/production/release-manifest.json
           SBOM_OUTPUT_DIR: deploy/production/sbom
-          SECURITY_PARALLELISM: "4"
+          # Trivy uses an exclusive cache lock and GitHub's keyless OIDC token
+          # endpoint is not safe to fan out from this job. Keep the security
+          # gate serial; image builds and signed-image reuse remain parallel.
+          SECURITY_PARALLELISM: "1"
         run: |
           ./scripts/secure-release-images.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
