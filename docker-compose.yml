@@ -549,6 +549,14 @@ services:
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
       Stripe__SuccessUrl: ${STRIPE_SUCCESS_URL:-http://localhost:3000/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}}
       Stripe__CancelUrl: ${STRIPE_CANCEL_URL:-http://localhost:3000/workspace/payment/plans}
+      Billing__Workers__SessionMonitorIntervalSeconds: ${BILLING_SESSION_MONITOR_INTERVAL_SECONDS:-5}
+      Billing__Workers__SubscriptionExpirationIntervalMinutes: ${BILLING_SUBSCRIPTION_EXPIRATION_INTERVAL_MINUTES:-60}
+      Billing__Workers__SubscriptionRenewalLookbackHours: ${BILLING_SUBSCRIPTION_RENEWAL_LOOKBACK_HOURS:-24}
+      Billing__Workers__DailyAuditHourUtc: ${BILLING_DAILY_AUDIT_HOUR_UTC:-0}
+      Billing__Workers__BillingAggregationIntervalSeconds: ${BILLING_AGGREGATION_INTERVAL_SECONDS:-10}
+      Billing__Workers__BillingAggregationBatchSize: ${BILLING_AGGREGATION_BATCH_SIZE:-1000}
+      Billing__Workers__BillingCycleIntervalMinutes: ${BILLING_CYCLE_INTERVAL_MINUTES:-60}
+      Billing__Workers__InvoiceOverdueIntervalMinutes: ${BILLING_INVOICE_OVERDUE_INTERVAL_MINUTES:-60}
     depends_on:
       migrator:
         condition: service_completed_successfully
