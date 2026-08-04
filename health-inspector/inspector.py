@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -12,6 +13,7 @@ import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -100,6 +102,12 @@ SECRET_PATTERNS = (
     (re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s,;]+"), r"\1[REDACTED]"),
     (re.compile(r"(?i)\b(password|secret|api[_-]?key|token)=([^\s,;]+)"), r"\1=[REDACTED]"),
 )
+TIMESTAMP_PREFIX = re.compile(
+    r"^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}))\s+"
+)
+UUID_PATTERN = re.compile(r"\b[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\b")
+LONG_HEX_PATTERN = re.compile(r"\b[0-9a-fA-F]{16,}\b")
+NUMBER_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\b")
 
 
 def redact(text: str) -> str:
@@ -122,8 +130,58 @@ def extract_log_findings(logs: str, limit: int) -> list[str]:
     return findings
 
 
+def group_log_findings(findings: list[str], limit: int) -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for line in findings:
+        timestamp_match = TIMESTAMP_PREFIX.match(line)
+        timestamp = timestamp_match.group("timestamp") if timestamp_match else None
+        message = line[timestamp_match.end() :] if timestamp_match else line
+        normalized = UUID_PATTERN.sub("<uuid>", message)
+        normalized = LONG_HEX_PATTERN.sub("<hex>", normalized)
+        normalized = NUMBER_PATTERN.sub("<n>", normalized)
+        normalized = " ".join(normalized.lower().split())
+        fingerprint = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+        group = groups.get(fingerprint)
+        if group is None:
+            groups[fingerprint] = {
+                "fingerprint": fingerprint,
+                "count": 1,
+                "firstSeen": timestamp,
+                "lastSeen": timestamp,
+                "sample": line,
+            }
+            continue
+        group["count"] += 1
+        if timestamp:
+            group["firstSeen"] = group["firstSeen"] or timestamp
+            group["lastSeen"] = timestamp
+    return sorted(groups.values(), key=lambda item: (-item["count"], item["fingerprint"]))[:limit]
+
+
+def load_checkpoint(path: Path) -> dict[str, Any]:
+    try:
+        with path.open(encoding="utf-8") as handle:
+            value = json.load(handle)
+        return value if isinstance(value, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_checkpoint(path: Path, checkpoint: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(checkpoint, handle, indent=2, sort_keys=True)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
 def evaluate_container_state(
-    service: str, state: dict[str, Any], restart_count: int
+    service: str,
+    state: dict[str, Any],
+    restart_count: int,
+    previous_restart_count: int | None = None,
 ) -> CheckResult:
     if state.get("OOMKilled"):
         return CheckResult(service, "critical", "container was OOM-killed")
@@ -145,8 +203,13 @@ def evaluate_container_state(
         return CheckResult(service, "critical", "Docker health status is unhealthy")
     if health == "starting":
         return CheckResult(service, "warning", "Docker health status is still starting")
-    if restart_count > 0:
-        return CheckResult(service, "warning", f"running with {restart_count} restart(s)")
+    if previous_restart_count is not None and restart_count > previous_restart_count:
+        restart_delta = restart_count - previous_restart_count
+        return CheckResult(
+            service,
+            "warning",
+            f"running with {restart_delta} new restart(s) since previous inspection",
+        )
     if health == "healthy":
         return CheckResult(service, "pass", "running; Docker health is healthy")
     return CheckResult(service, "pass", "running; application probe required")
@@ -195,9 +258,13 @@ def docker(*args: str, allow_failure: bool = False) -> str:
     return completed.stdout
 
 
-def docker_logs(container_id: str, since: str, tail: int) -> str:
+def docker_logs(container_id: str, since: str, tail: int, until: str | None = None) -> str:
+    command = ["docker", "logs", "--timestamps", "--since", since]
+    if until:
+        command.extend(["--until", until])
+    command.extend(["--tail", str(tail), container_id])
     completed = subprocess.run(
-        ["docker", "logs", "--since", since, "--tail", str(tail), container_id],
+        command,
         check=False,
         text=True,
         stdout=subprocess.PIPE,
@@ -284,11 +351,14 @@ def http_probe(service: str, probe: ServiceProbe, timeout: float) -> CheckResult
         return CheckResult(service, "critical", f"{probe.path} failed: {redact(str(reason))}", "probe")
 
 
-def run(args: argparse.Namespace) -> tuple[list[CheckResult], dict[str, list[str]], str]:
+def run(args: argparse.Namespace) -> tuple[list[CheckResult], dict[str, list[dict[str, Any]]], str]:
     containers = inspect_containers()
     project = choose_project(containers)
     results: list[CheckResult] = []
-    log_findings: dict[str, list[str]] = {}
+    log_findings: dict[str, list[dict[str, Any]]] = {}
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else None
+    checkpoint = load_checkpoint(checkpoint_path) if checkpoint_path else {}
+    previous_services = checkpoint.get("services", {})
 
     if not project:
         return [CheckResult("docker", "critical", "no WarpTalk Compose project found")], {}, ""
@@ -302,13 +372,25 @@ def run(args: argparse.Namespace) -> tuple[list[CheckResult], dict[str, list[str
     role = args.role if args.role != "auto" else detect_role(set(selected))
     expected = required_services(role, set(selected), args.require_ai)
 
+    def previous_restarts(service: str, container: dict[str, Any]) -> int | None:
+        previous = previous_services.get(service, {})
+        if previous.get("containerId") != container.get("Id"):
+            return None
+        value = previous.get("restartCount")
+        return value if isinstance(value, int) else None
+
     for service in sorted(expected):
         container = selected.get(service)
         if container is None:
             results.append(CheckResult(service, "critical", f"missing from Compose project {project}"))
             continue
         results.append(
-            evaluate_container_state(service, container.get("State", {}), container.get("RestartCount", 0))
+            evaluate_container_state(
+                service,
+                container.get("State", {}),
+                container.get("RestartCount", 0),
+                previous_restarts(service, container),
+            )
         )
 
     for service, probe in EXPECTED_SERVICES.items():
@@ -337,24 +419,57 @@ def run(args: argparse.Namespace) -> tuple[list[CheckResult], dict[str, list[str
         service = service_name(container)
         if service not in already_checked:
             results.append(
-                evaluate_container_state(service, container.get("State", {}), container.get("RestartCount", 0))
+                evaluate_container_state(
+                    service,
+                    container.get("State", {}),
+                    container.get("RestartCount", 0),
+                    previous_restarts(service, container),
+                )
             )
 
         if args.no_logs:
             continue
-        raw_logs = docker_logs(container["Id"], args.since, args.log_tail)
-        findings = extract_log_findings(raw_logs, args.max_log_findings)
-        if findings:
-            log_findings[service] = findings
+        window_start = args.from_time or args.since
+        raw_logs = docker_logs(container["Id"], window_start, args.log_tail, args.until)
+        findings = extract_log_findings(raw_logs, max(args.log_tail * 2, args.max_log_findings))
+        groups = group_log_findings(findings, args.max_log_findings)
+        if groups:
+            log_findings[service] = groups
             severity = "critical" if args.log_errors_critical else "warning"
+            window = f"{window_start}..{args.until or 'now'}"
             results.append(
-                CheckResult(service, severity, f"{len(findings)} suspicious log line(s) in {args.since}", "logs")
+                CheckResult(
+                    service,
+                    severity,
+                    f"{len(findings)} suspicious log line(s), "
+                    f"{len(groups)} fingerprint(s) in {window}",
+                    "logs",
+                )
             )
+
+    if checkpoint_path and not args.until:
+        checkpoint_scope = {service_name(container): container for container in scope}
+        checkpoint_scope.update(selected)
+        save_checkpoint(
+            checkpoint_path,
+            {
+                "checkedAt": datetime.now(timezone.utc).isoformat(),
+                "services": {
+                    service: {
+                        "containerId": container.get("Id"),
+                        "restartCount": container.get("RestartCount", 0),
+                    }
+                    for service, container in sorted(checkpoint_scope.items())
+                },
+            },
+        )
 
     return results, log_findings, project
 
 
-def render_human(results: list[CheckResult], log_findings: dict[str, list[str]], project: str) -> None:
+def render_human(
+    results: list[CheckResult], log_findings: dict[str, list[dict[str, Any]]], project: str
+) -> None:
     icons = {"pass": "PASS", "warning": "WARN", "critical": "FAIL"}
     print(f"WarpTalk health inspection | project={project or 'unknown'} | {datetime.now(timezone.utc).isoformat()}")
     print("=" * 88)
@@ -368,9 +483,15 @@ def render_human(results: list[CheckResult], log_findings: dict[str, list[str]],
 
     if log_findings:
         print("\n[LOG EVIDENCE - REDACTED]")
-        for service, findings in sorted(log_findings.items()):
-            for line in findings:
-                print(f"{service}: {line}")
+        for service, groups in sorted(log_findings.items()):
+            for group in groups:
+                seen = ""
+                if group["firstSeen"]:
+                    seen = f" first={group['firstSeen']} last={group['lastSeen']}"
+                print(
+                    f"{service}: [{group['fingerprint']}] count={group['count']}{seen} "
+                    f"sample={group['sample']}"
+                )
 
     counts = {status: sum(result.status == status for result in results) for status in icons}
     print(f"\nSUMMARY pass={counts['pass']} warning={counts['warning']} critical={counts['critical']}")
@@ -379,6 +500,8 @@ def render_human(results: list[CheckResult], log_findings: dict[str, list[str]],
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Inspect WarpTalk containers, readiness endpoints, and recent logs")
     parser.add_argument("--since", default=os.getenv("LOG_SINCE", "30m"), help="Docker log window, e.g. 30m or 2h")
+    parser.add_argument("--from", dest="from_time", help="exact Docker log start time (RFC3339 or Docker format)")
+    parser.add_argument("--until", help="exact Docker log end time (RFC3339 or Docker format)")
     parser.add_argument("--log-tail", type=int, default=3000, help="maximum log lines read per container")
     parser.add_argument("--max-log-findings", type=int, default=20, help="evidence lines retained per container")
     parser.add_argument("--timeout", type=float, default=5.0, help="HTTP probe timeout in seconds")
@@ -392,6 +515,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--log-errors-critical", action="store_true", help="make suspicious log findings exit 2")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    parser.add_argument("--checkpoint", help="persist restart baselines to this JSON file")
     return parser.parse_args()
 
 

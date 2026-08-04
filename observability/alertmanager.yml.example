@@ -1,3 +1,10 @@
+global:
+  smtp_smarthost: __SMTP_SMARTHOST__
+  smtp_from: __SMTP_FROM_EMAIL__
+  smtp_auth_username: __SMTP_USERNAME__
+  smtp_auth_password: __SMTP_PASSWORD__
+  smtp_require_tls: true
+
 route:
   receiver: warptalk-operations
   group_by: [alertname, service_name, queue, stream]
@@ -7,6 +14,6 @@ route:
 
 receivers:
   - name: warptalk-operations
-    webhook_configs:
-      - url: __ALERT_WEBHOOK_URL__
+    email_configs:
+      - to: __ALERT_EMAIL_TO__
         send_resolved: true
