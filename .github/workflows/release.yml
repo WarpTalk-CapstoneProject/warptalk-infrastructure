@@ -118,6 +118,7 @@ jobs:
           name: release-${{ inputs.release_tag }}
           path: |
             warptalk-infrastructure/deploy/production/release-manifest.json
+            warptalk-infrastructure/deploy/production/image-matrix.json
             warptalk-infrastructure/deploy/production/sbom
             warptalk-infrastructure/scripts/plan-release-deployment.sh
             ${{ runner.temp }}/warptalk-deployment.tar.gz
