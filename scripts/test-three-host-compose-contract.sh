@@ -60,9 +60,29 @@ rg -q "data-host:6333" "$repo_root/observability/prometheus.yml" ||
 render_dir="$(mktemp -d)"
 trap 'rm -rf "$render_dir"' EXIT
 
-ALERT_WEBHOOK_URL=https://example.invalid/warptalk-alerts \
+if ALERT_WEBHOOK_URL=https://alerts.warptalk.io.vn/warptalk-alerts \
+  ALERTMANAGER_CONFIG_PATH="$render_dir/webhook-alertmanager.yml" \
+  "$alert_renderer" >/dev/null 2>&1; then
+  fail "Alertmanager renderer must require the production email receiver"
+fi
+
+ALERT_EMAIL_TO=operations@example.com \
+RESEND_API_KEY=test-resend-api-key \
+RESEND_FROM_EMAIL=alerts@example.com \
 ALERTMANAGER_CONFIG_PATH="$render_dir/alertmanager.yml" \
   "$alert_renderer" >/dev/null
+
+rg -q 'email_configs:' "$render_dir/alertmanager.yml" ||
+  fail "Alertmanager configuration must use an email receiver"
+rg -q "to: 'operations@example.com'" "$render_dir/alertmanager.yml" ||
+  fail "Alertmanager email recipient was not rendered"
+rg -q "smtp_smarthost: 'smtp.resend.com:587'" "$render_dir/alertmanager.yml" ||
+  fail "Alertmanager must use the dedicated Resend SMTP endpoint"
+rg -q "smtp_auth_username: 'resend'" "$render_dir/alertmanager.yml" ||
+  fail "Alertmanager must use Resend SMTP authentication"
+if rg -q 'webhook_configs:' "$render_dir/alertmanager.yml"; then
+  fail "Alertmanager configuration still contains the disabled webhook receiver"
+fi
 
 AI_COST_STT_USD_PER_MINUTE=0 \
 AI_COST_TRANSLATION_USD_PER_MINUTE=0 \

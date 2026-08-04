@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-image="warptalk-health-inspector:20260801"
+image="warptalk-health-inspector:20260801-v3"
+state_volume="warptalk-health-inspector-state"
 network="$({ docker network ls --format '{{.Name}}' || true; } | awk '/^warptalk_.*-net$/ { print; exit }')"
 project="$({ docker ps --format '{{.Label "com.docker.compose.project"}}' || true; } | awk 'NF { print; exit }')"
 
@@ -17,6 +18,8 @@ docker image inspect "$image" >/dev/null 2>&1 || {
   echo "warptalk-health-check: image $image is not installed" >&2
   exit 2
 }
+docker volume inspect "$state_volume" >/dev/null 2>&1 ||
+  docker volume create "$state_volume" >/dev/null
 
 if [ "$#" -eq 0 ]; then
   set -- --since 2h
@@ -30,4 +33,5 @@ exec docker run --rm \
   --network "$network" \
   -e "INSPECTOR_PROJECT=$project" \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  "$image" "$@"
+  -v warptalk-health-inspector-state:/state \
+  "$image" --checkpoint /state/checkpoint.json "$@"

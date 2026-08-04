@@ -14,8 +14,11 @@ from inspector import (  # noqa: E402
     detect_role,
     evaluate_container_state,
     extract_log_findings,
+    group_log_findings,
+    load_checkpoint,
     result_exit_code,
     required_services,
+    save_checkpoint,
 )
 
 
@@ -46,15 +49,27 @@ class ContainerStateTests(unittest.TestCase):
         self.assertEqual("critical", result.status)
         self.assertIn("unhealthy", result.detail)
 
-    def test_recent_restarts_are_visible_even_when_container_is_running(self):
+    def test_only_restarts_since_the_previous_checkpoint_are_visible(self):
+        result = evaluate_container_state(
+            "meeting-service",
+            {"Status": "running", "Running": True, "OOMKilled": False, "Restarting": False},
+            restart_count=4,
+            previous_restart_count=3,
+        )
+
+        self.assertEqual("warning", result.status)
+        self.assertIn("1 new restart", result.detail)
+
+    def test_existing_restart_count_becomes_a_quiet_baseline(self):
         result = evaluate_container_state(
             "meeting-service",
             {"Status": "running", "Running": True, "OOMKilled": False, "Restarting": False},
             restart_count=3,
+            previous_restart_count=3,
         )
 
-        self.assertEqual("warning", result.status)
-        self.assertIn("3 restart", result.detail)
+        self.assertEqual("pass", result.status)
+        self.assertNotIn("restart", result.detail)
 
     def test_successful_migrator_exit_is_a_completed_job_not_an_outage(self):
         result = evaluate_container_state(
@@ -84,6 +99,23 @@ class LogFindingTests(unittest.TestCase):
 
         self.assertIn("normal output", logs)
         self.assertIn("ERROR written to stderr", logs)
+
+    @patch("inspector.subprocess.run")
+    def test_docker_logs_supports_an_exact_until_boundary(self, run):
+        run.return_value.returncode = 0
+        run.return_value.stdout = ""
+        run.return_value.stderr = ""
+
+        docker_logs(
+            "container-id",
+            "2026-08-01T04:30:00Z",
+            100,
+            until="2026-08-01T05:30:00Z",
+        )
+
+        command = run.call_args.args[0]
+        self.assertIn("--timestamps", command)
+        self.assertEqual("2026-08-01T05:30:00Z", command[command.index("--until") + 1])
 
     def test_detects_structured_and_plaintext_failures(self):
         logs = "\n".join(
@@ -118,6 +150,39 @@ class LogFindingTests(unittest.TestCase):
         self.assertEqual(1, len(findings))
         self.assertNotIn("super-secret-token", findings[0])
         self.assertNotIn("hunter2", findings[0])
+
+    def test_groups_repeated_errors_with_dynamic_ids_into_one_fingerprint(self):
+        findings = [
+            "2026-08-01T04:31:00.000Z ERROR request 90b3896b-8869-43da-b417-cf4cd3d7c30e failed after 1200 ms",
+            "2026-08-01T04:32:00.000Z ERROR request 2e6af4a4-c95d-4e66-b8b2-6de14e102aa1 failed after 1250 ms",
+            "2026-08-01T04:33:00.000Z System.TimeoutException: upstream unavailable",
+        ]
+
+        groups = group_log_findings(findings, limit=10)
+
+        self.assertEqual(2, len(groups))
+        repeated = next(group for group in groups if group["count"] == 2)
+        self.assertEqual("2026-08-01T04:31:00.000Z", repeated["firstSeen"])
+        self.assertEqual("2026-08-01T04:32:00.000Z", repeated["lastSeen"])
+        self.assertEqual(12, len(repeated["fingerprint"]))
+
+
+class CheckpointTests(unittest.TestCase):
+    def test_checkpoint_round_trip_is_persistent(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "checkpoint.json"
+            checkpoint = {
+                "services": {"meeting-service": {"containerId": "abc", "restartCount": 3}}
+            }
+
+            save_checkpoint(path, checkpoint)
+
+            self.assertEqual(checkpoint, load_checkpoint(path))
+
+    def test_missing_checkpoint_starts_empty(self):
+        self.assertEqual({}, load_checkpoint(Path("/path/that/does/not/exist.json")))
 
 
 class ExitCodeTests(unittest.TestCase):
