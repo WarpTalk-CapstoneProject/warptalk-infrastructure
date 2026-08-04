@@ -175,6 +175,8 @@ grep -Eq 'VERIFY_REUSED_IMAGES: "true"' "$workflow" ||
   fail "workflow does not fail closed when a cached image is unsigned"
 grep -Eq 'plan-release-deployment\.sh' "$workflow" ||
   fail "workflow does not calculate a deployment diff"
+grep -Fq 'warptalk-infrastructure/deploy/production/image-matrix.json' "$workflow" ||
+  fail "release artifact omits the deployment planner image matrix"
 grep -Eq 'force_full_deploy:' "$workflow" ||
   fail "workflow lacks an explicit full-deploy path for runtime config changes"
 grep -Eq 'timeout:[[:space:]]*["'\'']?45s' "$workflow" ||
