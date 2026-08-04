@@ -31,3 +31,4 @@ observability/alerts/warptalk.cost.rules.yml
 deploy/production/.env.production
 deploy/production/release-manifest.json
 terraform/.local-state/
+!CLAUDE.md
