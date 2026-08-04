@@ -23,7 +23,7 @@ grep -q "CREATE ROLE warptalk_migrator" \
   "$runtime_migrations/032-27-07-2026-add-billing-runtime-role.sql"
 grep -q "SET LOCAL ROLE warptalk_migrator" "$logical_runner"
 grep -q "RESET ROLE" "$logical_runner"
-grep -q "configure_migration_owner" "$logical_runner"
+grep -q "emit_migration_owner_sql" "$logical_runner"
 grep -q "ALTER DEFAULT PRIVILEGES FOR ROLE warptalk_migrator" "$logical_runner"
 
 echo "migration owner contract passed"
