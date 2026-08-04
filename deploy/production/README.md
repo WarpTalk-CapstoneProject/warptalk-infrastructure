@@ -116,13 +116,16 @@ one-shot container that creates the private buckets.
 Render the alert and cost files first:
 
 ```sh
-sudo ALERT_WEBHOOK_URL="$ALERT_WEBHOOK_URL" \
-  ALERTMANAGER_CONFIG_PATH=/etc/warptalk/alertmanager.yml \
-  ../../scripts/render-alertmanager-config.sh
-
 set -a
 . ./.env.production
 set +a
+
+sudo ALERT_EMAIL_TO="$ALERT_EMAIL_TO" \
+  RESEND_API_KEY="$RESEND_API_KEY" \
+  RESEND_FROM_EMAIL="$RESEND_FROM_EMAIL" \
+  ALERTMANAGER_CONFIG_PATH=/etc/warptalk/alertmanager.yml \
+  ../../scripts/render-alertmanager-config.sh
+
 ../../scripts/render-cost-observability.sh
 
 docker compose --env-file .env.production -f infra.compose.yml pull
