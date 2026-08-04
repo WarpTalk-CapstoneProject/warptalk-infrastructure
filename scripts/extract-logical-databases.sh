@@ -122,7 +122,6 @@ extract_context() {
         echo 'CREATE EXTENSION IF NOT EXISTS "pg_trgm";'
         cat "$schema_dump.raw2"
     } > "$schema_dump"
-
     # data_dump_args intentionally expands into multiple --schema arguments.
     # shellcheck disable=SC2046
     pg_dump --format=plain --no-owner --no-acl --data-only --disable-triggers \
