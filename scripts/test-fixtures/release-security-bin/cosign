@@ -17,7 +17,7 @@ if [ "$command_name" = "verify-attestation" ] &&
   else
     case "$subject" in
       *new-image*)
-        predicate='{"predicate":{"sourceRepository":"repo-new","sourceCommit":"1111111111111111111111111111111111111111","buildFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'
+        predicate='{"predicate":{"Data":"{\"sourceRepository\":\"repo-new\",\"sourceCommit\":\"1111111111111111111111111111111111111111\",\"buildFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}","Timestamp":"2026-08-04T00:00:00Z"}}'
         ;;
       *reused-image*)
         predicate='{"predicate":{"sourceRepository":"repo-reused","sourceCommit":"2222222222222222222222222222222222222222","buildFingerprint":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}'

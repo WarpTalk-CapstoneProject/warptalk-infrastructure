@@ -91,7 +91,12 @@ if [ "${1:-}" = "--worker" ]; then
     --arg sourceCommit "$source_commit" \
     --arg buildFingerprint "$build_fingerprint" '
     any((.[] | if type == "array" then .[] else . end | .payload);
-      (@base64d | fromjson | .predicate) as $predicate |
+      (@base64d | fromjson | .predicate |
+        if (type == "object" and ((.Data? | type) == "string"))
+        then (.Data | fromjson)
+        else .
+        end
+      ) as $predicate |
       $predicate.sourceRepository == $sourceRepository and
       $predicate.sourceCommit == $sourceCommit and
       $predicate.buildFingerprint == $buildFingerprint
