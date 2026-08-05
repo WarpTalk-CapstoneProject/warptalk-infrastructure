@@ -62,6 +62,80 @@ fail() {
   exit 1
 }
 
+# Reads C# on stdin and writes it back with comments removed.
+#
+# Source-text contracts below must judge code, not prose. A plain grep also
+# matches inside doc comments, so a comment that merely explains the arrangement
+# the contract permits reddens CI: that is exactly what happened to
+# LanguageRepository.cs, whose comment named the platform-owned table while
+# describing the local view over it, and the backend ended up rewording prose
+# (891bfc8) to get past the grep instead of changing any behaviour.
+#
+# Deliberately fail-closed. String literals are preserved byte for byte -- plain
+# "...", interpolated $"...", verbatim @"..." with its "" escape, and char
+# literals -- so SQL carried in a string is still scanned, and a "//" appearing
+# inside a string never starts a comment. Only /* */ and // are removed.
+# Block-comment and verbatim-string state carry across lines; awk is invoked
+# once per file, so the state cannot leak between files.
+strip_cs_comments() {
+  awk '
+    BEGIN { apostrophe = sprintf("%c", 39) }
+    {
+      line = $0
+      out = ""
+      i = 1
+      n = length(line)
+      while (i <= n) {
+        c = substr(line, i, 1)
+        c2 = substr(line, i, 2)
+        if (in_block) {
+          if (c2 == "*/") { in_block = 0; i += 2 } else { i += 1 }
+          continue
+        }
+        if (in_string == 1) {
+          if (c == "\\") { out = out c substr(line, i + 1, 1); i += 2; continue }
+          if (c == "\"") { in_string = 0 }
+          out = out c; i += 1; continue
+        }
+        if (in_string == 2) {
+          if (c2 == "\"\"") { out = out c2; i += 2; continue }
+          if (c == "\"") { in_string = 0 }
+          out = out c; i += 1; continue
+        }
+        if (in_string == 3) {
+          if (c == "\\") { out = out c substr(line, i + 1, 1); i += 2; continue }
+          if (c == apostrophe) { in_string = 0 }
+          out = out c; i += 1; continue
+        }
+        if (c2 == "//") { break }
+        if (c2 == "/*") { in_block = 1; i += 2; continue }
+        if (c2 == "@\"") { in_string = 2; out = out c2; i += 2; continue }
+        if (c == "\"") { in_string = 1; out = out c; i += 1; continue }
+        if (c == apostrophe) { in_string = 3; out = out c; i += 1; continue }
+        out = out c; i += 1
+      }
+      # Only a verbatim string may legally continue onto the next line.
+      if (in_string != 2) { in_string = 0 }
+      print out
+    }
+  '
+}
+
+# scan_cs_source <directory> <grep arguments...>
+# Prints "file:line:code" for every match found in comment-stripped source.
+# Blank lines replace stripped comments, so the reported line numbers are the
+# real ones.
+scan_cs_source() {
+  scan_dir="$1"
+  shift
+  find "$scan_dir" -name '*.cs' -type f -print |
+    while IFS= read -r cs_file; do
+      strip_cs_comments <"$cs_file" |
+        grep -n "$@" |
+        sed "s#^#$cs_file:#"
+    done
+}
+
 for dependency in docker jq; do
   command -v "$dependency" >/dev/null 2>&1 || fail "missing dependency: $dependency"
 done
@@ -227,10 +301,22 @@ if grep -R -n --include='*.cs' --exclude-dir=Migrations \
   'workspace\.workspaces' "$BACKEND_DIR/billing/src" >/dev/null; then
   fail "billing-service source must not query workspace.workspaces directly"
 fi
-if grep -R -n --include='*.cs' \
-  -e 'platform\.supported_languages' \
-  -e 'UserSettingsRepository' \
-  "$BACKEND_DIR/translation-room/src" >/dev/null; then
+# translation-room must read language data from its own
+# translation_room.supported_languages view rather than the platform-owned table,
+# and must obtain user settings over Auth gRPC rather than binding Auth's
+# UserSettingsRepository. The scan runs over comment-stripped source so that
+# documenting either arrangement is not a violation of it. An absent source tree
+# would make the scan vacuously pass, so require it explicitly.
+test -d "$BACKEND_DIR/translation-room/src" ||
+  fail "translation-room source tree is missing; the language data contract cannot be verified"
+TRANSLATION_ROOM_OFFENDERS="$(
+  scan_cs_source "$BACKEND_DIR/translation-room/src" \
+    -e 'platform\.supported_languages' \
+    -e 'UserSettingsRepository'
+)"
+if [ -n "$TRANSLATION_ROOM_OFFENDERS" ]; then
+  printf 'cross-schema language reads or Auth settings repository use:\n%s\n' \
+    "$TRANSLATION_ROOM_OFFENDERS" >&2
   fail "translation-room source must use local language data and Auth gRPC settings"
 fi
 
