@@ -83,6 +83,9 @@ done
 if [ "$DEPLOY_ROLE" = "infra" ]; then
   (
     set -a
+    # The env file is a runtime host path (/etc/warptalk/.env.production), so
+    # there is nothing for shellcheck to follow at lint time.
+    # shellcheck source=/dev/null
     . "$PRODUCTION_ENV_FILE"
     set +a
 
