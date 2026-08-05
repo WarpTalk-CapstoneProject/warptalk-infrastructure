@@ -37,6 +37,19 @@ render() {
   input="$1"
   output="$2"
   shift 2
+  # Docker creates an empty DIRECTORY at a bind-mount source that does not exist
+  # yet, so any release tree that has already reached `compose up` has one here.
+  # `mv` moves its source INTO an existing directory rather than replacing it, so
+  # without this the render below would report success, exit 0, and leave the
+  # exporter still reading a directory and crash-looping — the exact silent
+  # failure this whole script exists to prevent.
+  #
+  # rmdir, not rm -rf: the artifact Docker leaves is always empty, and anything
+  # else sitting at this path is a surprise that must stop the deploy loudly
+  # rather than be deleted on its behalf.
+  if [ -d "$output" ]; then
+    rmdir "$output"
+  fi
   temporary="$(mktemp "${output}.tmp.XXXXXX")"
   cp "$input" "$temporary"
   while [ "$#" -gt 0 ]; do
@@ -53,6 +66,12 @@ render() {
     chown 0:65534 "$temporary"
   fi
   mv "$temporary" "$output"
+  # Post-condition, so any future path that fails to produce a file fails the
+  # deploy instead of quietly handing sql_exporter something it cannot read.
+  if [ ! -f "$output" ]; then
+    echo "render did not produce a regular file at $output" >&2
+    exit 1
+  fi
 }
 
 render "$BILLING_TEMPLATE" "$BILLING_OUTPUT" \
