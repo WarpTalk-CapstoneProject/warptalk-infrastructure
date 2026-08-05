@@ -25,7 +25,7 @@ set +a
 ./scripts/render-cost-observability.sh
 ```
 
-The renderer accepts only non-negative decimal values, writes atomically and
+The renderer accepts only decimal values greater than zero, writes atomically and
 sets generated files to mode `0600`. Generated files are deploy artifacts and
 are not committed:
 
@@ -60,11 +60,30 @@ The exported series are:
 - `warptalk_object_storage_bytes{source}` for active Workspace documents and
   Translation artifacts, plus `warptalk_object_storage_budget_bytes`.
 
-MinIO bucket metrics remain scraped in the two-VM topology as a provider-level
-cross-check. The provider-neutral budget alert uses application-indexed object
-metadata so the same dashboard works with MinIO, R2 or another S3-compatible
-store. Reconcile it against provider billing to detect orphaned objects or
-missing metadata.
+The object storage capacity alerts are evaluated against
+`minio_bucket_usage_total_bytes` from the `minio-buckets` scrape job, not
+against `warptalk_object_storage_bytes`. The application-indexed series only
+sums size columns of live database rows: it undercounts real stored bytes by
+roughly an order of magnitude and never sees buckets that have no indexing
+table behind them, including voice samples, meeting chat and LiveKit egress
+recordings. A capacity budget has to be compared against bytes that are really
+on the volume, so provider-neutrality is traded away here; moving to R2 or
+another S3-compatible store means repointing those two rules at that
+provider's usage metric.
+
+`warptalk_object_storage_bytes{source}` remains exported and on the dashboard
+as the logical view of storage per application domain. The gap between it and
+the bucket totals is the orphaned-object and missing-metadata signal, and it
+should still be reconciled against provider billing.
+
+Because the capacity alerts now depend on a single scrape job,
+`WarpTalkObjectStorageUsageMetricMissing` fires when that series disappears,
+so losing the capacity signal is itself an alert rather than silence.
+
+A zero rate or budget is rejected by the renderer: it is not a way to disable
+an alert, it silently breaks one. A zero budget makes every comparison against
+it true, and a zero unit rate makes the estimated-cost metric identically zero
+so its budget alerts can never fire.
 
 The usage ledger remains the billing source of truth. These Prometheus metrics
 are estimates for operations and must not be used to create customer invoices.
