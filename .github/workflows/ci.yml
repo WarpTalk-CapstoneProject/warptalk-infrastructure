@@ -35,9 +35,30 @@ jobs:
         with:
           path: warptalk-infrastructure
           fetch-depth: 0
+      # The contract scripts below grep backend source, so CI must state which
+      # backend revision it validates against instead of silently taking that
+      # repository's default branch. Prefer the branch matching this infra ref
+      # (development -> development) so an infra PR sees the backend code it will
+      # ship beside; fall back to main for infra-only feature branches.
+      - name: Resolve backend ref to validate against
+        id: backend-ref
+        env:
+          INFRA_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          BACKEND_REPO: https://github.com/WarpTalk-CapstoneProject/warptalk-backend.git
+        run: |
+          set -eu
+          ref=main
+          if [ -n "${INFRA_REF:-}" ] &&
+            git ls-remote --exit-code --heads "$BACKEND_REPO" "$INFRA_REF" >/dev/null 2>&1; then
+            ref="$INFRA_REF"
+          fi
+          sha=$(git ls-remote "$BACKEND_REPO" "refs/heads/$ref" | cut -f1)
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Validating against warptalk-backend@$ref ($sha)"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: WarpTalk-CapstoneProject/warptalk-backend
+          ref: ${{ steps.backend-ref.outputs.ref }}
           path: warptalk-backend
       - name: Secret scan for introduced commits
         env:
