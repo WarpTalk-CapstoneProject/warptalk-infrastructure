@@ -72,6 +72,26 @@ for required_file in "$matrix_file" "$override_filter" "$compose_file"; do
   }
 done
 
+# The Infra role's Alertmanager config and the three sql_exporter query files are
+# rendered from templates, never committed (they carry the Resend SMTP key and are
+# gitignored). Until this ran here, rendering was a manual README step: every
+# release unpacked a fresh releases/<tag>/ tree without the rendered query files,
+# Docker created empty DIRECTORIES at those bind-mount paths, and all three
+# sql_exporters crash-looped on "sql_exporter.yml: is a directory" — taking the
+# billing-cost, livekit-cost and workspace-storage metrics down with them.
+# Rendering in a subshell keeps the production secrets out of the deploy shell.
+if [ "$DEPLOY_ROLE" = "infra" ]; then
+  (
+    set -a
+    . "$PRODUCTION_ENV_FILE"
+    set +a
+
+    ALERTMANAGER_CONFIG_PATH="$ALERTMANAGER_CONFIG_PATH" \
+      "$script_dir/render-alertmanager-config.sh"
+    "$script_dir/render-cost-observability.sh"
+  )
+fi
+
 jq -e --slurpfile matrix "$matrix_file" '
   .schemaVersion == 1 and
   ([.images[].service] | sort) == ([$matrix[0].images[].service] | sort) and
