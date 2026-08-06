@@ -16,6 +16,30 @@ retry_sigstore() {
   done
 }
 
+# Pulling a layer from the registry is as flaky as talking to Sigstore, and it
+# had no retry: release v19 pushed ai-stt, ai-translation and ai-tts fine at
+# 13:44 and then failed to pull all three back within the same second at 13:51,
+# with `DENIED` on the token endpoint and a 403 from an intermediary on a blob.
+# GHCR throttled the three largest AI images; nothing was misconfigured and
+# nothing was insecure, but the whole release died and cost a full rebuild.
+#
+# Only registry reads belong here. The vulnerability gate below is `trivy sbom`
+# over a local file with --exit-code 1: a HIGH/CRITICAL finding is a real
+# verdict, not a transient fault, and retrying it would only delay the failure
+# it is supposed to report.
+retry_registry() {
+  attempt=1
+  while [ "$attempt" -le 5 ]; do
+    if "$@"; then
+      return 0
+    fi
+    [ "$attempt" -lt 5 ] || return 1
+    echo "release security: registry request failed ($attempt/5); retrying" >&2
+    sleep $((attempt * 5))
+    attempt=$((attempt + 1))
+  done
+}
+
 if [ "${1:-}" = "--worker" ]; then
   sbom_dir="$2"
   encoded_image="$3"
@@ -49,7 +73,7 @@ if [ "${1:-}" = "--worker" ]; then
       buildFingerprint: $buildFingerprint
     }' >"$provenance"
 
-  trivy image \
+  retry_registry trivy image \
     --format spdx-json \
     --output "$sbom" \
     "$subject"
