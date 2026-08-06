@@ -113,6 +113,12 @@ jobs:
             echo "Unresolved git conflict markers in scripts/migrations." >&2
             exit 1
           fi
+      # WT-294. Must run BEFORE the staging step below: that step overwrites
+      # scripts/service-migrations/ in the working tree, which would make the
+      # committed-vs-backend comparison inside this check trivially pass.
+      - name: Service migration coverage contract
+        working-directory: warptalk-infrastructure
+        run: ./scripts/check-service-migration-coverage.sh ../warptalk-backend
       - name: Stage service-owned migrations
         working-directory: warptalk-infrastructure
         run: ./scripts/collect-service-migrations.sh

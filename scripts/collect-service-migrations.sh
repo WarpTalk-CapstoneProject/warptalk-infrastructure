@@ -31,10 +31,17 @@ stage_service() {
   find "$destination_dir" -maxdepth 1 -type f -name '*.sql' -delete
   source_files="$(find "$source_dir" -maxdepth 1 -type f -name '*.sql' -print)"
   [ -n "$source_files" ] || {
-    echo "Skipping $service: no service-owned migrations found in $source_dir."
+    # WT-294: an empty set still has to materialise its directory. Git cannot
+    # track an empty directory, so without the marker the path is absent from
+    # the release bundle and run-logical-database-migrations.sh takes its
+    # `[ -d "$dir" ] || return 0` branch — the service is skipped in silence and
+    # the first migration it ever gets has nowhere to land.
+    echo "No service-owned migrations in $source_dir; staging an empty set for $service."
+    : > "$destination_dir/.gitkeep"
     return 0
   }
 
+  rm -f "$destination_dir/.gitkeep"
   printf '%s\n' "$source_files" | while IFS= read -r migration; do
     cp "$migration" "$destination_dir/"
   done

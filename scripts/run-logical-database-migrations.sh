@@ -14,6 +14,7 @@ set -eu
 ROOT="${SERVICE_MIGRATIONS_ROOT:-/scripts/service-migrations}"
 RELEASE_ID="${RELEASE_ID:-local}"
 MIGRATION_APPLIED_BY="${MIGRATION_APPLIED_BY:-${PGUSER}@$(hostname)}"
+UNSTAGED_SERVICES=""
 
 sql_literal() {
   printf '%s' "$1" | sed "s/'/''/g"
@@ -95,6 +96,30 @@ BEGIN
                 object_record.relname)
         END;
     END LOOP;
+
+    -- WT-294: routines were never included in the transfer above, so a function
+    -- created by the pre-extraction bootstrap stayed owned by the superuser and
+    -- warptalk_migrator could neither CREATE OR REPLACE nor DROP it —
+    -- "must be owner of function ...", which aborts the whole service's chain.
+    -- BillingService is the only schema with routines today
+    -- (subscription.resolve_contract_terms, .settle_usage_charge and friends,
+    -- from 041-26-07-2026-phase3-contract-overage-settlement.sql), and that is
+    -- exactly the set its own migrations 004 and 017 have to replace.
+    FOR object_record IN
+        SELECT p.oid, p.prokind
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = current_setting('warptalk.migration_schema')
+    LOOP
+        EXECUTE format(
+            'ALTER %s %s OWNER TO warptalk_migrator',
+            CASE object_record.prokind
+                WHEN 'p' THEN 'PROCEDURE'
+                WHEN 'a' THEN 'AGGREGATE'
+                ELSE 'FUNCTION'
+            END,
+            object_record.oid::regprocedure);
+    END LOOP;
 END
 $ownership$;
 ALTER DEFAULT PRIVILEGES FOR ROLE warptalk_migrator IN SCHEMA :"schema_name"
@@ -110,13 +135,25 @@ apply_service() {
   schema="$3"
   runtime_role="$4"
   dir="$ROOT/$service"
-  [ -d "$dir" ] || return 0
+  # WT-294: a missing directory used to be skipped in total silence, which is
+  # how transcript, notification, meeting and assistant went from the logical
+  # cutover to 2026-08 without a single migration and without a single log line
+  # saying so. Record it and report it at the end. collect-service-migrations.sh
+  # now stages a .gitkeep for empty sets, so an absent directory in a release
+  # bundle means the bundle is wrong, not that the service has nothing to apply.
+  [ -d "$dir" ] || {
+    UNSTAGED_SERVICES="${UNSTAGED_SERVICES}${UNSTAGED_SERVICES:+, }$service ($database)"
+    return 0
+  }
   [ "$(database_exists "$database")" = "t" ] || {
     echo "Skipping $service: $database does not exist yet."
     return 0
   }
   files="$(find "$dir" -maxdepth 1 -type f -name '*.sql' -print | sort)"
-  [ -n "$files" ] || return 0
+  [ -n "$files" ] || {
+    echo "No migrations staged for $service; $database is unchanged."
+    return 0
+  }
 
   echo "Applying logical-database migrations for $service ($database)..."
   tmp="$(mktemp)"
@@ -175,5 +212,8 @@ apply_service notification "${NOTIFICATION_DATABASE:-warptalk_notification}" not
 apply_service meeting "${MEETING_DATABASE:-warptalk_meeting}" meeting warptalk_meeting_runtime
 apply_service assistant "${ASSISTANT_DATABASE:-warptalk_assistant}" assistant warptalk_assistant_runtime
 apply_service billing "${BILLING_DATABASE:-warptalk_billing}" subscription warptalk_billing_runtime
+
+[ -z "$UNSTAGED_SERVICES" ] || \
+  echo "WARNING: no migration set staged for: ${UNSTAGED_SERVICES}. Those databases received nothing." >&2
 
 echo "Logical-database migrations complete."
