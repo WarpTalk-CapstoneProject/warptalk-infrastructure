@@ -349,6 +349,11 @@ workloads:
       OPENAI_API_KEY: OPENAI_API_KEY
       TTS_PROVIDER: TTS_PROVIDER
       TTS_API_KEY: TTS_API_KEY
+      # Same omission as deploy/production/app.compose.yml: the TTS worker
+      # publishes into the LiveKit room and needs these three.
+      LIVEKIT_URL: LIVEKIT_URL
+      LIVEKIT_API_KEY: LIVEKIT_API_KEY
+      LIVEKIT_API_SECRET: LIVEKIT_API_SECRET
   assistant-worker:
     image: ai-assistant
     workerHealthName: assistant,assistant-chat
