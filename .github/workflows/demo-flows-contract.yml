@@ -1,0 +1,122 @@
+name: demo-flows-contract
+
+# Keeps demo/DEMO-FLOWS.md — the script the team reads on stage at the capstone
+# defence — in step with the product code.
+#
+# Why this is a separate workflow rather than a job in ci.yml:
+#   1. ci.yml is contended (PR #57 and #58 both edit it); a job added there
+#      would conflict.
+#   2. This check needs warptalk-WEB checked out, which ci.yml does not do.
+#   3. It needs a schedule trigger, which ci.yml has no reason to carry.
+# Once #57/#58 land, folding this into ci.yml as an extra job is a reasonable
+# tidy-up — nothing here depends on it being separate.
+
+on:
+  pull_request:
+    # An infra PR can only break this by editing the document, the contract or
+    # the checker. Drift coming from the sibling repos cannot trigger anything
+    # here at all — that is what the schedule below is for.
+    paths:
+      - "demo/**"
+      - "scripts/check-demo-flows-contract.mjs"
+      - "scripts/test-demo-flows-contract.sh"
+      - ".github/workflows/demo-flows-contract.yml"
+  push:
+    branches: [main, development]
+    paths:
+      - "demo/**"
+      - "scripts/check-demo-flows-contract.mjs"
+      - "scripts/test-demo-flows-contract.sh"
+      - ".github/workflows/demo-flows-contract.yml"
+  schedule:
+    # Mondays 02:00 UTC. A change in warptalk-backend or warptalk-web will never
+    # trigger a run in this repository, so without this the document could go
+    # stale for weeks and nobody would learn until the defence. Catching drift a
+    # week late still beats catching it on stage.
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      sibling_ref:
+        description: "Branch of warptalk-web / warptalk-backend to validate against"
+        required: false
+        default: development
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: warptalk-infrastructure
+
+      # The checker greps real product source, so the run has to state which
+      # revision of the siblings it validated against rather than silently
+      # taking whatever the default branch happens to be. Same approach as
+      # ci.yml's "Resolve backend ref" step, extended to the web repository.
+      #
+      # Preference order: the branch matching this infra ref (so an infra PR
+      # sees the code it will ship beside), then the requested/default
+      # `development`, then `main`.
+      - name: Resolve sibling refs
+        id: refs
+        env:
+          INFRA_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          WANTED: ${{ inputs.sibling_ref || 'development' }}
+          ORG: https://github.com/WarpTalk-CapstoneProject
+        run: |
+          set -eu
+          resolve() {
+            repo="$1"
+            url="$ORG/$repo.git"
+            for candidate in "$INFRA_REF" "$WANTED" development main; do
+              [ -n "$candidate" ] || continue
+              if git ls-remote --exit-code --heads "$url" "$candidate" >/dev/null 2>&1; then
+                sha=$(git ls-remote "$url" "refs/heads/$candidate" | cut -f1)
+                echo "$repo -> $candidate ($sha)" >&2
+                printf '%s' "$candidate"
+                return 0
+              fi
+            done
+            echo "Could not resolve any branch for $repo." >&2
+            return 1
+          }
+          web=$(resolve warptalk-web)
+          backend=$(resolve warptalk-backend)
+          echo "web=$web" >> "$GITHUB_OUTPUT"
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          {
+            echo "### DEMO-FLOWS contract validated against"
+            echo "- warptalk-web: \`$web\`"
+            echo "- warptalk-backend: \`$backend\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # No continue-on-error anywhere in this job: if either checkout fails the
+      # job fails. A run that cannot see the product code must never report
+      # success, because "the document is fine" would then be unfounded.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: WarpTalk-CapstoneProject/warptalk-web
+          ref: ${{ steps.refs.outputs.web }}
+          path: warptalk-web
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: WarpTalk-CapstoneProject/warptalk-backend
+          ref: ${{ steps.refs.outputs.backend }}
+          path: warptalk-backend
+
+      # Runs first and needs no sibling repos: if the checker itself has stopped
+      # detecting breakage, that is worth knowing before trusting its verdict.
+      - name: Checker self-test
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-demo-flows-contract.sh
+
+      # The siblings are checked out beside warptalk-infrastructure, which is
+      # exactly the layout the checker defaults to, so no paths are needed here.
+      - name: DEMO-FLOWS contract
+        working-directory: warptalk-infrastructure
+        run: ./scripts/check-demo-flows-contract.mjs
