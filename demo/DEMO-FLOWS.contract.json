@@ -1,0 +1,692 @@
+{
+  "$comment": [
+    "Machine-checkable claims made by DEMO-FLOWS.md, verified by",
+    "scripts/check-demo-flows-contract.mjs. See demo/README.md.",
+    "",
+    "Every entry carries an 'anchor': exact text that must still appear in",
+    "DEMO-FLOWS.md. That is what stops this file and the document drifting",
+    "apart — reword the line and the anchor check fails, so whoever edits the",
+    "document is forced back to the claim.",
+    "",
+    "'covers' lists the backticked route/endpoint tokens in the document that",
+    "this entry accounts for. Any token the document names that is neither",
+    "covered here nor listed in humanVerifyOnly is reported as unchecked."
+  ],
+
+  "requires": ["web", "backend"],
+
+  "claims": [
+    {
+      "id": "route.workspace-create",
+      "anchor": "`/workspace/create`",
+      "claim": "The workspace creation page exists at /workspace/create",
+      "covers": ["/workspace/create"],
+      "check": { "type": "route_exists", "route": "/workspace/create" }
+    },
+    {
+      "id": "route.members",
+      "anchor": "`/[slug]/members`",
+      "claim": "The workspace members page exists",
+      "covers": ["/[slug]/members"],
+      "check": { "type": "route_exists", "route": "/[slug]/members" }
+    },
+    {
+      "id": "route.invitations",
+      "anchor": "`/[slug]/invitations`",
+      "claim": "The invitations page (Invitations + Join requests tabs) exists",
+      "covers": ["/[slug]/invitations"],
+      "check": { "type": "route_exists", "route": "/[slug]/invitations" }
+    },
+    {
+      "id": "route.terminology",
+      "anchor": "`/terminology`",
+      "claim": "The glossary page exists at /terminology",
+      "covers": ["/terminology"],
+      "check": { "type": "route_exists", "route": "/terminology" }
+    },
+    {
+      "id": "route.ai-chat",
+      "anchor": "`/ai-chat`",
+      "claim": "The standalone assistant chat page exists at /ai-chat",
+      "covers": ["/ai-chat"],
+      "check": { "type": "route_exists", "route": "/ai-chat" }
+    },
+    {
+      "id": "route.advanced",
+      "anchor": "`/[slug]/advanced`",
+      "claim": "The danger-zone page (transfer ownership, delete workspace) exists",
+      "covers": ["/[slug]/advanced"],
+      "check": { "type": "route_exists", "route": "/[slug]/advanced" }
+    },
+    {
+      "id": "route.history",
+      "anchor": "`/[slug]/history`",
+      "claim": "The meeting history page exists",
+      "covers": ["/[slug]/history"],
+      "check": { "type": "route_exists", "route": "/[slug]/history" }
+    },
+    {
+      "id": "route.payment-plans",
+      "anchor": "`/[slug]/payment/plans`",
+      "claim": "The plan-selection page exists",
+      "covers": ["/[slug]/payment/plans"],
+      "check": { "type": "route_exists", "route": "/[slug]/payment/plans" }
+    },
+    {
+      "id": "route.voice-profiles",
+      "anchor": "`/voice-profiles`",
+      "claim": "The voice profiles page exists",
+      "covers": ["/voice-profiles"],
+      "check": { "type": "route_exists", "route": "/voice-profiles" }
+    },
+    {
+      "id": "route.room",
+      "anchor": "`/room/[id]`",
+      "claim": "The in-meeting page (LiveKit tiles + control bar) exists at /room/[id]",
+      "covers": ["/room/[id]"],
+      "check": { "type": "route_exists", "route": "/room/[id]" }
+    },
+    {
+      "id": "route.ai-summaries",
+      "anchor": "`/[slug]/ai-summaries`",
+      "claim": "The Transcripts / AI summaries page exists",
+      "covers": ["/[slug]/ai-summaries"],
+      "check": { "type": "route_exists", "route": "/[slug]/ai-summaries" }
+    },
+    {
+      "id": "route.settings",
+      "anchor": "`/[slug]/settings`",
+      "claim": "The workspace settings page exists",
+      "covers": ["/[slug]/settings"],
+      "check": { "type": "route_exists", "route": "/[slug]/settings" }
+    },
+    {
+      "id": "route.documents",
+      "anchor": "`/[slug]/documents`",
+      "claim": "The workspace documents page exists",
+      "covers": ["/[slug]/documents"],
+      "check": { "type": "route_exists", "route": "/[slug]/documents" }
+    },
+    {
+      "id": "route.billing",
+      "anchor": "`/[slug]/billing`",
+      "claim": "The workspace billing page exists",
+      "covers": ["/[slug]/billing"],
+      "check": { "type": "route_exists", "route": "/[slug]/billing" }
+    },
+    {
+      "id": "route.room-detail",
+      "anchor": "`/[slug]/rooms/[id]`",
+      "claim": "The room detail/preparation page exists and is distinct from /room/[id]",
+      "covers": ["/[slug]/rooms/[id]"],
+      "check": { "type": "route_exists", "route": "/[slug]/rooms/[id]" }
+    },
+    {
+      "id": "route.room-waiting",
+      "anchor": "`/[slug]/rooms/[id]/waiting`",
+      "claim": "The lobby / waiting room page exists",
+      "covers": ["/[slug]/rooms/[id]/waiting"],
+      "check": { "type": "route_exists", "route": "/[slug]/rooms/[id]/waiting" }
+    },
+    {
+      "id": "route.room-ended",
+      "anchor": "`/[slug]/rooms/[id]/ended`",
+      "claim": "The post-meeting ended page exists",
+      "covers": ["/[slug]/rooms/[id]/ended"],
+      "check": { "type": "route_exists", "route": "/[slug]/rooms/[id]/ended" }
+    },
+    {
+      "id": "route.transcript-alias",
+      "anchor": "`/[slug]/transcript`",
+      "claim": "The /[slug]/transcript alias page exists",
+      "covers": ["/[slug]/transcript"],
+      "check": { "type": "route_exists", "route": "/[slug]/transcript" }
+    },
+    {
+      "id": "route.invitation-accept",
+      "anchor": "`/invitations/[token]`",
+      "claim": "The invitation-accept page exists",
+      "covers": ["/invitations/[token]"],
+      "check": { "type": "route_exists", "route": "/invitations/[token]" }
+    },
+    {
+      "id": "route.workspace-join",
+      "anchor": "`/workspace/join`",
+      "claim": "The join-request page exists",
+      "covers": ["/workspace/join"],
+      "check": { "type": "route_exists", "route": "/workspace/join" }
+    },
+    {
+      "id": "route.workspace-picker",
+      "anchor": "`/workspace`",
+      "claim": "Transfer-ownership redirects the demoted owner to /workspace, which exists",
+      "covers": ["/workspace"],
+      "check": { "type": "route_exists", "route": "/workspace" }
+    },
+    {
+      "id": "route.register",
+      "anchor": "`/register`",
+      "claim": "The registration page exists",
+      "covers": ["/register"],
+      "check": { "type": "route_exists", "route": "/register" }
+    },
+    {
+      "id": "route.verify-email",
+      "anchor": "`/verify-email`",
+      "claim": "The email verification page exists",
+      "covers": ["/verify-email"],
+      "check": { "type": "route_exists", "route": "/verify-email" }
+    },
+    {
+      "id": "route.login",
+      "anchor": "`/login`",
+      "claim": "The login page exists",
+      "covers": ["/login"],
+      "check": { "type": "route_exists", "route": "/login" }
+    },
+    {
+      "id": "route.forgot-password",
+      "anchor": "`/forgot-password`",
+      "claim": "The forgot-password page exists (fallback if the panel asks)",
+      "covers": ["/forgot-password"],
+      "check": { "type": "route_exists", "route": "/forgot-password" }
+    },
+    {
+      "id": "route.reset-password",
+      "anchor": "`/reset-password`",
+      "claim": "The reset-password page exists",
+      "covers": ["/reset-password"],
+      "check": { "type": "route_exists", "route": "/reset-password" }
+    },
+    {
+      "id": "route.admin",
+      "anchor": "`/admin`",
+      "claim": "The admin portal overview page exists",
+      "covers": ["/admin"],
+      "check": { "type": "route_exists", "route": "/admin" }
+    },
+    {
+      "id": "route.admin-workspaces",
+      "anchor": "`/admin/workspaces`",
+      "claim": "The admin workspace directory exists",
+      "covers": ["/admin/workspaces"],
+      "check": { "type": "route_exists", "route": "/admin/workspaces" }
+    },
+    {
+      "id": "route.admin-workspace-detail",
+      "anchor": "`/admin/workspaces/[workspaceId]`",
+      "claim": "The admin workspace master-detail page exists",
+      "covers": ["/admin/workspaces/[workspaceId]"],
+      "check": { "type": "route_exists", "route": "/admin/workspaces/[workspaceId]" }
+    },
+    {
+      "id": "route.admin-global-glossary",
+      "anchor": "`/admin/global-glossary`",
+      "claim": "The platform-wide glossary page exists",
+      "covers": ["/admin/global-glossary"],
+      "check": { "type": "route_exists", "route": "/admin/global-glossary" }
+    },
+    {
+      "id": "route.admin-billing",
+      "anchor": "`/admin/billing`",
+      "claim": "The internal billing console exists",
+      "covers": ["/admin/billing"],
+      "check": { "type": "route_exists", "route": "/admin/billing" }
+    },
+
+    {
+      "id": "api.invite-member",
+      "anchor": "`POST /api/v1/workspaces/{workspaceId}/invitations`",
+      "claim": "Inviting a member posts to /api/v1/workspaces/{workspaceId}/invitations",
+      "covers": ["POST /api/v1/workspaces/{workspaceId}/invitations"],
+      "check": {
+        "type": "endpoint_exists",
+        "method": "POST",
+        "path": "/api/v1/workspaces/{workspaceId}/invitations"
+      }
+    },
+    {
+      "id": "api.retry-delivery",
+      "anchor": "`POST .../invitations/{invitationId}/retry-delivery`",
+      "claim": "The invitation retry-delivery endpoint exists in the backend (the point of the warning is that the UI never calls it)",
+      "covers": ["POST .../invitations/{invitationId}/retry-delivery"],
+      "check": {
+        "type": "endpoint_exists",
+        "method": "POST",
+        "path": "/api/v1/workspaces/{workspaceId}/invitations/{invitationId}/retry-delivery"
+      }
+    },
+    {
+      "id": "api.member-role",
+      "anchor": "`PUT .../members/{userId}/role`",
+      "claim": "The change-member-role endpoint exists in the backend (the point of the warning is that no UI calls it)",
+      "covers": ["PUT .../members/{userId}/role"],
+      "check": {
+        "type": "endpoint_exists",
+        "method": "PUT",
+        "path": "/api/v1/workspaces/{workspaceId}/members/{userId}/role"
+      }
+    },
+    {
+      "id": "api.member-patch",
+      "anchor": "`PATCH .../members/{userId}`",
+      "claim": "The can-create-meetings toggle PATCHes the member endpoint",
+      "covers": ["PATCH .../members/{userId}"],
+      "check": {
+        "type": "endpoint_exists",
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/{workspaceId}/members/{userId}"
+      }
+    },
+    {
+      "id": "api.transfer-ownership",
+      "anchor": "`POST /api/v1/workspaces/{workspaceId}/members/transfer-ownership`",
+      "claim": "Transfer ownership posts to the transfer-ownership endpoint",
+      "covers": ["POST /api/v1/workspaces/{workspaceId}/members/transfer-ownership"],
+      "check": {
+        "type": "endpoint_exists",
+        "method": "POST",
+        "path": "/api/v1/workspaces/{workspaceId}/members/transfer-ownership"
+      }
+    },
+    {
+      "id": "api.preferred-voice",
+      "anchor": "`PUT /api/v1/auth/voice-profiles/preferred-voice`",
+      "claim": "Choosing a default library voice PUTs to the preferred-voice endpoint",
+      "covers": ["PUT /api/v1/auth/voice-profiles/preferred-voice"],
+      "check": {
+        "type": "endpoint_exists",
+        "method": "PUT",
+        "path": "/api/v1/auth/voice-profiles/preferred-voice"
+      }
+    },
+    {
+      "id": "api.create-voice-profile",
+      "anchor": "`POST /api/v1/auth/voice-profiles`",
+      "claim": "Creating a voice profile posts multipart to /api/v1/auth/voice-profiles",
+      "covers": ["POST /api/v1/auth/voice-profiles"],
+      "check": {
+        "type": "endpoint_exists",
+        "method": "POST",
+        "path": "/api/v1/auth/voice-profiles"
+      }
+    },
+    {
+      "id": "api.voice-clone-consent",
+      "anchor": "`POST /api/v1/translation-rooms/{roomId}/audio-routes/voice-clone-consent`",
+      "claim": "The in-room voice-clone consent toggle posts to the audio-routes consent endpoint",
+      "covers": ["POST /api/v1/translation-rooms/{roomId}/audio-routes/voice-clone-consent"],
+      "check": {
+        "type": "endpoint_exists",
+        "method": "POST",
+        "path": "/api/v1/translation-rooms/{roomId}/audio-routes/voice-clone-consent"
+      }
+    },
+    {
+      "id": "api.admin-suspend",
+      "anchor": "`POST /api/v1/admin/workspaces/{id}/suspend|reactivate`",
+      "claim": "Admin suspend posts to /api/v1/admin/workspaces/{id}/suspend",
+      "covers": ["POST /api/v1/admin/workspaces/{id}/suspend|reactivate"],
+      "check": {
+        "type": "endpoint_exists",
+        "method": "POST",
+        "path": "/api/v1/admin/workspaces/{id}/suspend"
+      }
+    },
+    {
+      "id": "api.admin-reactivate",
+      "anchor": "`POST /api/v1/admin/workspaces/{id}/suspend|reactivate`",
+      "claim": "Admin reactivate posts to /api/v1/admin/workspaces/{id}/reactivate",
+      "covers": [],
+      "check": {
+        "type": "endpoint_exists",
+        "method": "POST",
+        "path": "/api/v1/admin/workspaces/{id}/reactivate"
+      }
+    },
+
+    {
+      "id": "table.meeting-types",
+      "anchor": "| Loại | Duyệt vào | Tắt mic khi vào | Tự ghi hình | Breakout | Số ghế |",
+      "claim": "The meeting-type table: six types, each with approval / mute-on-entry / auto-record / breakout / seat count",
+      "check": {
+        "type": "meeting_type_matrix",
+        "file": "translation-room/src/WarpTalk.TranslationRoomService.Domain/Constants/TranslationRoomTypes.cs",
+        "rows": {
+          "Event":              { "approval": false, "muteOnEntry": false, "autoRecord": false, "breakout": true,  "seats": 100 },
+          "ChannelMeeting":     { "approval": false, "muteOnEntry": false, "autoRecord": false, "breakout": true,  "seats": 50 },
+          "Webinar":            { "approval": true,  "muteOnEntry": true,  "autoRecord": true,  "breakout": false, "seats": 500 },
+          "CompanyMeeting":     { "approval": false, "muteOnEntry": true,  "autoRecord": true,  "breakout": true,  "seats": 500 },
+          "VirtualAppointment": { "approval": true,  "muteOnEntry": false, "autoRecord": false, "breakout": false, "seats": 2 },
+          "LiveEvent":          { "approval": true,  "muteOnEntry": true,  "autoRecord": true,  "breakout": false, "seats": 1000 }
+        }
+      }
+    },
+    {
+      "id": "lang.room-set",
+      "anchor": "(vi · en · ja · ko · fr · es)",
+      "claim": "A room's language set offers exactly vi, en, ja, ko, fr, es",
+      "check": {
+        "type": "literal_set",
+        "repo": "web",
+        "label": "the set of languages a room can be created in",
+        "sources": [
+          {
+            "$note": "Shape A: the picker spells the list out itself.",
+            "file": "src/components/rooms/create/language-selector.tsx",
+            "pattern": "code:\\s*\"([a-z]{2}-[A-Z]{2})\""
+          },
+          {
+            "$note": "Shape B (WT-259): the picker derives from the shared registry, so read the registry's meeting-scoped rows instead.",
+            "file": "src/lib/languages.ts",
+            "pattern": "locale:\\s*\"([a-z]{2}-[A-Z]{2})\"[\\s\\S]{0,240}?scopes:\\s*\\[[^\\]]*\"meeting\""
+          }
+        ],
+        "values": ["vi-VN", "en-US", "ja-JP", "ko-KR", "fr-FR", "es-ES"],
+        "fix": "The document's room language list and the languages a room can actually be created in disagree. The owner has ruled the demo supports only vi/en/ja, so a NEW language here is a document update; a MISSING one is a product regression."
+      }
+    },
+    {
+      "id": "lang.join-screen-from-registry",
+      "anchor": "**lấy từ registry chung**",
+      "claim": "The join screen's two language dropdowns are built from the shared registry's meeting scope, not from a list hardcoded in that page (WT-259)",
+      "check": {
+        "type": "file_contains",
+        "repo": "web",
+        "file": "src/app/(app)/join/page.tsx",
+        "needles": ["languagesInScope(\"meeting\")"],
+        "fix": "The join screen stopped reading the shared registry. If it went back to its own hardcoded list, the document's promise that ko/fr/es rooms can be joined in their own language is no longer safe — re-check what the page offers before the defence."
+      }
+    },
+    {
+      "id": "lang.join-screen-full-meeting-set",
+      "anchor": "**có đủ English · Vietnamese · Japanese · Korean · French · Spanish**",
+      "claim": "The join screen offers all six meeting-scope languages — the same set a room can be created in — so a ko/fr/es room can be joined in its own language",
+      "check": {
+        "type": "literal_set",
+        "repo": "web",
+        "label": "the meeting-scope languages the join screen renders",
+        "sources": [
+          {
+            "$note": "The join screen maps languagesInScope(\"meeting\") straight into both dropdowns, so the registry's meeting-scoped rows ARE what it offers.",
+            "file": "src/lib/languages.ts",
+            "pattern": "locale:\\s*\"([a-z]{2}-[A-Z]{2})\"[\\s\\S]{0,240}?scopes:\\s*\\[[^\\]]*\"meeting\""
+          }
+        ],
+        "values": ["vi-VN", "en-US", "ja-JP", "ko-KR", "fr-FR", "es-ES"],
+        "fix": "The join screen and the document disagree about which languages it offers. A SHRUNK scope brings back the old trap — a room created in a language nobody can join — so the warning about ko/fr/es would have to come back; a WIDENED one just needs the document's list extended."
+      }
+    },
+
+    {
+      "id": "neg.member-role-no-ui",
+      "anchor": "**Đổi role member chưa có trên giao diện.**",
+      "claim": "Nothing in the frontend calls the change-member-role hook — the endpoint exists but no UI reaches it",
+      "check": {
+        "type": "symbol_unused",
+        "repo": "web",
+        "subdir": "src",
+        "symbol": "useChangeWorkspaceMemberRole",
+        "definitions": 1
+      }
+    },
+    {
+      "id": "neg.retry-invitation-no-ui",
+      "anchor": "**Không có nút Retry / resend lời mời trên giao diện.**",
+      "claim": "The frontend defines a retryInvitation service method and endpoint builder but no component calls them",
+      "check": {
+        "type": "symbol_unused",
+        "repo": "web",
+        "subdir": "src",
+        "symbol": "retryInvitation",
+        "definitions": 3
+      }
+    },
+    {
+      "id": "neg.daily-toggle-not-submitted",
+      "anchor": "**Công tắc \"Daily\" trong menu ⋯ là công tắc chết.**",
+      "claim": "The Daily toggle's state never reaches handleSubmit — isDaily appears only at its declaration and the two props passed to OptionsMenu",
+      "check": {
+        "type": "symbol_unused",
+        "repo": "web",
+        "subdir": "src/components/rooms/create-room-dialog.tsx",
+        "symbol": "isDaily",
+        "definitions": 3
+      }
+    },
+    {
+      "id": "neg.no-recurrence-field",
+      "anchor": "**không có trường lặp lại nào**",
+      "claim": "CreateTranslationRoomRequest has no recurrence field of any kind",
+      "check": {
+        "type": "file_lacks",
+        "repo": "web",
+        "file": "src/types/translationRoom.ts",
+        "needles": ["recurrence", "recurring", "isDaily", "rrule", "repeatRule"],
+        "fix": "A recurrence field now exists on the create-room request. Recurring meetings may be real — re-check before telling the panel it does not work."
+      }
+    },
+    {
+      "id": "neg.polls-panel-unmounted",
+      "anchor": "(Backend polls vẫn còn nhưng không có UI.)",
+      "claim": "PollsPanel exists in the tree but nothing imports or mounts it",
+      "check": {
+        "type": "symbol_unused",
+        "repo": "web",
+        "subdir": "src",
+        "symbol": "PollsPanel",
+        "definitions": 1
+      }
+    },
+    {
+      "id": "neg.side-panel-three-tabs",
+      "anchor": "**Transcript · Chat · People**",
+      "claim": "The in-meeting side panel has exactly three modes: transcript, chat, participants",
+      "check": {
+        "type": "literal_set",
+        "repo": "web",
+        "file": "src/components/rooms/live/side-panel/meeting-side-panel.tsx",
+        "label": "SidePanelMode union",
+        "within": "export type SidePanelMode =",
+        "withinChars": 120,
+        "pattern": "\"(\\w+)\"",
+        "values": ["transcript", "chat", "participants"],
+        "fix": "A tab was added to or removed from the in-meeting side panel. If Polls/Q&A/Notes came back, the 'Những gì KHÔNG có' section is wrong."
+      }
+    },
+    {
+      "id": "neg.qa-panel-unmounted",
+      "anchor": "**Poll / Q&A / Notes trong phòng họp**",
+      "claim": "QaPanel exists in the tree but nothing imports or mounts it",
+      "check": {
+        "type": "symbol_unused",
+        "repo": "web",
+        "subdir": "src",
+        "symbol": "QaPanel",
+        "definitions": 1
+      }
+    },
+    {
+      "id": "neg.notes-panel-unmounted",
+      "anchor": "đã gỡ khỏi side panel",
+      "claim": "CollaborativeNotesPanel exists in the tree but nothing imports or mounts it",
+      "check": {
+        "type": "symbol_unused",
+        "repo": "web",
+        "subdir": "src",
+        "symbol": "CollaborativeNotesPanel",
+        "definitions": 1
+      }
+    },
+    {
+      "id": "neg.members-no-realtime",
+      "anchor": "**Máy 1 phải F5 mới thấy member mới.**",
+      "claim": "The members page has no effect hook and no realtime subscription, so it cannot refresh when an invite is accepted",
+      "check": {
+        "type": "file_lacks",
+        "repo": "web",
+        "file": "src/app/(app)/[workspaceSlug]/members/page.tsx",
+        "needles": ["useEffect", "@/lib/signalr", "@/constants/realtime"],
+        "fix": "The members page now has effect or realtime wiring. It may refresh on invite-accept — verify by hand before repeating the 'press F5' warning on stage."
+      }
+    },
+    {
+      "id": "neg.voice-preview-absent",
+      "anchor": "**Nghe thử giọng (audio preview)**",
+      "claim": "There is no way to play a voice sample: the DTO carries no audio URL and the page has no audio element",
+      "check": {
+        "type": "file_lacks",
+        "repo": "web",
+        "file": "src/types/voice-profile.ts",
+        "needles": ["sampleUrl", "previewUrl", "audioUrl"],
+        "fix": "The voice profile DTO now carries an audio URL. Audio preview may exist — re-check the page before saying it does not."
+      }
+    },
+    {
+      "id": "neg.voice-preview-no-player",
+      "anchor": "muốn so sánh giọng thì so",
+      "claim": "The voice profiles page contains no audio player",
+      "check": {
+        "type": "file_lacks",
+        "repo": "web",
+        "file": "src/app/(app)/voice-profiles/page.tsx",
+        "needles": ["new Audio(", "<audio"],
+        "fix": "An audio element appeared on the voice profiles page. Preview may now work."
+      }
+    },
+
+    {
+      "id": "bot.slash-commands",
+      "anchor": "có slash command `/summarize`",
+      "claim": "WarpBot registers exactly these seven slash commands",
+      "covers": [
+        "/summarize",
+        "/action-items",
+        "/room-info",
+        "/summarize-doc",
+        "/extract-terms",
+        "/recent-meetings",
+        "/search-docs"
+      ],
+      "check": {
+        "type": "literal_set",
+        "repo": "web",
+        "file": "src/components/layout/global-chatbot.tsx",
+        "label": "SLASH_COMMANDS",
+        "within": "const SLASH_COMMANDS",
+        "withinChars": 6000,
+        "pattern": "command:\\s*\"(/[a-z-]+)\"",
+        "values": [
+          "/summarize",
+          "/action-items",
+          "/room-info",
+          "/summarize-doc",
+          "/extract-terms",
+          "/recent-meetings",
+          "/search-docs"
+        ],
+        "fix": "The slash command list changed. The document names each one; bring them into step."
+      }
+    },
+    {
+      "id": "bot.five-surfaces",
+      "anchor": "Chỉ 5 surface đăng ký page-context",
+      "claim": "Exactly five surfaces register WarpBot page-context (1 hook definition + 5 imports + 5 calls = 11 mentions)",
+      "check": {
+        "type": "symbol_unused",
+        "repo": "web",
+        "subdir": "src",
+        "symbol": "useRegisterAssistantContext",
+        "definitions": 11
+      }
+    },
+    {
+      "id": "bot.transcripts-not-registered",
+      "anchor": "**Slash command bị khoá theo trang, và trang Transcripts KHÔNG nằm trong danh sách.**",
+      "claim": "The Transcripts page does not register page-context, so slash commands show nothing there",
+      "check": {
+        "type": "file_lacks",
+        "repo": "web",
+        "file": "src/app/(app)/[workspaceSlug]/ai-summaries/page.tsx",
+        "needles": ["useRegisterAssistantContext"],
+        "fix": "The Transcripts page now registers page-context. Slash commands probably work there — the warning and the checklist row telling the team to demo them elsewhere are both obsolete."
+      }
+    },
+
+    {
+      "id": "nav.sidebar-items",
+      "anchor": "**Home · Meetings · Transcripts · Voice Profiles**",
+      "claim": "The sidebar links to Home, Meetings, Transcripts, Voice Profiles, Members, Documents and — for Owner/Admin — Invitations, Billing, Settings and Dashboard",
+      "check": {
+        "type": "file_contains",
+        "repo": "web",
+        "file": "src/components/layout/linear-sidebar.tsx",
+        "needles": [
+          "/${slug}/home",
+          "/${slug}/rooms",
+          "/${slug}/ai-summaries",
+          "\"/voice-profiles\"",
+          "/${slug}/members",
+          "/${slug}/documents",
+          "/${slug}/invitations",
+          "/${slug}/billing",
+          "/${slug}/settings",
+          "/${slug}/dashboard"
+        ],
+        "fix": "A sidebar destination named in the document is gone. Flow 1 step 3 walks the panel through this list."
+      }
+    },
+    {
+      "id": "nav.platform-group",
+      "anchor": "Overview · Workspaces · Billing · Global Glossary",
+      "claim": "The system-admin Platform group links to Overview, Workspaces, Billing and Global Glossary",
+      "check": {
+        "type": "file_contains",
+        "repo": "web",
+        "file": "src/components/layout/linear-sidebar.tsx",
+        "needles": [
+          "\"/admin\"",
+          "\"/admin/workspaces\"",
+          "\"/admin/billing\"",
+          "\"/admin/global-glossary\""
+        ],
+        "fix": "The Platform group changed. Flow 5 depends on these four entries."
+      }
+    },
+    {
+      "id": "nav.not-in-sidebar",
+      "anchor": "**không có trong sidebar**, phải mở bằng URL",
+      "claim": "History, Payment plans, Terminology and AI chat are NOT reachable from the sidebar (Invitations now is — see nav.sidebar-items)",
+      "check": {
+        "type": "file_lacks",
+        "repo": "web",
+        "file": "src/components/layout/linear-sidebar.tsx",
+        "needles": ["/history", "/terminology", "/ai-chat", "/payment/plans"],
+        "fix": "One of these pages is now in the sidebar. The document tells the team to pre-open browser tabs for them and the checklist repeats it — drop whichever is now reachable, and add it to the sidebar walkthrough in Flow 1 step 3."
+      }
+    }
+  ],
+
+  "humanVerifyOnly": {
+    "$comment": "Tokens the document names in backticks that are deliberately NOT machine-checked. Each needs a human before the defence. Keeping them listed here is the point: they are visible rather than silently unchecked.",
+
+    "/[slug]/rooms/[id]/artifacts": "Not named as a demo step; the document reaches artifacts through buttons, not a URL.",
+    "/dev/email/workspace-invite": "A dev-only preview URL the document warns about rather than relies on.",
+    "/dev/": "The document points at the /dev/ prefix to warn against projecting it on stage. Not a route claim.",
+    "/join?code=": "Query-string form of /join; the route itself is covered by the join-screen language checks.",
+    "/api/v1/...": "Placeholder text, not a real endpoint.",
+    "/": "The slash a user types to open the slash-command menu, not a route."
+  },
+
+  "notCheckable": {
+    "$comment": "Claim CATEGORIES in DEMO-FLOWS.md that no check covers, with the reason. This is the honest remainder — everything here has to be verified by a person.",
+
+    "ui-copy-and-labels": "Exact on-screen wording (the public-email block message, 'Chưa có giọng nào cho ngôn ngữ này', dialog summary text). Only checkable by regex over JSX, which false-positives on every restyle.",
+    "runtime-behaviour": "Anything that only shows up when the system runs: the 3-second lobby poll, the 5-second artifact refresh, the 60-second suggestion strip, realtime room-list updates, SignalR billing updates, translation actually working.",
+    "permission-outcomes": "RBAC results (Access Denied screens, 403 on Start Translation for non-hosts, HOST_ONLY artifacts, fail-closed meeting-creation gate). These need a real token and a running backend.",
+    "empty-state-and-cache": "The lazy voice catalog being empty until warmed — a data condition, not a code fact.",
+    "settings-field-lists": "The Settings page field inventory in Flow 1 step 8 and the AI usage policy list. Long, deeply nested form JSX; a regex here would break on every refactor.",
+    "flow-ordering-and-advice": "The recommended flow order, the stage advice, and the whole preparation checklist — judgement, not facts about code.",
+    "cross-service-claims": "The credit pricing model, artifact retention, and the append-only audit log. The migrations are named in the document but live in warptalk-backend's service-owned migrations; the existing scripts/test-migration-owner-contract.sh already guards that boundary."
+  }
+}

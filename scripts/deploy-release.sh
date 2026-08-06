@@ -7,6 +7,11 @@ set -eu
 : "${PRODUCTION_ENV_FILE:?PRODUCTION_ENV_FILE is required}"
 
 SKIP_IMAGE_PULL="${SKIP_IMAGE_PULL:-false}"
+# Escape hatches for the disk guards. Both default to running: the guards exist
+# because nothing ever reclaimed disk on the app host and a release died at 100%
+# full, so they should have to be switched off deliberately.
+SKIP_DISK_PREFLIGHT="${SKIP_DISK_PREFLIGHT:-false}"
+SKIP_RELEASE_PRUNE="${SKIP_RELEASE_PRUNE:-false}"
 DEPLOY_MODE="${DEPLOY_MODE:-full}"
 DEPLOY_SERVICES="${DEPLOY_SERVICES:-}"
 RUN_MIGRATIONS="${RUN_MIGRATIONS:-true}"
@@ -16,6 +21,14 @@ case "$SKIP_IMAGE_PULL" in
     echo "SKIP_IMAGE_PULL must be true or false" >&2
     exit 1
     ;;
+esac
+case "$SKIP_DISK_PREFLIGHT" in
+  true|false) ;;
+  *) echo "SKIP_DISK_PREFLIGHT must be true or false" >&2; exit 1 ;;
+esac
+case "$SKIP_RELEASE_PRUNE" in
+  true|false) ;;
+  *) echo "SKIP_RELEASE_PRUNE must be true or false" >&2; exit 1 ;;
 esac
 case "$DEPLOY_MODE" in
   full|selective) ;;
@@ -65,7 +78,8 @@ case "$DEPLOY_ROLE" in
     ;;
 esac
 
-for required_file in "$matrix_file" "$override_filter" "$compose_file"; do
+for required_file in "$matrix_file" "$override_filter" "$compose_file" \
+  "$script_dir/preflight-release-disk.sh" "$script_dir/prune-release-artifacts.sh"; do
   test -r "$required_file" || {
     echo "Cannot read deployment artifact: $required_file" >&2
     exit 1
@@ -130,6 +144,49 @@ compose() {
 
 compose config --quiet
 
+# Rendering the Alertmanager config is not the same as loading it. Nothing about
+# the alertmanager service's spec or image digest changes when only the bytes on
+# disk change, so `compose up -d` correctly concludes there is nothing to
+# recreate and the running process keeps serving whatever it parsed at startup.
+#
+# That is how production served a stale Alertmanager configuration for six days
+# while the correct one sat on disk, and dropped two genuinely firing alerts
+# (WarpTalkObjectStorageBudgetNearLimit and WarpTalkObjectStorageBudgetExceeded).
+# The container reported `Up 6 days` while the cost exporters that feed those
+# alerts reported `Up 4 hours`.
+#
+# The renderer truncates and rewrites the same inode, so the read-only bind mount
+# inside the container already sees the new bytes; only the reload was missing,
+# and Alertmanager performs one on SIGHUP.
+#
+# Signal only a container that was already running before this deploy and was not
+# replaced by it. A container that `compose up` created or recreated has just
+# parsed the rendered file itself, and signalling a process that started
+# milliseconds ago risks arriving before it installs its SIGHUP handler, whose
+# default disposition is to terminate.
+running_alertmanager() {
+  alertmanager_container="$(compose ps -q alertmanager 2>/dev/null || true)"
+  [ -n "$alertmanager_container" ] || return 0
+  alertmanager_state="$(
+    docker inspect -f '{{.State.Running}}' "$alertmanager_container" 2>/dev/null || echo false
+  )"
+  [ "$alertmanager_state" = "true" ] || return 0
+  printf '%s\n' "$alertmanager_container"
+}
+
+alertmanager_before=''
+if [ "$DEPLOY_ROLE" = "infra" ]; then
+  alertmanager_before="$(running_alertmanager)"
+fi
+
+# Check the disk before pulling a single byte. A release that dies part-way
+# through the image pull leaves production split across two versions -- data and
+# infra on the new release, app on the old one -- which is a worse outcome than
+# a release that declines to start. Skipped when this deploy will not pull.
+if [ "$SKIP_IMAGE_PULL" != "true" ] && [ "$SKIP_DISK_PREFLIGHT" != "true" ]; then
+  "$script_dir/preflight-release-disk.sh" "$override"
+fi
+
 if [ "$DEPLOY_MODE" = "selective" ]; then
   # The planner emits service names from the trusted image matrix. Validate
   # again at the host boundary before allowing them to become CLI arguments.
@@ -161,6 +218,35 @@ if [ "$DEPLOY_MODE" = "selective" ]; then
   compose up -d --no-deps "$@"
 else
   compose up -d --remove-orphans
+fi
+
+if [ "$DEPLOY_ROLE" = "infra" ]; then
+  # Idempotent: a reload re-reads the file and is a no-op when the content is
+  # unchanged, and silences and notification state live in the alertmanager-data
+  # volume rather than in process memory. Nothing here may fail the release --
+  # on a first deploy there is no container to signal, and a signal that cannot
+  # be delivered is reported rather than fatal.
+  alertmanager_after="$(running_alertmanager)"
+  if [ -z "$alertmanager_before" ]; then
+    echo "Alertmanager was not running before this deploy; it reads the rendered configuration at startup."
+  elif [ "$alertmanager_after" != "$alertmanager_before" ]; then
+    echo "Alertmanager was recreated by this deploy; it read the rendered configuration at startup."
+  elif docker kill -s HUP "$alertmanager_before" >/dev/null 2>&1; then
+    echo "Reloaded the rendered Alertmanager configuration (SIGHUP to $alertmanager_before)."
+  else
+    echo "warning: could not signal Alertmanager ($alertmanager_before); it may still be serving the previous configuration" >&2
+  fi
+fi
+
+# Reclaim after the new release is up and healthy, never before. Retention is
+# bounded rather than unlimited: release directories are kept for forensics and
+# image generations are kept only as far back as the rollback target. Nothing
+# here may fail a deploy that has already succeeded -- the release is live, and
+# a housekeeping error is not a reason to report failure.
+if [ "$SKIP_RELEASE_PRUNE" != "true" ]; then
+  if ! "$script_dir/prune-release-artifacts.sh"; then
+    echo "warning: release artifact pruning failed; disk may need attention" >&2
+  fi
 fi
 
 echo "Deployed immutable release $(jq -r '.tag' "$RELEASE_MANIFEST") to $DEPLOY_ROLE ($DEPLOY_MODE)"

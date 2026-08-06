@@ -84,17 +84,40 @@ if rg -q 'webhook_configs:' "$render_dir/alertmanager.yml"; then
   fail "Alertmanager configuration still contains the disabled webhook receiver"
 fi
 
-AI_COST_STT_USD_PER_MINUTE=0 \
-AI_COST_TRANSLATION_USD_PER_MINUTE=0 \
-AI_COST_TTS_USD_PER_MINUTE=0 \
-AI_COST_VOICE_CLONE_USD_PER_MINUTE=0 \
-AI_BUDGET_STT_USD=0 \
-AI_BUDGET_TRANSLATION_USD=0 \
-AI_BUDGET_TTS_USD=0 \
-AI_BUDGET_VOICE_CLONE_USD=0 \
-LIVEKIT_COST_USD_PER_ROOM_MINUTE=0 \
-LIVEKIT_MONTHLY_BUDGET_USD=0 \
-OBJECT_STORAGE_BUDGET_GB=0 \
+if AI_COST_STT_USD_PER_MINUTE=0.006 \
+  AI_COST_TRANSLATION_USD_PER_MINUTE=0.002 \
+  AI_COST_TTS_USD_PER_MINUTE=0.015 \
+  AI_COST_VOICE_CLONE_USD_PER_MINUTE=0.05 \
+  AI_BUDGET_STT_USD=25 \
+  AI_BUDGET_TRANSLATION_USD=25 \
+  AI_BUDGET_TTS_USD=25 \
+  AI_BUDGET_VOICE_CLONE_USD=25 \
+  LIVEKIT_COST_USD_PER_ROOM_MINUTE=0.004 \
+  LIVEKIT_MONTHLY_BUDGET_USD=40 \
+  OBJECT_STORAGE_BUDGET_GB=0 \
+  BILLING_COST_QUERIES_PATH="$render_dir/zero-billing.yml" \
+  LIVEKIT_COST_QUERIES_PATH="$render_dir/zero-livekit.yml" \
+  WORKSPACE_STORAGE_QUERIES_PATH="$render_dir/zero-workspace.yml" \
+  COST_RULES_PATH="$render_dir/zero-rules.yml" \
+  "$cost_renderer" >/dev/null 2>&1; then
+  fail "cost renderer must reject a zero OBJECT_STORAGE_BUDGET_GB"
+fi
+
+# Placeholder rates and budgets, not the production numbers, but they must be
+# non-zero: the renderer rejects a zero rate or budget because it renders an
+# alert threshold that can never mean anything, and this fixture is the path a
+# zero OBJECT_STORAGE_BUDGET_GB previously reached production through.
+AI_COST_STT_USD_PER_MINUTE=0.006 \
+AI_COST_TRANSLATION_USD_PER_MINUTE=0.002 \
+AI_COST_TTS_USD_PER_MINUTE=0.015 \
+AI_COST_VOICE_CLONE_USD_PER_MINUTE=0.05 \
+AI_BUDGET_STT_USD=25 \
+AI_BUDGET_TRANSLATION_USD=25 \
+AI_BUDGET_TTS_USD=25 \
+AI_BUDGET_VOICE_CLONE_USD=25 \
+LIVEKIT_COST_USD_PER_ROOM_MINUTE=0.004 \
+LIVEKIT_MONTHLY_BUDGET_USD=40 \
+OBJECT_STORAGE_BUDGET_GB=50 \
 BILLING_COST_QUERIES_PATH="$render_dir/billing.yml" \
 LIVEKIT_COST_QUERIES_PATH="$render_dir/livekit.yml" \
 WORKSPACE_STORAGE_QUERIES_PATH="$render_dir/workspace.yml" \

@@ -488,6 +488,17 @@ services:
     environment:
       <<: *ai-environment
       WORKER_HEALTH_NAME: tts
+      # The TTS worker publishes synthesised audio into the LiveKit room as an
+      # `ai-interpreter-*` participant, so it needs the same LiveKit credentials
+      # as livekit-ingress-worker. These three were missing since this file was
+      # first written: shared/config.py gives LiveKitSettings placeholder
+      # defaults rather than requiring them, so the worker started clean and
+      # dialled ws://localhost:7880, and publish_pcm swallowed the connect
+      # error. tts:results still reached Redis, so billing, transcripts and the
+      # healthcheck all stayed green while no meeting ever produced audio.
+      LIVEKIT_URL: ${LIVEKIT_URL:?}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?}
       TTS_PROVIDER: ${TTS_PROVIDER:?}
       TTS_API_KEY: ${TTS_API_KEY:?}
       TTS_MODEL: sonic-3.5

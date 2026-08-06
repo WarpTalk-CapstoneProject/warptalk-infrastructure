@@ -28,7 +28,26 @@ OBJECT_STORAGE_BUDGET_GB
 for name in $required_values; do
   eval "value=\${$name:-}"
   if ! printf '%s\n' "$value" | grep -Eq '^[0-9]+([.][0-9]+)?$'; then
-    echo "$name must be a non-negative decimal number" >&2
+    echo "$name must be a decimal number" >&2
+    exit 1
+  fi
+  # Every value in the list above is either an alert threshold or the rate that
+  # feeds one, so zero is valid syntax but never a valid configuration: it does
+  # not disable the alert, it silently breaks it. Matches 0, 00, 0.0, 0.000 and
+  # any other spelling that renders to zero.
+  if printf '%s\n' "$value" | grep -Eq '^0*([.]0*)?$'; then
+    case "$name" in
+      OBJECT_STORAGE_BUDGET_GB)
+        reason="a zero storage budget makes every object storage alert (WarpTalkObjectStorageBudgetNearLimit, WarpTalkObjectStorageBudgetExceeded) fire unconditionally, because any stored byte is greater than zero"
+        ;;
+      *BUDGET*)
+        reason="a zero budget makes every alert that compares spend against it fire unconditionally, because any non-zero spend is greater than zero"
+        ;;
+      *)
+        reason="a zero unit rate makes the estimated-cost metric identically zero, so the budget alerts that depend on it can never fire"
+        ;;
+    esac
+    echo "$name must be greater than zero (got '$value'): $reason" >&2
     exit 1
   fi
 done

@@ -1,0 +1,20 @@
+# Migrations under scripts/migrations/ that deliberately have no counterpart in
+# any service-owned set (scripts/service-migrations/<service>/).
+#
+# scripts/migrations/ is applied by run-migrations.sh to the LEGACY MONOLITH
+# database `warptalk`. No service connects to it. A file listed here is
+# therefore asserting: "this changes nothing any running service reads, and that
+# is intended." check-service-migration-coverage.sh exempts the files named
+# here from the mirroring check.
+#
+# Format: one filename per line, followed by a blank line and a reason as a
+# comment. Adding a line is a deliberate, reviewable act — if you are reaching
+# for this file to make CI green, you almost certainly want a service-owned
+# migration in warptalk-backend/<service>/database/migrations/ instead.
+#
+# Only migrations numbered at or above the cutover in
+# check-service-migration-coverage.sh are checked; anything below it predates
+# the logical-database extraction and is present in every extracted database by
+# construction, so it never needs an entry here.
+
+# (no entries)

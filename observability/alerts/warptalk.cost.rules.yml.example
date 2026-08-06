@@ -33,8 +33,26 @@ groups:
         annotations:
           summary: "LiveKit estimated spend exceeded its monthly budget"
 
+      # Capacity is measured from the object store's own per-bucket usage rather
+      # than from warptalk_object_storage_bytes. That series sums size columns of
+      # live database rows, so it undercounts what is actually stored by roughly
+      # an order of magnitude and is blind to every bucket with no indexing table
+      # behind it - voice samples, meeting chat and LiveKit egress recordings all
+      # count against the same disk but never appear in it. A capacity budget has
+      # to be compared against bytes that are really on the volume.
+      #
+      # warptalk_object_storage_bytes{source} stays exported and on the dashboard:
+      # it is the logical view (live, non-deleted rows per application domain) and
+      # the gap between it and the bucket totals is the orphaned-object signal.
+      # The bucket metric's own `bucket` label is finer-grained than `source`, but
+      # it is a physical grouping, not a per-domain one, so the two are kept side
+      # by side instead of one replacing the other.
+      #
+      # This trades away the provider-neutrality of the previous expression: a
+      # move off MinIO to R2 or another S3-compatible store means repointing these
+      # two rules at that provider's usage metric.
       - alert: WarpTalkObjectStorageBudgetNearLimit
-        expr: sum(max by (source) (warptalk_object_storage_bytes)) > max(warptalk_object_storage_budget_bytes) * 0.8
+        expr: sum(minio_bucket_usage_total_bytes) > max(warptalk_object_storage_budget_bytes) * 0.8
         for: 30m
         labels:
           severity: warning
@@ -42,9 +60,20 @@ groups:
           summary: "Object storage is above 80% of its configured capacity budget"
 
       - alert: WarpTalkObjectStorageBudgetExceeded
-        expr: sum(max by (source) (warptalk_object_storage_bytes)) > max(warptalk_object_storage_budget_bytes)
+        expr: sum(minio_bucket_usage_total_bytes) > max(warptalk_object_storage_budget_bytes)
         for: 15m
         labels:
           severity: critical
         annotations:
           summary: "Object storage exceeded its configured capacity budget"
+
+      # The two rules above now depend on a single scrape job (minio-buckets). If
+      # that job stops returning the series they stop evaluating and go quiet, so
+      # the loss of the capacity signal has to alert on its own.
+      - alert: WarpTalkObjectStorageUsageMetricMissing
+        expr: absent(minio_bucket_usage_total_bytes)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Object storage usage metric is missing, so the capacity budget alerts cannot evaluate"
