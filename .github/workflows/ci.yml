@@ -102,15 +102,26 @@ jobs:
       - name: Backup encryption contract
         working-directory: warptalk-infrastructure
         run: ./scripts/test-backup-encryption.sh
-      - name: Migration conflict-marker contract
+      - name: Repository conflict-marker contract
         working-directory: warptalk-infrastructure
         run: |
           # Git writes a conflict marker as exactly seven <, = or > characters at
           # the start of a line, followed by a space or the end of the line. Anchor
-          # on that shape so a legitimate SQL banner comment (-- ==========) or a
-          # string containing angle brackets cannot trip the check.
-          if grep -rEn '^(<{7}|={7}|>{7})( |$)' scripts/migrations; then
-            echo "Unresolved git conflict markers in scripts/migrations." >&2
+          # on that shape so a legitimate SQL banner comment (-- ==========), a
+          # 40-char = rule, or a string containing angle brackets cannot trip the
+          # check.
+          #
+          # Scope is the whole repository, not just scripts/migrations: markers
+          # have now been found in migrations and in a shell heredoc, and the
+          # heredoc case failed silently because the generated file was still
+          # written. Use `git grep` rather than `grep -r` so the file set is
+          # exactly "what this repository tracks" — that skips .git, node_modules
+          # and every other ignored path by construction, with no hand-maintained
+          # --exclude list that could quietly grow to cover a real source file.
+          # -I skips files Git considers binary (see .gitattributes); those cannot
+          # contain a text conflict marker Git would have written.
+          if git grep -I -n -E '^(<{7}|={7}|>{7})( |$)' -- .; then
+            echo "Unresolved git conflict markers found in tracked files (listed above)." >&2
             exit 1
           fi
       - name: Stage service-owned migrations
