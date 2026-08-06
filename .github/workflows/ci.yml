@@ -39,7 +39,7 @@ jobs:
       # backend revision it validates against instead of silently taking that
       # repository's default branch. Prefer the branch matching this infra ref
       # (development -> development) so an infra PR sees the backend code it will
-      # ship beside; fall back to main for infra-only feature branches.
+      # ship beside; fall back to development for infra-only feature branches.
       - name: Resolve backend ref to validate against
         id: backend-ref
         env:
@@ -47,7 +47,12 @@ jobs:
           BACKEND_REPO: https://github.com/WarpTalk-CapstoneProject/warptalk-backend.git
         run: |
           set -eu
-          ref=main
+          # development, not main: production ships from development, and main
+          # trails it (40 commits behind as of 2026-08-06). Falling back to main
+          # made the service-migration coverage check compare infra's staged
+          # copies against a backend that lacks the migrations they mirror, so
+          # every infra PR whose branch name has no backend twin failed.
+          ref=development
           if [ -n "${INFRA_REF:-}" ] &&
             git ls-remote --exit-code --heads "$BACKEND_REPO" "$INFRA_REF" >/dev/null 2>&1; then
             ref="$INFRA_REF"
