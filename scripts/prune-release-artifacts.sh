@@ -50,6 +50,7 @@ case "$DRY_RUN" in
   true|false) ;;
   *) echo "prune: DRY_RUN must be true or false" >&2; exit 1 ;;
 esac
+value=""
 for var in KEEP_RELEASES KEEP_IMAGE_RELEASES; do
   eval "value=\$$var"
   echo "$value" | grep -Eq '^[0-9]+$' && [ "$value" -ge 1 ] || {
