@@ -102,6 +102,17 @@ jobs:
       - name: Backup encryption contract
         working-directory: warptalk-infrastructure
         run: ./scripts/test-backup-encryption.sh
+      - name: Migration conflict-marker contract
+        working-directory: warptalk-infrastructure
+        run: |
+          # Git writes a conflict marker as exactly seven <, = or > characters at
+          # the start of a line, followed by a space or the end of the line. Anchor
+          # on that shape so a legitimate SQL banner comment (-- ==========) or a
+          # string containing angle brackets cannot trip the check.
+          if grep -rEn '^(<{7}|={7}|>{7})( |$)' scripts/migrations; then
+            echo "Unresolved git conflict markers in scripts/migrations." >&2
+            exit 1
+          fi
       - name: Stage service-owned migrations
         working-directory: warptalk-infrastructure
         run: ./scripts/collect-service-migrations.sh
