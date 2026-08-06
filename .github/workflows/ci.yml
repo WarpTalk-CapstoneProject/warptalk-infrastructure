@@ -65,6 +65,30 @@ jobs:
           repository: WarpTalk-CapstoneProject/warptalk-backend
           ref: ${{ steps.backend-ref.outputs.ref }}
           path: warptalk-backend
+      # WT-322: the realtime event contract is the only check here that needs BOTH
+      # product repositories — it diffs the SignalR events the web client listens
+      # for against the ones the backend actually sends. Resolved exactly like the
+      # backend ref above, for the same reason.
+      - name: Resolve web ref to validate against
+        id: web-ref
+        env:
+          INFRA_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          WEB_REPO: https://github.com/WarpTalk-CapstoneProject/warptalk-web.git
+        run: |
+          set -eu
+          ref=development
+          if [ -n "${INFRA_REF:-}" ] &&
+            git ls-remote --exit-code --heads "$WEB_REPO" "$INFRA_REF" >/dev/null 2>&1; then
+            ref="$INFRA_REF"
+          fi
+          sha=$(git ls-remote "$WEB_REPO" "refs/heads/$ref" | cut -f1)
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Validating against warptalk-web@$ref ($sha)"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: WarpTalk-CapstoneProject/warptalk-web
+          ref: ${{ steps.web-ref.outputs.ref }}
+          path: warptalk-web
       - name: Secret scan for introduced commits
         env:
           SECRET_SCAN_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -147,6 +171,12 @@ jobs:
           PGPASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
           PGDATABASE: warptalk
         run: ./scripts/test-logical-database-migrations.sh
+      # A `connection.on("X")` handler for an event nobody sends looks like working
+      # code and does nothing — that is how WT-322 shipped a participant with no
+      # audio and no captions. This diffs both sides of the SignalR contract.
+      - name: Realtime event contract
+        working-directory: warptalk-infrastructure
+        run: node scripts/check-realtime-event-contract.mjs
       - name: Production deployment contracts
         working-directory: warptalk-infrastructure
         run: ./scripts/check-production-deployment.sh
