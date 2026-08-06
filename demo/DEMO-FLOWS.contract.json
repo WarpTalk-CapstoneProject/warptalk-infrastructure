@@ -387,27 +387,34 @@
       }
     },
     {
-      "id": "lang.join-screen-only-three",
-      "anchor": "**chỉ có English · Vietnamese · Japanese**",
-      "claim": "The join screen's two language dropdowns offer only English, Vietnamese and Japanese, from a list hardcoded in that page",
+      "id": "lang.join-screen-from-registry",
+      "anchor": "**lấy từ registry chung**",
+      "claim": "The join screen's two language dropdowns are built from the shared registry's meeting scope, not from a list hardcoded in that page (WT-259)",
       "check": {
         "type": "file_contains",
         "repo": "web",
         "file": "src/app/(app)/join/page.tsx",
-        "needles": ["\"en-US\"", "\"vi-VN\"", "\"ja-JP\""],
-        "fix": "The join screen no longer hardcodes English/Vietnamese/Japanese. If it now derives from the shared registry, the warning in the document is obsolete and the 'do not create a room in ko/fr/es' advice is wrong."
+        "needles": ["languagesInScope(\"meeting\")"],
+        "fix": "The join screen stopped reading the shared registry. If it went back to its own hardcoded list, the document's promise that ko/fr/es rooms can be joined in their own language is no longer safe — re-check what the page offers before the defence."
       }
     },
     {
-      "id": "lang.join-screen-no-wider-set",
-      "anchor": "thì người vào **không chọn được** mấy ngôn ngữ đó ở màn hình này",
-      "claim": "The join screen does NOT offer Korean, French or Spanish, and does not read the shared language registry",
+      "id": "lang.join-screen-full-meeting-set",
+      "anchor": "**có đủ English · Vietnamese · Japanese · Korean · French · Spanish**",
+      "claim": "The join screen offers all six meeting-scope languages — the same set a room can be created in — so a ko/fr/es room can be joined in its own language",
       "check": {
-        "type": "file_lacks",
+        "type": "literal_set",
         "repo": "web",
-        "file": "src/app/(app)/join/page.tsx",
-        "needles": ["ko-KR", "fr-FR", "es-ES", "languagesInScope"],
-        "fix": "The join screen has been widened beyond three languages. The document tells the team NOT to create rooms in ko/fr/es because they could not be joined — that advice is now wrong and the warning should be removed."
+        "label": "the meeting-scope languages the join screen renders",
+        "sources": [
+          {
+            "$note": "The join screen maps languagesInScope(\"meeting\") straight into both dropdowns, so the registry's meeting-scoped rows ARE what it offers.",
+            "file": "src/lib/languages.ts",
+            "pattern": "locale:\\s*\"([a-z]{2}-[A-Z]{2})\"[\\s\\S]{0,240}?scopes:\\s*\\[[^\\]]*\"meeting\""
+          }
+        ],
+        "values": ["vi-VN", "en-US", "ja-JP", "ko-KR", "fr-FR", "es-ES"],
+        "fix": "The join screen and the document disagree about which languages it offers. A SHRUNK scope brings back the old trap — a room created in a language nobody can join — so the warning about ko/fr/es would have to come back; a WIDENED one just needs the document's list extended."
       }
     },
 
@@ -609,7 +616,7 @@
     {
       "id": "nav.sidebar-items",
       "anchor": "**Home · Meetings · Transcripts · Voice Profiles**",
-      "claim": "The sidebar links to Home, Meetings, Transcripts, Voice Profiles, Members, Documents, Billing, Settings and Dashboard",
+      "claim": "The sidebar links to Home, Meetings, Transcripts, Voice Profiles, Members, Documents and — for Owner/Admin — Invitations, Billing, Settings and Dashboard",
       "check": {
         "type": "file_contains",
         "repo": "web",
@@ -621,6 +628,7 @@
           "\"/voice-profiles\"",
           "/${slug}/members",
           "/${slug}/documents",
+          "/${slug}/invitations",
           "/${slug}/billing",
           "/${slug}/settings",
           "/${slug}/dashboard"
@@ -648,13 +656,13 @@
     {
       "id": "nav.not-in-sidebar",
       "anchor": "**không có trong sidebar**, phải mở bằng URL",
-      "claim": "History, Invitations, Payment plans, Terminology and AI chat are NOT reachable from the sidebar",
+      "claim": "History, Payment plans, Terminology and AI chat are NOT reachable from the sidebar (Invitations now is — see nav.sidebar-items)",
       "check": {
         "type": "file_lacks",
         "repo": "web",
         "file": "src/components/layout/linear-sidebar.tsx",
-        "needles": ["/history", "/terminology", "/ai-chat", "/invitations", "/payment/plans"],
-        "fix": "One of these pages is now in the sidebar. The document tells the team to pre-open browser tabs for them and the checklist repeats it — drop whichever is now reachable."
+        "needles": ["/history", "/terminology", "/ai-chat", "/payment/plans"],
+        "fix": "One of these pages is now in the sidebar. The document tells the team to pre-open browser tabs for them and the checklist repeats it — drop whichever is now reachable, and add it to the sidebar walkthrough in Flow 1 step 3."
       }
     }
   ],

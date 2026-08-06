@@ -42,11 +42,11 @@ có chính sách AI và có hạn mức tính bằng credit.
 3. **Giới thiệu điều hướng** — sidebar thật gồm:
    - **Home · Meetings · Transcripts · Voice Profiles**
      ("Meetings" có sẵn nút *Join by code* và *Create Meeting*; "Transcripts" trỏ tới `/[slug]/ai-summaries`)
-   - **Members · Documents**, và nếu là Owner/Admin thêm **Billing · Settings · Dashboard**
+   - **Members · Documents**, và nếu là Owner/Admin thêm **Invitations · Billing · Settings · Dashboard**
    - Nhóm **Platform** chỉ hiện với tài khoản system admin: Overview · Workspaces · Billing · Global Glossary
 
    > ⚠️ Các trang sau **không có trong sidebar**, phải mở bằng URL — hãy mở sẵn tab trước buổi bảo vệ:
-   > `/[slug]/history` (có link từ trang *ended*), `/[slug]/invitations`,
+   > `/[slug]/history` (có link từ trang *ended*),
    > `/[slug]/payment/plans`, `/terminology`, `/ai-chat`, `/[slug]/advanced`.
    > (`/[slug]/advanced` chỉ xuất hiện trong sidebar khi **đang ở trang settings và sidebar
    > đang thu gọn** — coi như phải mở bằng URL.)
@@ -192,13 +192,13 @@ có chính sách AI và có hạn mức tính bằng credit.
      **tập ngôn ngữ sẽ được nói**, *không* phải "ngôn ngữ nguồn → danh sách ngôn ngữ đích".
      Mỗi người chọn ngôn ngữ nói/nghe của riêng mình lúc vào phòng.
 
-     > ⚠️⚠️ **Bản đang chạy vẫn cho chọn đủ 6 ngôn ngữ, trái với chính sách "chỉ vi / en / ja".**
-     > `language-selector.tsx` trên production còn nguyên danh sách cứng 6 dòng
-     > (vi-VN · en-US · ja-JP · ko-KR · fr-FR · es-ES). **WT-259 (language registry) đã có
-     > trên nhánh nhưng CHƯA deploy** — đừng tin là nó đã chặn giúp.
-     > Hệ quả trực tiếp: **người tạo phòng bấm nhầm ko / fr / es là hỏng buổi demo**, vì
-     > màn hình join `/join?code=` chỉ có 3 ngôn ngữ (xem bước 3) nên không ai chọn được
-     > mấy thứ tiếng đó nữa. **Chỉ chọn vi, en, ja. Không đụng 3 cái còn lại.**
+     > ℹ️ **WT-259 (language registry) đã vào `development`: dialog tạo phòng và màn hình
+     > join giờ đọc chung một danh sách** — `languagesInScope("meeting")` trong
+     > `src/lib/languages.ts`, đúng 6 dòng vi-VN · en-US · ja-JP · ko-KR · fr-FR · es-ES.
+     > Nghĩa là **tạo phòng bằng ko / fr / es không còn làm kẹt người vào nữa**: họ chọn
+     > được đúng thứ tiếng đó ở màn hình join (xem bước 3 Flow 2).
+     > Vẫn nên diễn cặp **vi ↔ en** cho chắc, nhưng đó là lựa chọn kịch bản chứ không còn
+     > là giới hạn của sản phẩm — đừng nói với hội đồng là chỉ hỗ trợ 3 ngôn ngữ.
    - Date & Time, mời theo email.
 
    > ⚠️ **Công tắc "Daily" trong menu ⋯ là công tắc chết.** Nó có bật/tắt trên giao diện nhưng
@@ -233,10 +233,13 @@ có chính sách AI và có hạn mức tính bằng credit.
    > phòng**, tức **nghe tiếng chưa dịch**, và phải đổi bằng **voice/language picker trong phòng**.
    > **Cho host vào bằng `/join?code=…` để chọn được "tôi nghe tiếng…" ngay từ đầu.**
    > ⚠️ **Noise suppression và background blur mặc định TẮT** — muốn khoe thì phải tự bật.
-   > ⚠️ Hai dropdown ngôn ngữ ở đây **chỉ có English · Vietnamese · Japanese** — danh sách
-   > cứng riêng của trang join, không lấy theo tập ngôn ngữ của phòng. Phòng khai ko / fr / es
-   > thì người vào **không chọn được** mấy ngôn ngữ đó ở màn hình này. Demo song ngữ vi↔en
-   > thì không sao, nhưng đừng tạo phòng bằng ngôn ngữ ngoài 3 cái này.
+   > ℹ️ Hai dropdown ngôn ngữ ở đây **lấy từ registry chung** — `languagesInScope("meeting")`
+   > trong `src/lib/languages.ts`, không còn là danh sách cứng riêng của trang join (WT-259).
+   > Nhờ vậy màn hình này **có đủ English · Vietnamese · Japanese · Korean · French · Spanish**,
+   > đúng bằng tập ngôn ngữ dùng để tạo phòng: phòng khai ko / fr / es
+   > thì người vào **vẫn chọn được** mấy ngôn ngữ đó ở màn hình này.
+   > ⚠️ Nhưng danh sách vẫn **không lọc theo tập ngôn ngữ của phòng** — nó luôn là cả 6, nên
+   > vẫn chọn nhầm được một thứ tiếng mà phòng không khai. Đọc kỹ tập ngôn ngữ của phòng trước khi chọn.
    > ⚠️ Người **chưa thuộc workspace** mở link này sẽ bị đá sang `/workspace/join?code=…`
    > (luồng xin vào ở Flow 1 bước 5), không vào thẳng phòng được.
 4. **Phòng chờ** — `/[slug]/rooms/[id]/waiting`: host thấy hàng chờ và bấm **Admit**.
@@ -403,7 +406,7 @@ trang này, nên không tách làm hai bước.
 | Account tạo workspace phải là **email doanh nghiệp** | Gmail/Outlook bị chặn ngay ở `/workspace/create` |
 | **Warm voice catalog** cho mọi ngôn ngữ sẽ demo (nhất là `vi`) — chạy 1 lần dịch thật | Cache rỗng → picker trống → tưởng lỗi |
 | Tạo phòng demo bằng loại **Webinar / Virtual Appointment / Live Event** | Loại khác không có phòng chờ, mất hẳn bước Admit |
-| **Chỉ chọn vi / en / ja** ở tập ngôn ngữ của phòng | Dialog vẫn cho chọn 6 (WT-259 chưa deploy); màn hình join chỉ có 3 → chọn ko/fr/es là kẹt |
+| Diễn cặp **vi ↔ en** ở tập ngôn ngữ của phòng | Không còn là giới hạn (WT-259: join đã đủ 6 ngôn ngữ) — chỉ vì đó là cặp đã warm voice catalog và cả nhóm tập nhiều nhất |
 | **Cho cả host và khách vào bằng `/join?code=…`** | Modal Configure không cho host chọn ngôn ngữ nghe → host nghe tiếng chưa dịch |
 | **Chạy thử 1 cuộc họp 2 máy trên chính production** trước buổi bảo vệ | WT-269 vừa deploy hôm nay, chưa ai xác nhận LiveKit tải được audio |
 | Nếu muốn khoe Recording thì **bấm Record khi cả 2 máy đã vào phòng** | Loại cuộc họp không tự ghi; và người vào sau khi đã ghi thì không thấy chỉ báo |
@@ -414,7 +417,7 @@ trang này, nên không tách làm hai bước.
 | Tạo sẵn 1 voice profile + 1 giọng mặc định đã chọn | Ghi âm và chờ xử lý live rất tốn thời gian |
 | Tạo sẵn 1 cuộc họp cũ đã có transcript + summary | Flow 4 có dữ liệu đẹp, không phụ thuộc Flow 2 chạy trót lọt |
 | Tạo sẵn 1 workspace "rác" để suspend ở Flow 5 | Không suspend nhầm workspace đang demo (dùng luôn cho Danger zone ở Flow 1 bước 12) |
-| Mở sẵn tab các trang không có trong sidebar | `/[slug]/history`, `/[slug]/invitations`, `/[slug]/payment/plans`, `/terminology`, `/ai-chat`, `/[slug]/advanced` |
+| Mở sẵn tab các trang không có trong sidebar | `/[slug]/history`, `/[slug]/payment/plans`, `/terminology`, `/ai-chat`, `/[slug]/advanced` |
 | **Không bấm Transfer ownership / Delete trên workspace đang demo** | Không hoàn tác được, và mất luôn quyền Owner giữa buổi |
 | **Sửa `fullName` của cả 2 tài khoản demo trước** | Màn hình join không cho nhập tên; tile sẽ hiện nguyên địa chỉ email |
 | Diễn slash command của WarpBot ở **History** hoặc **trang chi tiết phòng** | Trang Transcripts không đăng ký page-context, gõ `/` không ra gì |
