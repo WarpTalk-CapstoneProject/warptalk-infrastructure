@@ -201,9 +201,21 @@ có chính sách AI và có hạn mức tính bằng credit.
      > là giới hạn của sản phẩm — đừng nói với hội đồng là chỉ hỗ trợ 3 ngôn ngữ.
    - Date & Time, mời theo email.
 
-   > ⚠️ **Công tắc "Daily" trong menu ⋯ là công tắc chết.** Nó có bật/tắt trên giao diện nhưng
-   > `handleSubmit` không gửi nó đi, và `CreateTranslationRoomRequest` **không có trường lặp lại nào**.
-   > Đừng hứa "đặt lịch lặp hằng ngày" — bấm xong không có gì xảy ra.
+   > ✅ **Công tắc "Daily" trong menu ⋯ giờ là công tắc thật (WT-327).** Chọn **Daily** sẽ
+   > **mở modal chọn giờ**: giờ trong ngày, ngày kết thúc, và múi giờ (đọc từ trình duyệt —
+   > máy demo ở `Asia/Ho_Chi_Minh`). Modal in sẵn số cuộc họp sắp tạo, ví dụ
+   > *"Every day at 08:00 · 31 meetings · Aug 7 – Sep 6"*, **trước khi** bấm Create.
+   >
+   > Bấm **Create Room** xong, backend tạo **mỗi ngày một phòng thật** (`translation_rooms` thật,
+   > mỗi phòng một Room Code, một transcript, một hoá đơn riêng — không phải một dòng "ảo").
+   > Ban đầu chỉ tạo trước **14 ngày**; một worker chạy mỗi 15 phút đẩy chân trời đó tiến lên.
+   > Trên **Meetings** và **DailyTimeline**, mỗi phòng như vậy có huy hiệu **Daily**.
+   >
+   > ⚠️ **Vẫn phải bấm Start bằng tay.** Phòng lặp lại **không** tự bật dịch — đó là giao kèo
+   > WT-248, đừng hứa là tới giờ nó tự chạy.
+   >
+   > ⚠️ **Không chọn cùng lúc "Date & Time" và "Daily".** Server từ chối request mang cả hai;
+   > chọn Daily thì pill Date & Time tự biến mất.
 
    Bấm **Create Room** xong dialog chuyển sang màn hình xác nhận: hiện **Room Code**, nút
    **copy link mời** (`/join?code=…` — đây là chỗ lấy mã cho máy 2), nút **Configure**
@@ -460,7 +472,10 @@ trang này, nên không tách làm hai bước.
   Cho host vào bằng `/join?code=…`.
 - Bật/tắt **Voice Clone hay Recording ngay lúc tạo phòng** — voice clone là công tắc
   trong phòng, còn recording **chỉ bấm tay trong phòng** (loại cuộc họp không quyết định).
-- **Lịch lặp lại (Daily)** — công tắc có trên giao diện tạo phòng nhưng không được gửi lên
-  backend; request tạo phòng không có trường lặp lại nào.
+- **Lặp lại theo tuần / theo tháng** — chỉ có **Daily**. Cột `recurrence_type` đã nhận
+  `WEEKLY`/`MONTHLY` nên sau này thêm không cần migration nữa, nhưng hôm nay server **từ chối
+  thẳng** hai giá trị đó ("not available yet") chứ không lưu im lặng.
+- **Sửa một chuỗi lặp sau khi tạo** — không đổi được giờ, không có "this and following".
+  Chỉ có: huỷ **cả chuỗi** (dừng mọi buổi trong tương lai) hoặc huỷ **một buổi** (chuỗi vẫn chạy).
 - **Đổi tên hiển thị lúc vào phòng** — tên lấy từ tài khoản, không sửa được ở màn hình join.
 - **Slash command của WarpBot trên trang Transcripts** — trang đó không đăng ký page-context.

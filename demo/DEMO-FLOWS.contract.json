@@ -443,27 +443,27 @@
       }
     },
     {
-      "id": "neg.daily-toggle-not-submitted",
-      "anchor": "**Công tắc \"Daily\" trong menu ⋯ là công tắc chết.**",
-      "claim": "The Daily toggle's state never reaches handleSubmit — isDaily appears only at its declaration and the two props passed to OptionsMenu",
+      "id": "pos.daily-toggle-opens-modal-and-submits",
+      "anchor": "**Công tắc \"Daily\" trong menu ⋯ giờ là công tắc thật (WT-327).**",
+      "claim": "Choosing Daily opens the schedule modal, and the hour the user picks reaches the create request",
       "check": {
-        "type": "symbol_unused",
+        "type": "file_contains",
         "repo": "web",
-        "subdir": "src/components/rooms/create-room-dialog.tsx",
-        "symbol": "isDaily",
-        "definitions": 3
+        "file": "src/components/rooms/create-room-dialog.tsx",
+        "needles": ["<DailyScheduleDialog", "createRecurringRoomMutation.mutateAsync(", "startTimeLocal: dailyRecurrence.time", "timeZone: detectTimeZone()"],
+        "fix": "The Daily control has stopped submitting its schedule. It was a DEAD SWITCH before WT-327 and this document now promises it works — re-check before demoing it."
       }
     },
     {
-      "id": "neg.no-recurrence-field",
-      "anchor": "**không có trường lặp lại nào**",
-      "claim": "CreateTranslationRoomRequest has no recurrence field of any kind",
+      "id": "pos.recurrence-field-exists",
+      "anchor": "**mở modal chọn giờ**",
+      "claim": "CreateTranslationRoomRequest carries a recurrence rule with a local wall clock and an IANA zone",
       "check": {
-        "type": "file_lacks",
+        "type": "file_contains",
         "repo": "web",
         "file": "src/types/translationRoom.ts",
-        "needles": ["recurrence", "recurring", "isDaily", "rrule", "repeatRule"],
-        "fix": "A recurrence field now exists on the create-room request. Recurring meetings may be real — re-check before telling the panel it does not work."
+        "needles": ["recurrence?: RecurrenceRequest", "startTimeLocal: string", "timeZone: string", "seriesId?: string"],
+        "fix": "The recurrence field is gone from the create-room request. Recurring meetings may no longer work — re-check before telling the panel they do."
       }
     },
     {

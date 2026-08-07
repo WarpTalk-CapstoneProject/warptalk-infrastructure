@@ -49,6 +49,53 @@ inspect_existing_digest() {
   printf '%s\n' "$digest"
 }
 
+# Run one `docker buildx build --push` so that the BuildKit registry cache can
+# never fail the release.
+#
+# The cache lives in its own GHCR repository ($REGISTRY/build-cache/<image>),
+# and release v20 died entirely inside it: `failed to configure registry cache
+# importer: failed to fetch oauth token: denied`, a 403 on a build-cache
+# manifest HEAD, and `error writing layer blob: permission_denied ... 403` on
+# the export. GHCR was throttling; nothing about the code being released was
+# wrong. retry_registry in secure-release-images.sh covers the SBOM pull and
+# does not reach here. A cache miss must cost build minutes, never a release.
+#
+# Three layers, cheapest first:
+#   1. Import only when the cache manifest is readable right now. BuildKit has
+#      no ignore-error for cache IMPORT -- a failed importer aborts the whole
+#      solve -- so the decision has to be made before the build starts.
+#   2. Export with ignore-error=true, which turns a rejected cache write into a
+#      BuildKit warning instead of `failed to solve`.
+#   3. If a cached build still fails, rebuild once with no cache flags at all.
+#      That is the only cover for a throttle that begins *during* the build,
+#      and it absorbs one transient 403 on --push as well. Bounded to one extra
+#      attempt: a genuine compile error costs one repeat build and then fails.
+build_with_cache() {
+  cache_ref="$1"
+  build_context="$2"
+  shift 2
+
+  if docker buildx imagetools inspect "$cache_ref" >/dev/null 2>&1; then
+    if "$@" \
+      --cache-from "type=registry,ref=$cache_ref" \
+      --cache-to "type=registry,ref=$cache_ref,mode=max,ignore-error=true" \
+      "$build_context"; then
+      return 0
+    fi
+    echo "release build: cached build failed for $cache_ref; retrying once without the registry cache" >&2
+  else
+    echo "release build: $cache_ref is unreadable or absent; building without cache import" >&2
+    if "$@" \
+      --cache-to "type=registry,ref=$cache_ref,mode=max,ignore-error=true" \
+      "$build_context"; then
+      return 0
+    fi
+    echo "release build: build failed for $cache_ref; retrying once without the registry cache" >&2
+  fi
+
+  "$@" "$build_context"
+}
+
 sha256_text() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum | awk '{print $1}'
@@ -222,16 +269,15 @@ process_image() {
 
     if [ "$PUSH_IMAGES" = "true" ]; then
       cache_ref="$CACHE_REGISTRY/$image_name:buildkit"
-      set -- "$@" \
-        --cache-from "type=registry,ref=$cache_ref" \
-        --cache-to "type=registry,ref=$cache_ref,mode=max" \
-        --push
+      set -- "$@" --push
+      echo "release build: building $image_ref for $platform" >&2
+      build_with_cache "$cache_ref" "$context_dir" "$@" ||
+        fail "failed to build $image_ref"
     else
       set -- "$@" --load
+      echo "release build: building $image_ref for $platform" >&2
+      "$@" "$context_dir"
     fi
-
-    echo "release build: building $image_ref for $platform" >&2
-    "$@" "$context_dir"
 
     if [ "$PUSH_IMAGES" = "true" ]; then
       digest="$(inspect_remote_digest "$image_ref")" ||

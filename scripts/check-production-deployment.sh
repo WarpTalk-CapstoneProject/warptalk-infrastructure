@@ -301,6 +301,46 @@ if grep -R -n --include='*.cs' --exclude-dir=Migrations \
   'workspace\.workspaces' "$BACKEND_DIR/billing/src" >/dev/null; then
   fail "billing-service source must not query workspace.workspaces directly"
 fi
+
+# Billing owns the money path, so its data access must go through EF Core
+# repositories rather than hand-written SQL. Exactly two operations cannot be
+# expressed in LINQ and are approved primitives:
+#
+#   UsageSettlementRepository - invokes subscription.settle_usage_charge, which
+#     keeps the debit, usage record, credit transaction, idempotency check and
+#     overage re-evaluation atomic inside the database.
+#   OutboxClaimStore - needs FOR UPDATE SKIP LOCKED so concurrent dispatchers
+#     claim disjoint batches instead of blocking or double-publishing.
+#
+# Any other file reaching for a raw command, a raw connection, or FromSql fails
+# this gate. Adding a third primitive is a deliberate decision that must be made
+# here, not silently in the service.
+BILLING_RAW_SQL_PRIMITIVES="UsageSettlementRepository.cs OutboxClaimStore.cs"
+for primitive in $BILLING_RAW_SQL_PRIMITIVES; do
+  # A stale allowlist entry is itself a defect: it would silently widen the gate
+  # if the file were renamed or deleted.
+  [ -f "$BACKEND_DIR/billing/src/WarpTalk.BillingService.Infrastructure/Repositories/$primitive" ] ||
+    fail "approved billing raw-SQL primitive $primitive is missing; update the allowlist in this script"
+done
+# The trailing `|| true` matters: grep exits 1 when it finds nothing, which is
+# the passing case here, and `set -e` would abort the script on it.
+BILLING_RAW_SQL_OFFENDERS="$(
+  grep -R -n --include='*.cs' --exclude-dir=Migrations \
+    --exclude='UsageSettlementRepository.cs' \
+    --exclude='OutboxClaimStore.cs' \
+    -e 'GetDbConnection' \
+    -e 'NpgsqlCommand' \
+    -e 'CreateCommand' \
+    -e 'FromSqlRaw' \
+    -e 'FromSqlInterpolated' \
+    -e 'ExecuteSqlRaw' \
+    -e 'ExecuteSqlInterpolated' \
+    "$BACKEND_DIR/billing/src" || true
+)"
+if [ -n "$BILLING_RAW_SQL_OFFENDERS" ]; then
+  printf 'unapproved raw SQL in billing-service source:\n%s\n' "$BILLING_RAW_SQL_OFFENDERS" >&2
+  fail "billing-service source must use EF Core repositories outside the approved raw-SQL primitives"
+fi
 # translation-room must read language data from its own
 # translation_room.supported_languages view rather than the platform-owned table,
 # and must obtain user settings over Auth gRPC rather than binding Auth's
