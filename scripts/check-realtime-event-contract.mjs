@@ -206,16 +206,6 @@ const KNOWN_UNHANDLED = new Map([
     },
   ],
   [
-    "ParticipantAdmitted",
-    {
-      status: "known-dead",
-      reason:
-        "TranslationRoomHub broadcasts it, but the lobby admits over REST " +
-        "(useAdmitParticipant) and the waiting page refetches rather than listening. Found by " +
-        "the WT-322 audit; out of scope.",
-    },
-  ],
-  [
     "ParticipantMuteChanged",
     {
       status: "alias",
