@@ -129,6 +129,22 @@ services:
       HEALTH_PORT: "5101"
       AppBaseUrl: https://${APP_DOMAIN:?}
       Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID:?}
+      # TEMPORARY — remove once Resend delivery is confirmed working.
+      #
+      # AutoVerifySelfRegistration now defaults to false, so registration mints a
+      # verification token and mails it. Delivery is failing, and RegisterAsync
+      # deliberately swallows that failure (the account is already committed, and
+      # returning an error would invite duplicate registrations). ResendVerification
+      # calls the same sender, so it fails the same way. The result is an account
+      # that can never become verified, and "Email not verified" blocks room
+      # creation — a dead end with no way out from inside the product.
+      #
+      # This trades back the spec-137 guard: with auto-verify on, someone who
+      # registers with an address they do not own is treated as verified. That is
+      # a deliberate, temporary choice to keep the product usable while mail is
+      # down, NOT a decision that the guard was unnecessary. Revert this line the
+      # moment a verification email actually arrives.
+      AuthSettings__AutoVerifySelfRegistration: "true"
       Resend__ApiKey: ${RESEND_API_KEY:?}
       Resend__FromEmail: ${RESEND_FROM_EMAIL:?}
       Resend__FromName: ${RESEND_FROM_NAME:-WarpTalk}
