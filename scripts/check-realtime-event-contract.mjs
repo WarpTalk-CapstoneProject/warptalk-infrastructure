@@ -196,16 +196,6 @@ const KNOWN_UNHANDLED = new Map([
     },
   ],
   [
-    "ChatAssistantResponsePending",
-    {
-      status: "known-dead",
-      reason:
-        "MeetingChatNotifier broadcasts it; the meeting chat panel shows its own optimistic " +
-        "pending state instead and binds only ChatMessageReceived/ChatMessageHidden. Found by " +
-        "the WT-322 audit; out of scope.",
-    },
-  ],
-  [
     "ParticipantMuteChanged",
     {
       status: "alias",
