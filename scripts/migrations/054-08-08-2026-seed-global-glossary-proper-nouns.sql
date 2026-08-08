@@ -31,6 +31,26 @@
 -- columns, so ON CONFLICT DO NOTHING makes a re-run a no-op rather than a duplicate-key
 -- failure.
 
+-- DELIBERATELY NOT SEEDED HERE: the names of real people.
+--
+-- An earlier draft of this migration listed the project team and their supervisor. That was
+-- wrong on three counts, and none of them are about tidiness.
+--
+-- This table is PLATFORM-WIDE. Its terms are published into `stt_keywords` and `mt_glossary`
+-- for every meeting in every workspace, and from there into prompts sent to external STT and
+-- TTS providers. Seeding five individuals' names here would transmit personal data belonging
+-- to one team into the request context of unrelated customers, permanently and by default.
+--
+-- It is also the wrong scope. Those names matter to exactly one workspace, and the workspace
+-- glossary already exists for precisely that — MergeTerms even lets a workspace term override
+-- a global one, so nothing is lost by putting them where they belong.
+--
+-- And it would degrade recognition for everybody else: the STT keyword budget is 24, so five
+-- names nobody in that meeting will say would displace five terms they might, while biasing
+-- the model toward phonemes that are not coming.
+--
+-- A team that wants its own names recognised should add them to its own workspace glossary.
+
 BEGIN;
 
 INSERT INTO transcript.global_glossary_terms
@@ -71,16 +91,7 @@ VALUES
   ('transcript',   'transcript',   NULL, NULL, NULL, 'The written record of what was said in a meeting.', 7, 'published'),
   ('workspace',    'workspace',    NULL, NULL, NULL, 'A WarpTalk tenant containing members, meetings and documents.', 7, 'published'),
   ('breakout room','breakout room',NULL, NULL, NULL, 'A sub-meeting split off from the main room.', 6, 'published'),
-  ('glossary',     'glossary',     NULL, NULL, NULL, 'The term list biasing recognition and translation — this table.', 6, 'published'),
-
-  -- ── The team and supervisor, as they are said aloud ─────────────────────────
-  -- Vietnamese names are recognised inconsistently and then "translated" into unrelated
-  -- words. Keeping them verbatim is the whole point of listing them.
-  ('Huỳnh Thái Tú',      'Huỳnh Thái Tú',      NULL, NULL, NULL, 'WarpTalk team leader.', 8, 'published'),
-  ('Huỳnh Ngọc Kỳ',      'Huỳnh Ngọc Kỳ',      NULL, NULL, NULL, 'WarpTalk team member.', 8, 'published'),
-  ('Ngô Xuân Hạnh Nhi',  'Ngô Xuân Hạnh Nhi',  NULL, NULL, NULL, 'WarpTalk team member.', 8, 'published'),
-  ('Trần Mạnh Tuấn',     'Trần Mạnh Tuấn',     NULL, NULL, NULL, 'WarpTalk team member.', 8, 'published'),
-  ('Thân Thị Ngọc Vân',  'Thân Thị Ngọc Vân',  NULL, NULL, NULL, 'WarpTalk capstone supervisor.', 8, 'published')
+  ('glossary',     'glossary',     NULL, NULL, NULL, 'The term list biasing recognition and translation — this table.', 6, 'published')
 ON CONFLICT DO NOTHING;
 
 COMMIT;
