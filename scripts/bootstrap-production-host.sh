@@ -2,7 +2,12 @@
 set -eu
 
 ROLE="${ROLE:-}"
+# One or more trusted CIDRs, separated by spaces or commas. Every entry gets its
+# own SSH allow rule so the team does not share a single operator /32.
 ADMIN_CIDR="${ADMIN_CIDR:-}"
+# The tailnet is the primary SSH transport for both operators and the
+# release workflow, so the rule that permits it must be rebuilt here.
+TAILSCALE_SSH="${TAILSCALE_SSH:-true}"
 APP_PRIVATE_IP="${APP_PRIVATE_IP:-}"
 DATA_PRIVATE_IP="${DATA_PRIVATE_IP:-}"
 INFRA_PRIVATE_IP="${INFRA_PRIVATE_IP:-}"
@@ -28,9 +33,19 @@ run() {
 [ "$(id -u)" -eq 0 ] || fail "run as root"
 [ "$ROLE" = "app" ] || [ "$ROLE" = "data" ] || [ "$ROLE" = "infra" ] ||
   fail "ROLE must be app, data, or infra"
-[ -n "$ADMIN_CIDR" ] || fail "ADMIN_CIDR is required to avoid locking out SSH"
-case "$ADMIN_CIDR" in
-  0.0.0.0/0|::/0) fail "ADMIN_CIDR must not allow the entire Internet" ;;
+ADMIN_CIDR_LIST="$(printf '%s' "$ADMIN_CIDR" | tr ',' ' ')"
+[ -n "$(printf '%s' "$ADMIN_CIDR_LIST" | tr -d ' ')" ] ||
+  fail "ADMIN_CIDR is required to avoid locking out SSH"
+for admin_cidr_entry in $ADMIN_CIDR_LIST; do
+  case "$admin_cidr_entry" in
+    0.0.0.0/0|::/0) fail "ADMIN_CIDR must not allow the entire Internet" ;;
+    */*) ;;
+    *) fail "ADMIN_CIDR entry is not CIDR notation: $admin_cidr_entry" ;;
+  esac
+done
+case "$TAILSCALE_SSH" in
+  true|false) ;;
+  *) fail "TAILSCALE_SSH must be true or false" ;;
 esac
 case "$SSH_PORT" in
   *[!0-9]*|"") fail "SSH_PORT must be numeric" ;;
@@ -129,7 +144,16 @@ fi
 run ufw --force reset
 run ufw default deny incoming
 run ufw default allow outgoing
-run ufw allow from "$ADMIN_CIDR" to any port "$SSH_PORT" proto tcp
+for admin_cidr_entry in $ADMIN_CIDR_LIST; do
+  run ufw allow from "$admin_cidr_entry" to any port "$SSH_PORT" proto tcp
+done
+
+# Without this rule a re-run of this script silently severs every tailnet SSH
+# path, including the release workflow's production job, which joins the tailnet
+# and then connects to the App host.
+if [ "$TAILSCALE_SSH" = "true" ]; then
+  run ufw allow in on tailscale0 to any port "$SSH_PORT" proto tcp comment "SSH over Tailscale"
+fi
 
 if [ "$ROLE" = "app" ]; then
   run ufw allow 80/tcp

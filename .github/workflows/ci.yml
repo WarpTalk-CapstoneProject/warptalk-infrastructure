@@ -159,6 +159,12 @@ jobs:
       - name: Service migration coverage contract
         working-directory: warptalk-infrastructure
         run: ./scripts/check-service-migration-coverage.sh ../warptalk-backend
+      # A missing GrpcSettings key does not fail a deploy or a health check — the client is
+      # built lazily and throws inside whatever worker first needs it. Only a comparison
+      # between the C# that demands the key and the YAML that supplies it can see it.
+      - name: gRPC configuration coverage contract
+        working-directory: warptalk-infrastructure
+        run: node scripts/check-grpc-config-coverage.mjs
       - name: Stage service-owned migrations
         working-directory: warptalk-infrastructure
         run: ./scripts/collect-service-migrations.sh

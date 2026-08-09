@@ -228,6 +228,7 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
       ConnectionStrings__AuthDb: "Host=pgbouncer;Port=6432;Database=warptalk_auth;Username=warptalk_auth;Password=${AUTH_DB_PASSWORD};Search Path=auth,public;GSS Encryption Mode=Disable"
       AppBaseUrl: ${APP_BASE_URL:-http://localhost:3000}
+      GrpcSettings__WorkspaceServiceUrl: "http://workspace-service:50056"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
@@ -308,6 +309,9 @@ services:
       ConnectionStrings__TranslationRoomDb: "Host=pgbouncer;Port=6432;Database=warptalk_translation_room;Username=warptalk_translation_room;Password=${TRANSLATION_ROOM_DB_PASSWORD:-warptalk-translation-room-dev};Search Path=translation_room,public;GSS Encryption Mode=Disable"
       App__FrontendBaseUrl: ${FRONTEND_BASE_URL:-http://localhost:3000}
       GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
+      GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
+      GrpcSettings__TranscriptServiceUrl: "http://transcript-service:50055"
+      GrpcSettings__WorkspaceServiceUrl: "http://workspace-service:50056"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}

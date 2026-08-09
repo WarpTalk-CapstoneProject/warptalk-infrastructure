@@ -78,7 +78,7 @@ resource "openstack_compute_instance_v2" "app" {
   key_pair     = var.keypair_name
   config_drive = true
   user_data = templatefile("${path.module}/cloud-init/app.yaml.tftpl", {
-    admin_cidr           = var.admin_cidr
+    admin_cidr           = join(" ", var.admin_cidrs)
     bootstrap_script_b64 = local.bootstrap_script_b64
   })
 
@@ -111,7 +111,7 @@ resource "openstack_compute_instance_v2" "data" {
   key_pair     = var.keypair_name
   config_drive = true
   user_data = templatefile("${path.module}/cloud-init/data.yaml.tftpl", {
-    admin_cidr           = var.admin_cidr
+    admin_cidr           = join(" ", var.admin_cidrs)
     app_private_ip       = var.app_private_ip
     infra_private_ip     = var.infra_private_ip
     bootstrap_script_b64 = local.bootstrap_script_b64
@@ -154,7 +154,7 @@ resource "openstack_compute_instance_v2" "infra" {
   key_pair     = var.keypair_name
   config_drive = true
   user_data = templatefile("${path.module}/cloud-init/infra.yaml.tftpl", {
-    admin_cidr           = var.admin_cidr
+    admin_cidr           = join(" ", var.admin_cidrs)
     app_private_ip       = var.app_private_ip
     data_private_ip      = var.data_private_ip
     bootstrap_script_b64 = local.bootstrap_script_b64
