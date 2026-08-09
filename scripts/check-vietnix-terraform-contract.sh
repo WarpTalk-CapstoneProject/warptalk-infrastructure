@@ -78,8 +78,10 @@ rg -q 'resource "openstack_networking_secgroup_v2" "data"' \
   "$tf_root/security-groups.tf" || fail "Data security group is missing"
 rg -q 'resource "openstack_networking_secgroup_v2" "infra"' \
   "$tf_root/security-groups.tf" || fail "Infra security group is missing"
-rg -q 'remote_ip_prefix[[:space:]]*=[[:space:]]*var\.admin_cidr' \
-  "$tf_root/security-groups.tf" || fail "SSH is not restricted to admin_cidr"
+rg -q 'for_each[[:space:]]*=[[:space:]]*toset\(var\.admin_cidrs\)' \
+  "$tf_root/security-groups.tf" || fail "SSH rules are not driven by admin_cidrs"
+rg -q 'remote_ip_prefix[[:space:]]*=[[:space:]]*each\.value' \
+  "$tf_root/security-groups.tf" || fail "SSH is not restricted to admin_cidrs"
 rg -q 'remote_group_id[[:space:]]*=[[:space:]]*openstack_networking_secgroup_v2\.app\.id' \
   "$tf_root/security-groups.tf" || fail "Data ingress is not restricted to the App group"
 for internal_port in 22 5432 6432 9000 9001 6333 6334; do

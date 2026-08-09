@@ -558,6 +558,8 @@ grep -q 'ADMIN_CIDR must not allow the entire Internet' "$HOST_BOOTSTRAP" ||
   fail "host bootstrap must reject world-open SSH"
 grep -q 'ufw default deny incoming' "$HOST_BOOTSTRAP" ||
   fail "host bootstrap must default-deny inbound traffic"
+grep -q 'ufw allow in on tailscale0' "$HOST_BOOTSTRAP" ||
+  fail "host bootstrap must rebuild tailnet SSH or a re-run cuts off the release workflow"
 grep -q 'download.docker.com/linux/ubuntu' "$HOST_BOOTSTRAP" ||
   fail "host bootstrap must install Docker from the signed apt repository"
 grep -q 'APP_PRIVATE_IP=10.20.0.10' "$SINGLE_HOST_INVENTORY" &&

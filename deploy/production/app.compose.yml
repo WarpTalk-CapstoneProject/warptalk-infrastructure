@@ -126,6 +126,9 @@ services:
     image: ${IMAGE_REGISTRY:?}/auth-service:${IMAGE_TAG:?}
     environment:
       <<: *dotnet-environment
+      # Required by WorkspaceInvitationGrpcClient, which verifies and accepts workspace
+      # invitation tokens. Same failure mode as above.
+      GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
       HEALTH_PORT: "5101"
       AppBaseUrl: https://${APP_DOMAIN:?}
       Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID:?}
@@ -214,6 +217,13 @@ services:
       # WT-188: resolves the caller's workspace role so a workspace Owner/Admin can admit
       # participants into rooms they do not personally host.
       GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
+      # WT-14: the ReminderNotificationWorker and the transcript client resolve these on
+      # first use. GetRequiredServiceUri THROWS outside Development when a key is absent,
+      # so leaving them out did not degrade the feature — it took the client down the
+      # moment anything asked for it, which is why no reminder notification has ever
+      # been delivered in production.
+      GrpcSettings__NotificationServiceUrl: http://notification-service:50054
+      GrpcSettings__TranscriptServiceUrl: http://transcript-service:50055
       LiveKit__Egress__S3__AccessKey: ${LIVEKIT_EGRESS_S3_ACCESS_KEY:?}
       LiveKit__Egress__S3__Secret: ${LIVEKIT_EGRESS_S3_SECRET:?}
       LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:?}

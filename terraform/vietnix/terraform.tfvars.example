@@ -1,5 +1,5 @@
 # Replace with the current trusted operator public IP as a /32.
-admin_cidr = "203.0.113.10/32"
+admin_cidrs = ["203.0.113.10/32", "203.0.113.11/32"]
 
 # Set true to create the catalog-compatible three-host topology.
 create_compute = false
