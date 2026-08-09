@@ -532,7 +532,11 @@ services:
     image: ${IMAGE_REGISTRY:?}/ai-assistant:${IMAGE_TAG:?}
     environment:
       <<: *ai-environment
-      WORKER_HEALTH_NAME: assistant,assistant-chat
+      # Every worker this container runs must be named here. The probe requires a fresh
+      # heartbeat for each, so a name left out is a worker whose death is invisible — the
+      # container stays green while the feature it serves is simply gone. summary-template
+      # was added to __main__ without being added here.
+      WORKER_HEALTH_NAME: assistant,assistant-chat,summary-template
       ASSISTANT_MODEL: gpt-4.1
       ASSISTANT_CHAT_MODEL: gpt-4o-mini
       ASSISTANT_CHAT_WORKSPACE_SERVICE_URL: http://workspace-service:5106
