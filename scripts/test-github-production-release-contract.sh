@@ -37,6 +37,13 @@ grep -Eq -- '--output "\$trivy_archive"' "$workflow" ||
 grep -Eq 'tar -xzf "\$trivy_archive" trivy' "$workflow" ||
   fail "Trivy extraction does not use the verified archive"
 
+# The release must verify its own migration artifact against the backend SHA it is
+# shipping. CI's copy of this check resolves the backend to a branch, so it cannot see a
+# migration that landed on the released commit but not on that branch — which is exactly
+# how a migration reached main and never reached production.
+grep -Eq 'check-service-migration-coverage\.sh \.\./warptalk-backend' "$workflow" ||
+  fail "release does not verify staged service migrations against the released backend"
+
 grep -Eq 'warptalk-deployment\.tar\.gz' "$workflow" ||
   fail "the selected infrastructure release is not packaged"
 grep -Eq 'package-production-deployment\.sh' "$workflow" ||

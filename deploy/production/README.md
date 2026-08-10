@@ -15,7 +15,8 @@ SSH jump host. Docker state on Data and Infra lives under
 ## Network contract
 
 - Public inbound to App: TCP 80, TCP/UDP 443.
-- SSH to App: the current operator `/32` only.
+- SSH to App: any tailnet peer on `tailscale0`, plus the break-glass operator
+  `/32`s listed in `ADMIN_CIDR` / `admin_cidrs`.
 - Data ingress from App: TCP 22, 5432, 6432, 9000, 9001, 6333 and 6334.
 - Data ingress from Infra: TCP 5432, 9000, 6333 and 6334.
 - Infra ingress from App: TCP 22, 6379, 5672, 15672, 15692, 4317, 4318,
@@ -26,23 +27,31 @@ Provider security groups and UFW enforce the same boundary.
 
 ## Host preparation
 
-Bootstrap a clean Ubuntu 24.04 host before deploying containers:
+Bootstrap a clean Ubuntu 24.04 host before deploying containers.
+
+`ADMIN_CIDR` accepts several CIDRs separated by spaces or commas, so each
+operator gets an individual rule instead of the team sharing one `/32`. It is
+the break-glass path: normal team and workflow access arrives over the tailnet.
+`TAILSCALE_SSH` defaults to `true` and rebuilds the `tailscale0` SSH rule — set
+it to `false` only on a host with no tailnet membership, because `ufw --force
+reset` at the top of the firewall section would otherwise drop tailnet SSH and
+break the release workflow's production job.
 
 ```sh
 sudo ROLE=app \
-  ADMIN_CIDR=203.0.113.10/32 \
+  ADMIN_CIDR="203.0.113.10/32 203.0.113.11/32" \
   DEPLOY_USER=cloud-user \
   ./scripts/bootstrap-production-host.sh
 
 sudo ROLE=data \
-  ADMIN_CIDR=203.0.113.10/32 \
+  ADMIN_CIDR="203.0.113.10/32 203.0.113.11/32" \
   APP_PRIVATE_IP=10.20.0.200 \
   INFRA_PRIVATE_IP=10.20.0.30 \
   DEPLOY_USER=cloud-user \
   ./scripts/bootstrap-production-host.sh
 
 sudo ROLE=infra \
-  ADMIN_CIDR=203.0.113.10/32 \
+  ADMIN_CIDR="203.0.113.10/32 203.0.113.11/32" \
   APP_PRIVATE_IP=10.20.0.200 \
   DATA_PRIVATE_IP=10.20.0.20 \
   DEPLOY_USER=cloud-user \

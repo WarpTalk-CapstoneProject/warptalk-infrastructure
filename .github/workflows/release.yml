@@ -78,6 +78,19 @@ jobs:
       - name: Build and push immutable images
         working-directory: warptalk-infrastructure
         run: ./scripts/build-release.sh
+      # The staged copies under scripts/service-migrations/ are what production actually
+      # applies — app.compose.yml mounts ../../scripts as /scripts. CI already compares them
+      # against the backend, but CI resolves the backend to a BRANCH (development), so when
+      # that branch trails the commit being released, both sides are missing the same file
+      # and the comparison passes on a lie. That is how a glossary seed reported success
+      # three times while the table never changed.
+      #
+      # Here the comparison is against the exact backend SHA in this dispatch, so a migration
+      # that exists in the released backend and not in the released infrastructure artifact
+      # stops the release instead of deploying a no-op.
+      - name: Released migrations must be staged for the released backend
+        working-directory: warptalk-infrastructure
+        run: ./scripts/check-service-migration-coverage.sh ../warptalk-backend
       - name: Package the selected infrastructure release
         working-directory: warptalk-infrastructure
         env:

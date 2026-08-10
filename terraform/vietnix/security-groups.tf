@@ -48,12 +48,14 @@ resource "openstack_networking_secgroup_v2" "infra" {
 }
 
 resource "openstack_networking_secgroup_rule_v2" "app_ssh" {
+  for_each = toset(var.admin_cidrs)
+
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
   port_range_min    = 22
   port_range_max    = 22
-  remote_ip_prefix  = var.admin_cidr
+  remote_ip_prefix  = each.value
   security_group_id = openstack_networking_secgroup_v2.app.id
 }
 

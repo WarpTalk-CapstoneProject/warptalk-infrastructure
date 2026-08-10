@@ -64,16 +64,25 @@ variable "infra_private_ip" {
   default     = "10.20.0.30"
 }
 
-variable "admin_cidr" {
-  description = "Single trusted public IPv4 CIDR allowed to SSH to the App VM."
-  type        = string
+variable "admin_cidrs" {
+  description = <<-EOT
+    Trusted public IPv4 CIDRs allowed to SSH to the App VM, one per operator.
+    This is the break-glass path only; routine team and workflow access arrives
+    over the tailnet, which the host bootstrap permits on tailscale0.
+  EOT
+  type        = list(string)
 
   validation {
-    condition = (
-      can(cidrhost(var.admin_cidr, 0)) &&
-      var.admin_cidr != "0.0.0.0/0"
-    )
-    error_message = "admin_cidr must be a valid restricted CIDR and cannot be 0.0.0.0/0."
+    condition     = length(var.admin_cidrs) > 0
+    error_message = "admin_cidrs must list at least one CIDR or SSH is unreachable."
+  }
+
+  validation {
+    condition = alltrue([
+      for cidr in var.admin_cidrs :
+      can(cidrhost(cidr, 0)) && cidr != "0.0.0.0/0" && cidr != "::/0"
+    ])
+    error_message = "Every admin_cidrs entry must be a valid restricted CIDR and cannot be 0.0.0.0/0 or ::/0."
   }
 }
 
