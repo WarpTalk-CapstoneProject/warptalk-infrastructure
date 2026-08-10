@@ -42,9 +42,19 @@ config:
   OpenAI__ChatTranslationModel: gpt-4o-mini
   STT_MODEL: gpt-4o-mini-transcribe
   TRANSLATION_MODEL: gpt-4.1-mini
+  # Pinned explicitly — previously unset here and in app.compose.yml, so the primary
+  # translation model came from shared/config.py's default with nothing in either
+  # deploy file recording it. Keep both files in step.
+  TRANSLATION_REALTIME_MODEL: gpt-realtime-2.1-mini
   TTS_MODEL: sonic-3.5
-  ASSISTANT_MODEL: gpt-4.1
-  ASSISTANT_CHAT_MODEL: gpt-4o-mini
+  # See app.compose.yml for the reasoning: Luna replaces gpt-4.1 (cheaper + stronger,
+  # off the realtime path); the chat model stays on 4o-mini because Luna is dearer
+  # and slower than a mini model.
+  ASSISTANT_MODEL: gpt-5.6-luna
+  ASSISTANT_CHAT_MODEL: gpt-5.6-luna
+  SUGGESTION_ENABLED: "true"
+  SUGGESTION_DECIDE_MODEL: gpt-4o-mini
+  SUGGESTION_GENERATE_MODEL: gpt-5.6-luna
   TTS_CACHE_ENABLED: "true"
   TTS_CACHE_TTL_SECONDS: "3600"
   BILLING_DB_MIN_POOL_SIZE: "1"

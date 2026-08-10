@@ -504,6 +504,14 @@ services:
       TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:?}
       TRANSLATION_API_KEY: ${TRANSLATION_API_KEY:?}
       TRANSLATION_MODEL: gpt-4.1-mini
+      # Pinned explicitly even though it equals shared/config.py's default. It was
+      # previously unset, so production silently inherited its PRIMARY translation
+      # model from a code default — editing that one line in config.py would have
+      # changed live translation with nothing in this file to review. Verified on the
+      # running host: openai_translator_loaded reports this model and the 4-socket
+      # pool warms successfully, so realtime — not TRANSLATION_MODEL — carries the
+      # first sentence of every utterance.
+      TRANSLATION_REALTIME_MODEL: gpt-realtime-2.1-mini
     healthcheck: *ai-healthcheck
     deploy:
       resources:
@@ -550,8 +558,18 @@ services:
       # container stays green while the feature it serves is simply gone. summary-template
       # was added to __main__ without being added here.
       WORKER_HEALTH_NAME: assistant,assistant-chat,summary-template
-      ASSISTANT_MODEL: gpt-4.1
-      ASSISTANT_CHAT_MODEL: gpt-4o-mini
+      # gpt-5.6-luna: cheaper AND higher-scoring than gpt-4.1 on general reasoning,
+      # and meeting summarization is off the realtime path — nobody is waiting on it,
+      # so Luna's ~1.9s median latency costs nothing here. Requires the shared
+      # completion_options() helper: Luna is a gpt-5 model and rejects the legacy
+      # max_tokens/temperature pair this worker used to send unconditionally.
+      ASSISTANT_MODEL: gpt-5.6-luna
+      # Also Luna, at the owner's decision (2026-08-10). Note the trade this accepts:
+      # unlike the summary model above, this REPLACES a mini model, so it costs more
+      # per token and adds latency to a stream a user is actively watching. Chosen for
+      # answer quality and tool-calling reliability. If chat starts feeling sluggish,
+      # this line — not the summary one — is the first thing to revert.
+      ASSISTANT_CHAT_MODEL: gpt-5.6-luna
       ASSISTANT_CHAT_WORKSPACE_SERVICE_URL: http://workspace-service:5106
       ASSISTANT_CHAT_TRANSCRIPT_SERVICE_URL: http://transcript-service:5103
       ASSISTANT_CHAT_TRANSLATION_ROOM_SERVICE_URL: http://translation-room-service:5102
@@ -568,12 +586,18 @@ services:
     environment:
       <<: *ai-environment
       WORKER_HEALTH_NAME: suggestion
-      # Ships dark. The worker consumes stt:results in its own consumer group either way,
-      # so it can be rolled out and verified healthy while producing nothing; flipping this
-      # to "true" is the only step that changes user-visible behaviour.
-      SUGGESTION_ENABLED: "false"
+      # Enabled 2026-08-10 at the owner's request, after ~2 months running dark and
+      # healthy. This is the ONLY flag here that changes what a participant sees:
+      # unprompted hints now appear mid-meeting. Revert to "false" to switch the
+      # feature off instantly without touching code or models.
+      SUGGESTION_ENABLED: "true"
+      # Stays on 4o-mini: this stage runs ~150x per meeting for a 64-token verdict,
+      # so it must be the cheapest thing in the pipeline. Luna costs more per token
+      # and spends hidden reasoning tokens — wrong trade for a gate.
       SUGGESTION_DECIDE_MODEL: gpt-4o-mini
-      SUGGESTION_GENERATE_MODEL: gpt-4.1
+      # Runs only for the few segments that pass the gate, so quality matters more
+      # than cost — and Luna is both cheaper and stronger than the gpt-4.1 it replaces.
+      SUGGESTION_GENERATE_MODEL: gpt-5.6-luna
       SUGGESTION_COOLDOWN_SECONDS: "45"
       SUGGESTION_MAX_PER_MEETING: "15"
       SUGGESTION_MIN_CONFIDENCE: "0.7"
