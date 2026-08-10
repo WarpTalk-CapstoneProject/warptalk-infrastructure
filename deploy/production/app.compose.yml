@@ -193,6 +193,9 @@ services:
       Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:?}
       Storage__S3__BucketName: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:?}
       Storage__S3__EnsureBucketExists: "false"
+      # Read-only: the workspace knowledge view scrolls this workspace's own collection.
+      # Indexing still goes out over Redis to embedding-worker — this is the read path back.
+      VectorDb__Url: http://${DATA_PRIVATE_IP:?}:6333
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -595,6 +598,11 @@ services:
       EMBEDDING_DIMENSIONS: "1536"
       VECTOR_DB_PROVIDER: qdrant
       VECTOR_DB_URL: http://${DATA_PRIVATE_IP:?}:6333
+      # Extract one readable fact per chunk and store it in the chunk's payload, so the
+      # workspace knowledge view has something a person can read rather than a vector.
+      # Costs one model call per chunk at index time — it is off by default in code for
+      # exactly that reason, and turned on here deliberately.
+      EMBEDDING_FACTS_ENABLED: "true"
     healthcheck: *ai-healthcheck
     deploy:
       resources:
