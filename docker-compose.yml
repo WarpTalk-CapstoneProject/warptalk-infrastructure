@@ -282,6 +282,8 @@ services:
       Storage__S3__SecretKey: ${WORKSPACE_STORAGE_S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}} # gitleaks:allow
       Storage__S3__BucketName: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}
       Storage__S3__EnsureBucketExists: ${WORKSPACE_STORAGE_ENSURE_BUCKET:-false}
+      # Read-only: the workspace knowledge view scrolls this workspace's own collection.
+      VectorDb__Url: ${VECTOR_DB_URL:-http://qdrant:6333}
     depends_on:
       migrator:
         condition: service_completed_successfully
