@@ -503,15 +503,36 @@ services:
       WORKER_HEALTH_NAME: translation
       TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:?}
       TRANSLATION_API_KEY: ${TRANSLATION_API_KEY:?}
-      TRANSLATION_MODEL: gpt-4.1-mini
-      # Pinned explicitly even though it equals shared/config.py's default. It was
+      # Off the mini tier, because the mini tier cannot use the ASR-repair machinery
+      # that v50 shipped. Handed the same misheard sentence with the same glossary,
+      # gpt-4.1-mini answered "The damn thing automatically restarted that pod" while
+      # gpt-4.1 answered "Kubernetes just restarted that pod itself." The hint reaches
+      # both; only one acts on it.
+      #
+      # This path carries sentences 2..N of a multi-sentence utterance plus the fallback
+      # when a realtime socket is unhealthy, so it is off the critical first-sentence
+      # path and can afford the larger model.
+      TRANSLATION_MODEL: gpt-4.1
+      # Pinned explicitly even though it once equalled shared/config.py's default. It was
       # previously unset, so production silently inherited its PRIMARY translation
       # model from a code default — editing that one line in config.py would have
-      # changed live translation with nothing in this file to review. Verified on the
-      # running host: openai_translator_loaded reports this model and the 4-socket
-      # pool warms successfully, so realtime — not TRANSLATION_MODEL — carries the
-      # first sentence of every utterance.
-      TRANSLATION_REALTIME_MODEL: gpt-realtime-2.1-mini
+      # changed live translation with nothing in this file to review.
+      #
+      # Now off mini as well, and this is the line that matters most: realtime carries the
+      # FIRST sentence of every utterance, the one a listener waits on. On the same probe,
+      # same sentence, same glossary (tools/probe_which_part_repairs.py):
+      #
+      #     gpt-realtime-2.1-mini   effort=minimal   893ms   repaired 0/3
+      #     gpt-realtime-2.1        effort=minimal   985ms   repaired 3/3
+      #
+      # An older comment feared the full model was slower. Measured over 18 runs each on
+      # ordinary speech it is not: p90 776ms against mini's 840ms, nothing above 2s on
+      # either. Read that as "not slower" rather than "faster" — one machine, one session.
+      #
+      # Raising reasoning effort was tried first and ruled out: it never repaired anything,
+      # and below a 512-token ceiling it returned `incomplete` and fell through to the
+      # slower HTTP path. See TranslationSettings.realtime_reasoning_effort for that sweep.
+      TRANSLATION_REALTIME_MODEL: gpt-realtime-2.1
     healthcheck: *ai-healthcheck
     deploy:
       resources:
