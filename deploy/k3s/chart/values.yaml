@@ -51,6 +51,8 @@ config:
   # off the realtime path); the chat model stays on 4o-mini because Luna is dearer
   # and slower than a mini model.
   ASSISTANT_MODEL: gpt-5.6-luna
+  # Requires the /v1/responses agent loop — see app.compose.yml. On chat completions a
+  # reasoning model rejects function tools outright.
   ASSISTANT_CHAT_MODEL: gpt-5.6-luna
   SUGGESTION_ENABLED: "true"
   SUGGESTION_DECIDE_MODEL: gpt-4o-mini
