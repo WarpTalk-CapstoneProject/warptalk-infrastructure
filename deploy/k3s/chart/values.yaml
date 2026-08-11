@@ -41,11 +41,14 @@ config:
   OPENAI_CHAT_TRANSLATION_MODEL: gpt-4o-mini
   OpenAI__ChatTranslationModel: gpt-4o-mini
   STT_MODEL: gpt-4o-mini-transcribe
-  TRANSLATION_MODEL: gpt-4.1-mini
+  # Both off the mini tier — see app.compose.yml for the measurements. Short version:
+  # the mini models receive the ASR-repair hint and ignore it (0/3), the full ones act
+  # on it (3/3), and the full realtime model is not measurably slower on ordinary speech.
+  TRANSLATION_MODEL: gpt-4.1
   # Pinned explicitly — previously unset here and in app.compose.yml, so the primary
   # translation model came from shared/config.py's default with nothing in either
   # deploy file recording it. Keep both files in step.
-  TRANSLATION_REALTIME_MODEL: gpt-realtime-2.1-mini
+  TRANSLATION_REALTIME_MODEL: gpt-realtime-2.1
   TTS_MODEL: sonic-3.5
   # See app.compose.yml for the reasoning: Luna replaces gpt-4.1 (cheaper + stronger,
   # off the realtime path); the chat model stays on 4o-mini because Luna is dearer
