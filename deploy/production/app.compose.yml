@@ -564,11 +564,17 @@ services:
       # completion_options() helper: Luna is a gpt-5 model and rejects the legacy
       # max_tokens/temperature pair this worker used to send unconditionally.
       ASSISTANT_MODEL: gpt-5.6-luna
-      # Also Luna, at the owner's decision (2026-08-10). Note the trade this accepts:
-      # unlike the summary model above, this REPLACES a mini model, so it costs more
-      # per token and adds latency to a stream a user is actively watching. Chosen for
-      # answer quality and tool-calling reliability. If chat starts feeling sluggish,
-      # this line — not the summary one — is the first thing to revert.
+      # Luna again, and this time the worker can actually run it. v47 set this while the
+      # agent loop still called /v1/chat/completions, which refuses function tools on a
+      # reasoning model:
+      #
+      #   400 Function tools with reasoning_effort are not supported for gpt-5.6-luna
+      #   in /v1/chat/completions. To use function tools, use /v1/responses.
+      #
+      # chat_worker.py:_run_agent_loop now uses /v1/responses, verified end to end
+      # against the live API on both gpt-5.6-luna and gpt-4o-mini: tool requested, result
+      # fed back, answer streamed. Reverting this line to gpt-4o-mini remains a safe
+      # instant rollback — the loop works on both.
       ASSISTANT_CHAT_MODEL: gpt-5.6-luna
       ASSISTANT_CHAT_WORKSPACE_SERVICE_URL: http://workspace-service:5106
       ASSISTANT_CHAT_TRANSCRIPT_SERVICE_URL: http://transcript-service:5103
