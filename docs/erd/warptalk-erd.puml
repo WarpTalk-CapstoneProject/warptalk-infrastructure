@@ -245,8 +245,6 @@ meeting_chat_messages ||--o{ meeting_chat_moderation_events
 users ||--o{ meeting_chat_moderation_events : "moderates"
 meeting_chat_messages ||--o{ meeting_chat_assistant_requests : "triggers"
 
-' BreakoutSession.ParentMeetingRoomId
-
 ' ══ Transcript ═══════════════════════════════════════════════════════════════
 ' Transcript.PreviousTranscriptId, TranslationContent.PreviousTranslationContentId,
 ' AudioDubbing.PreviousAudioDubbingId, TranscriptSegment.MatchedSegmentId — all nullable, all
