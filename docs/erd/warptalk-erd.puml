@@ -1,36 +1,39 @@
 @startuml warptalk-erd
 ' WarpTalk — logical ERD
 '
-' SCOPE
-'   Entity names only, by request. No columns.
+' HOW THIS WAS BUILT, AND WHY THAT MATTERS
+'   Every relationship below comes from a foreign-key property on an EF entity. The column is
+'   named in a comment beside each block. Nothing is inferred from a table name.
+'
+'   The previous revision was drawn by inference — reading names and reasoning about the domain —
+'   and it was wrong in ways nobody could see without opening the entities: corrections were hung
+'   off transcripts instead of segments, the invoice/payment relationship pointed the wrong way,
+'   `refunds` was drawn although no entity exists, `supported_languages` was joined to rooms by a
+'   foreign key that does not exist, and all four version chains were missing. This revision
+'   exists because that method does not survive contact with the code.
+'
+' CARDINALITY IS READ FROM NULLABILITY
+'   ||--o{  the child's FK is NOT NULL — every child has exactly one parent
+'   |o--o{  the child's FK is nullable — the parent is optional
+'   |o--o|  a nullable self-reference: a version chain, whose head is null
 '
 ' WHAT IS DRAWN
-'   The system AS DESIGNED. An entity appears here if the code defines it — a mapped entity, a
-'   repository, or a gRPC contract — whether or not production has exercised it yet.
-'
-'   This is deliberate, and it is a correction. An earlier pass drew only tables with rows in
-'   production, which quietly deleted real parts of the design: every billing entity (nobody has
-'   subscribed yet), the whole polls / questions / breakouts feature set, and the RBAC permission
-'   tables. "Not used yet" is not "not needed", and an ERD that confuses the two describes the
-'   demo data rather than the system.
+'   The system as designed: an entity appears if the code defines it, whether or not production
+'   has rows. "Not used yet" is not "not needed".
 '
 ' WHAT IS NOT DRAWN
-'   1. Four tables scheduled for removal. They exist only in the retired legacy `warptalk`
-'      baseline dump and were carried into the per-service databases by the extraction. No entity,
-'      no repository, no proto, no raw SQL, no Python reference, zero rows:
-'        notification_campaigns, email_delivery_logs, push_delivery_logs, voice_consents
-'      (notification.notifications is NOT in this list — it is still being verified.)
-'   2. Infrastructure bookkeeping: schema_migrations (three copies per database),
-'      service_schema_migrations, logical_database_extract, outbox_messages, inbox_messages.
-'   3. workspace_knowledge_glossaries — exists only in the retired legacy database and was never
-'      created in warptalk_workspace.
+'   - No entity exists: refunds, billing_pricing_config, billing_policy_config. They have tables
+'     but no mapped entity, so they have no verifiable relationships.
+'   - Scheduled for removal, unreferenced anywhere and empty in production:
+'     notification_campaigns, email_delivery_logs, push_delivery_logs, voice_consents.
+'   - Infrastructure: schema_migrations, service_schema_migrations, logical_database_extract,
+'     outbox_messages, inbox_messages.
+'   - supported_languages: it is a lookup read by language CODE, not by foreign key. Drawing an
+'     arrow to it would assert a constraint the database does not have.
 '
-' WHAT "LINKED" MEANS HERE
-'   Production runs one physical database PER SERVICE (warptalk_auth, warptalk_workspace,
-'   warptalk_translation_room, warptalk_meeting, warptalk_transcript, warptalk_billing,
-'   warptalk_assistant, warptalk_notification). Relationships crossing a package are therefore
-'   LOGICAL — the id is carried, the foreign key is not enforced by Postgres. They are drawn
-'   because the reader needs the model, not the deployment.
+' WHAT "LINKED" MEANS
+'   Production runs one database PER SERVICE. Relationships crossing a package are LOGICAL: the
+'   id is carried, no Postgres foreign key enforces it.
 
 hide circle
 hide empty members
@@ -41,8 +44,8 @@ package "Auth" #F7F8FA {
   entity users
   entity user_settings
   entity roles
-  entity user_roles
   entity permissions
+  entity user_roles
   entity role_permissions
   entity refresh_tokens
 }
@@ -76,8 +79,7 @@ package "Translation Room" #F7F8FA {
   entity supported_languages
 }
 
-' The RTC layer. These are NOT the meeting — the meeting is translation_rooms. This package holds
-' the live LiveKit session: who is streaming, room lock, recording egress, host handover.
+' NOT the meeting — the meeting is translation_rooms. This is the live LiveKit session.
 package "RTC session (schema: meeting)" #F7F8FA {
   entity meeting_rooms
   entity rtc_stream_participants
@@ -113,17 +115,15 @@ package "Transcript" #F7F8FA {
 package "Billing" #F7F8FA {
   entity plans
   entity subscriptions
-  entity invoices
+  entity transactions
   entity payments
-  entity refunds
+  entity invoices
   entity credit_transactions
   entity credit_balance_snapshots
   entity usage_records
-  entity sales_inquiries
-  entity billing_pricing_config
   entity usage_rate_card
-  entity billing_policy_config
   entity workspace_entitlement_overrides
+  entity sales_inquiries
 }
 
 package "Assistant" #F7F8FA {
@@ -140,64 +140,109 @@ package "Notification" #F7F8FA {
   entity admin_notifications
 }
 
-' ── Auth ─────────────────────────────────────────────────────────────────────
+' ══ Auth ═════════════════════════════════════════════════════════════════════
+' UserSetting.UserId, RefreshToken.UserId
 users ||--o{ user_settings
 users ||--o{ refresh_tokens
+
+' UserRole.UserId + UserRole.RoleId
 users ||--o{ user_roles
 roles ||--o{ user_roles
 users }o--o{ roles : "granted (via user_roles)"
 
+' RolePermission.RoleId + RolePermission.PermissionId
 roles ||--o{ role_permissions
 permissions ||--o{ role_permissions
 roles }o--o{ permissions : "allows (via role_permissions)"
 
+' VoiceProfile.UserId required, VoiceProfile.WorkspaceId nullable — a profile is personal and
+' only optionally scoped to a workspace.
 users ||--o{ voice_profiles
+workspaces |o--o{ voice_profiles
 voice_profiles ||--o{ voice_samples
 
-' ── Workspace ────────────────────────────────────────────────────────────────
+' ══ Workspace ════════════════════════════════════════════════════════════════
+' Workspace.OwnerId
+users ||--o{ workspaces : "owns"
+
+' WorkspaceMember.WorkspaceId + .UserId + .RoleId
 workspaces ||--o{ workspace_members
 users ||--o{ workspace_members
+roles ||--o{ workspace_members
 users }o--o{ workspaces : "belongs to (via workspace_members)"
 
+' WorkspaceInvitation.WorkspaceId + .RoleId, .MatchedDomainId nullable — an invite may or may not
+' have been auto-matched by a verified domain.
 workspaces ||--o{ workspace_invitations
-workspaces ||--o{ workspace_verified_domains
-workspaces ||--o{ workspace_entitlement_snapshots
-workspaces ||--o{ workspace_admin_actions
-workspaces ||--o{ workspace_documents
-workspace_documents ||--o{ workspace_document_access_policies
-workspace_documents ||--o{ workspace_document_audits
+roles ||--o{ workspace_invitations
+workspace_verified_domains |o--o{ workspace_invitations : "auto-matched by"
 
-' ── Translation Room ─────────────────────────────────────────────────────────
-' A series is a BOOKING, not a meeting: it materialises one ordinary room per occurrence, and
-' every occurrence answers to the same room code.
-translation_room_series ||--o{ translation_rooms : "materialises"
+workspaces ||--o{ workspace_verified_domains
+
+' WorkspaceDocument.WorkspaceId required; .OwnerId and .SourceId nullable
+workspaces ||--o{ workspace_documents
+users |o--o{ workspace_documents : "owns"
+workspace_documents |o--o| workspace_documents : "derived from"
+
+' WorkspaceDocumentAccessPolicy.DocumentId + .WorkspaceId, .SubjectId nullable
+workspace_documents ||--o{ workspace_document_access_policies
+' WorkspaceDocumentAudit.DocumentId + .WorkspaceId, .ActorId nullable
+workspace_documents ||--o{ workspace_document_audits
+users |o--o{ workspace_document_audits : "acted"
+
+workspaces ||--o{ workspace_entitlement_snapshots
+' WorkspaceAdminAction.WorkspaceId is nullable — a platform-level action has no workspace.
+workspaces |o--o{ workspace_admin_actions
+
+' ══ Translation Room ═════════════════════════════════════════════════════════
+' A series is a BOOKING, not a meeting. TranslationRoom.SeriesId is nullable: a one-off room has
+' no series, an occurrence does.
+workspaces ||--o{ translation_room_series
+users ||--o{ translation_room_series : "hosts"
+translation_room_series |o--o{ translation_rooms : "materialises"
+
 workspaces ||--o{ translation_rooms
 users ||--o{ translation_rooms : "hosts"
 
+' TranslationRoomParticipant.UserId is NULLABLE — a guest can attend without an account.
 translation_rooms ||--o{ translation_room_participants
-users ||--o{ translation_room_participants
+users |o--o{ translation_room_participants
 users }o--o{ translation_rooms : "attends (via translation_room_participants)"
 
 translation_rooms ||--o{ translation_room_invitations
 translation_rooms ||--o{ translation_room_sessions
 translation_rooms ||--o{ translation_room_artifacts
-translation_rooms ||--o{ translation_room_audio_routes
 translation_rooms ||--o{ translation_room_feedback
 users ||--o{ translation_room_feedback
-supported_languages ||--o{ translation_rooms : "source / target"
 
-' ── RTC session ──────────────────────────────────────────────────────────────
-' One meeting gets one live session when somebody starts it.
+' AudioRoute.SourceParticipantId + .TargetParticipantId, both required: a route is one speaker to
+' one listener.
+translation_rooms ||--o{ translation_room_audio_routes
+translation_room_participants ||--o{ translation_room_audio_routes : "speaks / hears"
+
+' ══ RTC session ══════════════════════════════════════════════════════════════
+' MeetingRoom.TranslationRoomId required, .ActiveHostId nullable — a room can be hostless after
+' the host drops.
 translation_rooms ||--o| meeting_rooms : "live session of"
-meeting_rooms ||--o{ rtc_stream_participants
-users ||--o{ rtc_stream_participants
-rtc_stream_participants ||--o{ meeting_tracks
-meeting_rooms ||--o{ rtc_session_revocations : "denies rejoin"
+users |o--o{ meeting_rooms : "active host"
 
+' MeetingParticipant.UserId nullable, same guest case as the meeting roster.
+meeting_rooms ||--o{ rtc_stream_participants
+users |o--o{ rtc_stream_participants
+rtc_stream_participants ||--o{ meeting_tracks
+
+' Revocation.MeetingRoomId required; .InviteeUserId and .GroupId nullable — a ban targets a person
+' OR a group, which is why it cannot be folded into translation_room_invitations.
+meeting_rooms ||--o{ rtc_session_revocations : "denies rejoin"
+users |o--o{ rtc_session_revocations
+
+' MeetingChatMessage.SenderUserId and .ParticipantId nullable — system messages have no sender.
 meeting_rooms ||--o{ meeting_chat_messages
+users |o--o{ meeting_chat_messages : "sends"
 meeting_chat_messages ||--o{ meeting_chat_translations
 meeting_chat_messages ||--o{ meeting_chat_moderation_events
-meeting_chat_messages ||--o{ meeting_chat_assistant_requests
+users ||--o{ meeting_chat_moderation_events : "moderates"
+meeting_chat_messages ||--o{ meeting_chat_assistant_requests : "triggers"
 
 meeting_rooms ||--o{ polls
 polls ||--o{ poll_options
@@ -210,58 +255,109 @@ questions ||--o{ question_votes
 users ||--o{ question_votes
 users }o--o{ questions : "upvotes (via question_votes)"
 
+' BreakoutSession.ParentMeetingRoomId
 meeting_rooms ||--o{ breakout_sessions
 breakout_sessions ||--o{ breakout_assignments
 users ||--o{ breakout_assignments
 users }o--o{ breakout_sessions : "assigned to (via breakout_assignments)"
 
-' ── Transcript ───────────────────────────────────────────────────────────────
+' ══ Transcript ═══════════════════════════════════════════════════════════════
+' Transcript.PreviousTranscriptId, TranslationContent.PreviousTranslationContentId,
+' AudioDubbing.PreviousAudioDubbingId, TranscriptSegment.MatchedSegmentId — all nullable, all
+' version chains whose head is null. Corrections have NO chain: see below.
+workspaces ||--o{ transcripts
 translation_rooms ||--o{ transcripts
+transcripts |o--o| transcripts : "supersedes"
+
 transcripts ||--o{ transcript_segments
-' A correction belongs to a SEGMENT, not to the transcript, and there is no chain of
-' corrections: each row is append-only and carries both OriginalText and CorrectedText, so a
-' segment's history is its correction rows in order. An earlier draft drew a self-reference
-' for versioning; the code has none.
+translation_room_participants |o--o{ transcript_segments : "spoken by"
+transcript_segments |o--o| transcript_segments : "matched to"
+
+' TranscriptCorrection.SegmentId + .UserId required; .TranslationContentId NULLABLE.
+' Many corrections per segment, each optionally the one that produced a final translation. This is
+' what makes revert possible: every edit keeps its own row, its author and its timestamp. A 1-1
+' would overwrite the earlier edit and lose who changed what.
 transcript_segments ||--o{ transcript_corrections
 users ||--o{ transcript_corrections : "submits"
-translation_contents ||--o| transcript_corrections : "retranslation triggered by"
-transcripts ||--o{ transcript_exports
+translation_contents |o--o{ transcript_corrections : "finalised by"
 
+transcripts ||--o{ transcript_exports
+users ||--o{ transcript_exports
+
+workspaces ||--o{ translation_contents
+translation_contents |o--o| translation_contents : "supersedes"
+
+' SegmentTranslationLink.SegmentId + .TranslationContentId, both required.
 transcript_segments ||--o{ segment_translation_links
 translation_contents ||--o{ segment_translation_links
 transcript_segments }o--o{ translation_contents : "translated as (via segment_translation_links)"
 
-' One translated passage produces many dubbed files: different voices, and regenerated versions
-' over time. The chain carries that history — there is no link to a voice profile.
+' AudioDubbing.TranslationContentId required. There is deliberately NO link to a voice profile:
+' the dubbing stores VoiceType, Provider and ProviderVoiceId instead, so the file stays
+' attributable even after the speaker deletes their profile.
 translation_contents ||--o{ audio_dubbings
-audio_dubbings ||--o| audio_dubbings : "regenerated from"
+audio_dubbings |o--o| audio_dubbings : "regenerated from"
 
 workspaces ||--o{ glossaries
 glossaries ||--o{ glossary_terms
 global_glossary_terms ||--o{ global_glossary_audits
+users ||--o{ global_glossary_audits : "acted"
 
-' ── Billing ──────────────────────────────────────────────────────────────────
+' ══ Billing ══════════════════════════════════════════════════════════════════
+' Subscription.UserId + .WorkspaceId + .PlanId
 plans ||--o{ subscriptions
 workspaces ||--o{ subscriptions
-subscriptions ||--o{ invoices
-invoices ||--o{ payments
-payments ||--o{ refunds
-workspaces ||--o{ credit_transactions
-workspaces ||--o{ credit_balance_snapshots
-workspaces ||--o{ usage_records
-workspaces ||--o{ workspace_entitlement_overrides
-usage_rate_card ||--o{ usage_records : "priced by"
+users ||--o{ subscriptions
 
-' ── Assistant ────────────────────────────────────────────────────────────────
+' Payment.SubscriptionId; Invoice.PaymentId — the invoice belongs to the PAYMENT, not the reverse.
+subscriptions ||--o{ payments
+payments ||--o{ invoices
+users ||--o{ payments
+users ||--o{ invoices
+
+' Transaction.SubscriptionId + .UserId
+subscriptions ||--o{ transactions
+users ||--o{ transactions
+
+subscriptions ||--o{ credit_balance_snapshots
+
+' UsageRecord.SubscriptionId + .WorkspaceId required; .UserId, .TranslationRoomId, .SegmentId
+' nullable — usage is always billed to a workspace, but not always traceable to one meeting.
+subscriptions ||--o{ usage_records
+workspaces ||--o{ usage_records
+translation_rooms |o--o{ usage_records
+transcript_segments |o--o{ usage_records
+
+' CreditTransaction: three required owners, and six optional links describing WHY it happened.
+subscriptions ||--o{ credit_transactions
+workspaces ||--o{ credit_transactions
+users ||--o{ credit_transactions
+usage_rate_card |o--o{ credit_transactions : "priced by"
+usage_records |o--o{ credit_transactions : "charged for"
+invoices |o--o{ credit_transactions : "billed on"
+transcript_segments |o--o{ credit_transactions : "caused by"
+credit_transactions |o--o| credit_transactions : "reverses"
+' TranscriptCorrection.ReversalCreditTransactionId — a correction that forces a retranslation
+' refunds the credit spent on the first one.
+credit_transactions |o--o{ transcript_corrections : "refunds"
+
+workspaces ||--o{ workspace_entitlement_overrides
+' SalesInquiry.WorkspaceId and .SubscriptionId are both nullable — an inquiry can arrive before
+' either exists.
+workspaces |o--o{ sales_inquiries
+subscriptions |o--o{ sales_inquiries
+
+' ══ Assistant ════════════════════════════════════════════════════════════════
 workspaces ||--o{ assistant_conversations
 users ||--o{ assistant_conversations
 assistant_conversations ||--o{ assistant_messages
+' AssistantMessage.UserId nullable — the assistant's own replies have no user.
+users |o--o{ assistant_messages
 assistant_messages ||--o{ assistant_tool_calls
 
-' ── Notification ─────────────────────────────────────────────────────────────
+' ══ Notification ═════════════════════════════════════════════════════════════
 users ||--o{ notification_preferences
 users ||--o{ notification_messages
-notification_templates ||--o{ notification_messages : "rendered from"
 users ||--o{ push_subscriptions
 
 @enduml
