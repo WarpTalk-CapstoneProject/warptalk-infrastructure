@@ -63,7 +63,11 @@ services:
       PGPORT: 5432
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
-      PGDATABASE: ${POSTGRES_DB:-warptalk}
+      # Admin connection, not an application database. It was the legacy monolith DB
+      # `warptalk`, which nothing has connected to since the logical-database split — and
+      # which extract-logical-databases.sh still opened on every run through psql_admin,
+      # so retiring that database was impossible while this pointed at it.
+      PGDATABASE: postgres
       MIGRATIONS_DIR: /scripts/migrations
       SERVICE_MIGRATIONS_ROOT: /service-migrations
       RELEASE_ID: ${IMAGE_TAG:-local-compose}
@@ -96,12 +100,9 @@ services:
       - -c
       - |
         set -e
-        tr -d '\r' < /scripts/run-migrations.sh > /tmp/run-migrations.sh
         tr -d '\r' < /scripts/provision-service-db-users.sh > /tmp/provision-service-db-users.sh
         tr -d '\r' < /scripts/extract-logical-databases.sh > /tmp/extract-logical-databases.sh
         tr -d '\r' < /scripts/run-logical-database-migrations.sh > /tmp/run-logical-database-migrations.sh
-        export MIGRATIONS_DIR=/scripts/migrations
-        sh /tmp/run-migrations.sh
         sh /tmp/provision-service-db-users.sh
         sh /tmp/extract-logical-databases.sh
         sh /tmp/run-logical-database-migrations.sh
@@ -645,7 +646,7 @@ services:
     image: prometheuscommunity/postgres-exporter:v0.19.1@sha256:e96064f876226d94bb6ce48a4c4b3dd76edba91168ec1ab024e5c4b959310b0f
     container_name: warptalk-postgres-exporter
     environment:
-      DATA_SOURCE_NAME: postgresql://warptalk_monitor:${MONITOR_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-warptalk}?sslmode=disable
+      DATA_SOURCE_NAME: postgresql://warptalk_monitor:${MONITOR_DB_PASSWORD}@postgres:5432/postgres?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy

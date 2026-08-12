@@ -199,7 +199,7 @@ services:
     <<: *infra-service-defaults
     image: prometheuscommunity/postgres-exporter:v0.19.1@sha256:e96064f876226d94bb6ce48a4c4b3dd76edba91168ec1ab024e5c4b959310b0f
     environment:
-      DATA_SOURCE_NAME: postgresql://warptalk_monitor:${MONITOR_DB_PASSWORD:?}@${DATA_PRIVATE_IP:?}:5432/${POSTGRES_DB:?}?sslmode=disable
+      DATA_SOURCE_NAME: postgresql://warptalk_monitor:${MONITOR_DB_PASSWORD:?}@${DATA_PRIVATE_IP:?}:5432/postgres?sslmode=disable
     deploy:
       resources:
         limits:
