@@ -218,7 +218,13 @@ users }o--o{ breakout_sessions : "assigned to (via breakout_assignments)"
 ' ── Transcript ───────────────────────────────────────────────────────────────
 translation_rooms ||--o{ transcripts
 transcripts ||--o{ transcript_segments
-transcripts ||--o{ transcript_corrections
+' A correction belongs to a SEGMENT, not to the transcript, and there is no chain of
+' corrections: each row is append-only and carries both OriginalText and CorrectedText, so a
+' segment's history is its correction rows in order. An earlier draft drew a self-reference
+' for versioning; the code has none.
+transcript_segments ||--o{ transcript_corrections
+users ||--o{ transcript_corrections : "submits"
+translation_contents ||--o| transcript_corrections : "retranslation triggered by"
 transcripts ||--o{ transcript_exports
 
 transcript_segments ||--o{ segment_translation_links
