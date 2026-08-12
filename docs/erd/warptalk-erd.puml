@@ -4,27 +4,33 @@
 ' SCOPE
 '   Entity names only, by request. No columns.
 '
+' WHAT IS DRAWN
+'   The system AS DESIGNED. An entity appears here if the code defines it — a mapped entity, a
+'   repository, or a gRPC contract — whether or not production has exercised it yet.
+'
+'   This is deliberate, and it is a correction. An earlier pass drew only tables with rows in
+'   production, which quietly deleted real parts of the design: every billing entity (nobody has
+'   subscribed yet), the whole polls / questions / breakouts feature set, and the RBAC permission
+'   tables. "Not used yet" is not "not needed", and an ERD that confuses the two describes the
+'   demo data rather than the system.
+'
+' WHAT IS NOT DRAWN
+'   1. Four tables scheduled for removal. They exist only in the retired legacy `warptalk`
+'      baseline dump and were carried into the per-service databases by the extraction. No entity,
+'      no repository, no proto, no raw SQL, no Python reference, zero rows:
+'        notification_campaigns, email_delivery_logs, push_delivery_logs, voice_consents
+'      (notification.notifications is NOT in this list — it is still being verified.)
+'   2. Infrastructure bookkeeping: schema_migrations (three copies per database),
+'      service_schema_migrations, logical_database_extract, outbox_messages, inbox_messages.
+'   3. workspace_knowledge_glossaries — exists only in the retired legacy database and was never
+'      created in warptalk_workspace.
+'
 ' WHAT "LINKED" MEANS HERE
 '   Production runs one physical database PER SERVICE (warptalk_auth, warptalk_workspace,
 '   warptalk_translation_room, warptalk_meeting, warptalk_transcript, warptalk_billing,
-'   warptalk_assistant, warptalk_notification). Relationships that cross a package below are
-'   therefore LOGICAL — the id is carried, the foreign key is not enforced by Postgres. They are
-'   drawn because the reader needs to see the model, not the deployment.
-'
-' WHAT IS NOT DRAWN, AND WHY
-'   - Tables with zero rows in production and no writes ever recorded (pg_stat_user_tables,
-'     checked 2026-08-12): permissions, role_permissions, voice_consents,
-'     workspace_admin_actions, translation_room_feedback, glossaries, glossary_terms,
-'     transcript_exports, global_glossary_audits, assistant_tool_calls, and eight unused
-'     notification tables.
-'   - Infrastructure bookkeeping: schema_migrations (three copies per database),
-'     service_schema_migrations, logical_database_extract, outbox_messages, inbox_messages.
-'   - workspace_knowledge_glossaries: it exists only in the retired legacy `warptalk` database
-'     and was never created in warptalk_workspace. It is not part of the system.
-'
-' STILL DRAWN THOUGH EMPTY
-'   Every billing entity has zero rows because nobody has subscribed yet — the feature is
-'   unused, the schema is not. Dropping them would remove a working feature.
+'   warptalk_assistant, warptalk_notification). Relationships crossing a package are therefore
+'   LOGICAL — the id is carried, the foreign key is not enforced by Postgres. They are drawn
+'   because the reader needs the model, not the deployment.
 
 hide circle
 hide empty members
@@ -36,6 +42,8 @@ package "Auth" #F7F8FA {
   entity user_settings
   entity roles
   entity user_roles
+  entity permissions
+  entity role_permissions
   entity refresh_tokens
 }
 
@@ -53,6 +61,7 @@ package "Workspace" #F7F8FA {
   entity workspace_document_access_policies
   entity workspace_document_audits
   entity workspace_entitlement_snapshots
+  entity workspace_admin_actions
 }
 
 package "Translation Room" #F7F8FA {
@@ -63,28 +72,42 @@ package "Translation Room" #F7F8FA {
   entity translation_room_sessions
   entity translation_room_artifacts
   entity translation_room_audio_routes
+  entity translation_room_feedback
   entity supported_languages
 }
 
-' The RTC layer. These are NOT the meeting — the meeting is translation_rooms. This package
-' holds the live LiveKit session: who is streaming, room lock, recording egress, host handover.
+' The RTC layer. These are NOT the meeting — the meeting is translation_rooms. This package holds
+' the live LiveKit session: who is streaming, room lock, recording egress, host handover.
 package "RTC session (schema: meeting)" #F7F8FA {
   entity meeting_rooms
   entity rtc_stream_participants
   entity rtc_session_revocations
+  entity meeting_tracks
   entity meeting_chat_messages
   entity meeting_chat_translations
+  entity meeting_chat_moderation_events
   entity meeting_chat_assistant_requests
+  entity polls
+  entity poll_options
+  entity poll_votes
+  entity questions
+  entity question_votes
+  entity breakout_sessions
+  entity breakout_assignments
 }
 
 package "Transcript" #F7F8FA {
   entity transcripts
   entity transcript_segments
   entity transcript_corrections
+  entity transcript_exports
   entity translation_contents
   entity segment_translation_links
   entity audio_dubbings
+  entity glossaries
+  entity glossary_terms
   entity global_glossary_terms
+  entity global_glossary_audits
 }
 
 package "Billing" #F7F8FA {
@@ -92,10 +115,10 @@ package "Billing" #F7F8FA {
   entity subscriptions
   entity invoices
   entity payments
+  entity refunds
   entity credit_transactions
   entity credit_balance_snapshots
   entity usage_records
-  entity refunds
   entity sales_inquiries
   entity billing_pricing_config
   entity usage_rate_card
@@ -106,11 +129,15 @@ package "Billing" #F7F8FA {
 package "Assistant" #F7F8FA {
   entity assistant_conversations
   entity assistant_messages
+  entity assistant_tool_calls
 }
 
 package "Notification" #F7F8FA {
   entity notification_messages
   entity notification_preferences
+  entity notification_templates
+  entity push_subscriptions
+  entity admin_notifications
 }
 
 ' ── Auth ─────────────────────────────────────────────────────────────────────
@@ -119,6 +146,10 @@ users ||--o{ refresh_tokens
 users ||--o{ user_roles
 roles ||--o{ user_roles
 users }o--o{ roles : "granted (via user_roles)"
+
+roles ||--o{ role_permissions
+permissions ||--o{ role_permissions
+roles }o--o{ permissions : "allows (via role_permissions)"
 
 users ||--o{ voice_profiles
 voice_profiles ||--o{ voice_samples
@@ -131,6 +162,7 @@ users }o--o{ workspaces : "belongs to (via workspace_members)"
 workspaces ||--o{ workspace_invitations
 workspaces ||--o{ workspace_verified_domains
 workspaces ||--o{ workspace_entitlement_snapshots
+workspaces ||--o{ workspace_admin_actions
 workspaces ||--o{ workspace_documents
 workspace_documents ||--o{ workspace_document_access_policies
 workspace_documents ||--o{ workspace_document_audits
@@ -150,6 +182,8 @@ translation_rooms ||--o{ translation_room_invitations
 translation_rooms ||--o{ translation_room_sessions
 translation_rooms ||--o{ translation_room_artifacts
 translation_rooms ||--o{ translation_room_audio_routes
+translation_rooms ||--o{ translation_room_feedback
+users ||--o{ translation_room_feedback
 supported_languages ||--o{ translation_rooms : "source / target"
 
 ' ── RTC session ──────────────────────────────────────────────────────────────
@@ -157,26 +191,48 @@ supported_languages ||--o{ translation_rooms : "source / target"
 translation_rooms ||--o| meeting_rooms : "live session of"
 meeting_rooms ||--o{ rtc_stream_participants
 users ||--o{ rtc_stream_participants
+rtc_stream_participants ||--o{ meeting_tracks
 meeting_rooms ||--o{ rtc_session_revocations : "denies rejoin"
+
 meeting_rooms ||--o{ meeting_chat_messages
 meeting_chat_messages ||--o{ meeting_chat_translations
-meeting_rooms ||--o{ meeting_chat_assistant_requests
+meeting_chat_messages ||--o{ meeting_chat_moderation_events
+meeting_chat_messages ||--o{ meeting_chat_assistant_requests
+
+meeting_rooms ||--o{ polls
+polls ||--o{ poll_options
+poll_options ||--o{ poll_votes
+users ||--o{ poll_votes
+users }o--o{ poll_options : "votes for (via poll_votes)"
+
+meeting_rooms ||--o{ questions
+questions ||--o{ question_votes
+users ||--o{ question_votes
+users }o--o{ questions : "upvotes (via question_votes)"
+
+meeting_rooms ||--o{ breakout_sessions
+breakout_sessions ||--o{ breakout_assignments
+users ||--o{ breakout_assignments
+users }o--o{ breakout_sessions : "assigned to (via breakout_assignments)"
 
 ' ── Transcript ───────────────────────────────────────────────────────────────
 translation_rooms ||--o{ transcripts
 transcripts ||--o{ transcript_segments
 transcripts ||--o{ transcript_corrections
+transcripts ||--o{ transcript_exports
 
 transcript_segments ||--o{ segment_translation_links
 translation_contents ||--o{ segment_translation_links
 transcript_segments }o--o{ translation_contents : "translated as (via segment_translation_links)"
 
 ' One translated passage produces many dubbed files: different voices, and regenerated versions
-' over time. The chain is what carries that history — there is no link to a voice profile.
+' over time. The chain carries that history — there is no link to a voice profile.
 translation_contents ||--o{ audio_dubbings
 audio_dubbings ||--o| audio_dubbings : "regenerated from"
 
-workspaces ||--o{ global_glossary_terms
+workspaces ||--o{ glossaries
+glossaries ||--o{ glossary_terms
+global_glossary_terms ||--o{ global_glossary_audits
 
 ' ── Billing ──────────────────────────────────────────────────────────────────
 plans ||--o{ subscriptions
@@ -194,9 +250,12 @@ usage_rate_card ||--o{ usage_records : "priced by"
 workspaces ||--o{ assistant_conversations
 users ||--o{ assistant_conversations
 assistant_conversations ||--o{ assistant_messages
+assistant_messages ||--o{ assistant_tool_calls
 
 ' ── Notification ─────────────────────────────────────────────────────────────
 users ||--o{ notification_preferences
 users ||--o{ notification_messages
+notification_templates ||--o{ notification_messages : "rendered from"
+users ||--o{ push_subscriptions
 
 @enduml
