@@ -28,6 +28,12 @@
 '     but no mapped entity, so they have no verifiable relationships.
 '   - Scheduled for removal, unreferenced anywhere and empty in production:
 '     notification_campaigns, email_delivery_logs, push_delivery_logs, voice_consents.
+'   - OUT OF PRESENTATION SCOPE, not out of the system: polls, poll_options, poll_votes,
+'     questions, question_votes, breakout_sessions, breakout_assignments. These are fully built —
+'     entities, services, controllers and web endpoints — and their tables exist in production
+'     with zero rows. They are omitted because in-meeting engagement is not part of what this
+'     diagram presents. If asked why the database holds tables this diagram does not, that is the
+'     answer: scope of the drawing, not absence from the system.
 '   - Infrastructure: schema_migrations, service_schema_migrations, logical_database_extract,
 '     outbox_messages, inbox_messages.
 '   - supported_languages: it is a lookup read by language CODE, not by foreign key. Drawing an
@@ -91,13 +97,6 @@ package "RTC session (schema: meeting)" #F7F8FA {
   entity meeting_chat_translations
   entity meeting_chat_moderation_events
   entity meeting_chat_assistant_requests
-  entity polls
-  entity poll_options
-  entity poll_votes
-  entity questions
-  entity question_votes
-  entity breakout_sessions
-  entity breakout_assignments
 }
 
 package "Transcript" #F7F8FA {
@@ -246,22 +245,7 @@ meeting_chat_messages ||--o{ meeting_chat_moderation_events
 users ||--o{ meeting_chat_moderation_events : "moderates"
 meeting_chat_messages ||--o{ meeting_chat_assistant_requests : "triggers"
 
-meeting_rooms ||--o{ polls
-polls ||--o{ poll_options
-poll_options ||--o{ poll_votes
-users ||--o{ poll_votes
-users }o--o{ poll_options : "votes for (via poll_votes)"
-
-meeting_rooms ||--o{ questions
-questions ||--o{ question_votes
-users ||--o{ question_votes
-users }o--o{ questions : "upvotes (via question_votes)"
-
 ' BreakoutSession.ParentMeetingRoomId
-meeting_rooms ||--o{ breakout_sessions
-breakout_sessions ||--o{ breakout_assignments
-users ||--o{ breakout_assignments
-users }o--o{ breakout_sessions : "assigned to (via breakout_assignments)"
 
 ' ══ Transcript ═══════════════════════════════════════════════════════════════
 ' Transcript.PreviousTranscriptId, TranslationContent.PreviousTranslationContentId,
