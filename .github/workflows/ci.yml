@@ -177,6 +177,22 @@ jobs:
           PGPASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
           PGDATABASE: warptalk
         run: ./scripts/test-logical-database-migrations.sh
+      # check-database-boundaries.sh runs second of the migrator's five steps, so
+      # when it is wrong the deploy stops before a single service is updated —
+      # which is exactly how release v55 died, on a check whose assumptions had
+      # outlived the schema layout it was written against. The static contract
+      # below cannot catch that: the SQL was well-formed and the file read fine.
+      # This one builds logical databases on the CI Postgres and injects each
+      # violation the check claims to catch.
+      - name: Database boundary isolation contract
+        working-directory: warptalk-infrastructure
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
+          PGDATABASE: postgres
+        run: ./scripts/test-database-boundary-isolation.sh
       # A `connection.on("X")` handler for an event nobody sends looks like working
       # code and does nothing — that is how WT-322 shipped a participant with no
       # audio and no captions. This diffs both sides of the SignalR contract.
