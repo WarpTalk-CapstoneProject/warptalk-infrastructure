@@ -15,7 +15,9 @@
 ' CARDINALITY IS READ FROM NULLABILITY
 '   ||--o{  the child's FK is NOT NULL — every child has exactly one parent
 '   |o--o{  the child's FK is nullable — the parent is optional
-'   |o--o|  a nullable self-reference: a version chain, whose head is null
+'   |o--o{  a nullable self-reference: a version chain. Drawn as one-to-MANY, not one-to-one:
+'            there is no unique index on any previous_* column (checked against production),
+'            so nothing stops two rows naming the same predecessor — a branch is possible.
 '
 ' WHAT IS DRAWN
 '   The system as designed: an entity appears if the code defines it, whether or not production
@@ -182,7 +184,7 @@ workspaces ||--o{ workspace_verified_domains
 ' WorkspaceDocument.WorkspaceId required; .OwnerId and .SourceId nullable
 workspaces ||--o{ workspace_documents
 users |o--o{ workspace_documents : "owns"
-workspace_documents |o--o| workspace_documents : "derived from"
+workspace_documents |o--o{ workspace_documents : "derived from"
 
 ' WorkspaceDocumentAccessPolicy.DocumentId + .WorkspaceId, .SubjectId nullable
 workspace_documents ||--o{ workspace_document_access_policies
@@ -267,11 +269,11 @@ users }o--o{ breakout_sessions : "assigned to (via breakout_assignments)"
 ' version chains whose head is null. Corrections have NO chain: see below.
 workspaces ||--o{ transcripts
 translation_rooms ||--o{ transcripts
-transcripts |o--o| transcripts : "supersedes"
+transcripts |o--o{ transcripts : "supersedes"
 
 transcripts ||--o{ transcript_segments
 translation_room_participants |o--o{ transcript_segments : "spoken by"
-transcript_segments |o--o| transcript_segments : "matched to"
+transcript_segments |o--o{ transcript_segments : "matched to"
 
 ' TranscriptCorrection.SegmentId + .UserId required; .TranslationContentId NULLABLE.
 ' Many corrections per segment, each optionally the one that produced a final translation. This is
@@ -285,7 +287,7 @@ transcripts ||--o{ transcript_exports
 users ||--o{ transcript_exports
 
 workspaces ||--o{ translation_contents
-translation_contents |o--o| translation_contents : "supersedes"
+translation_contents |o--o{ translation_contents : "supersedes"
 
 ' SegmentTranslationLink.SegmentId + .TranslationContentId, both required.
 transcript_segments ||--o{ segment_translation_links
@@ -296,7 +298,7 @@ transcript_segments }o--o{ translation_contents : "translated as (via segment_tr
 ' the dubbing stores VoiceType, Provider and ProviderVoiceId instead, so the file stays
 ' attributable even after the speaker deletes their profile.
 translation_contents ||--o{ audio_dubbings
-audio_dubbings |o--o| audio_dubbings : "regenerated from"
+audio_dubbings |o--o{ audio_dubbings : "regenerated from"
 
 workspaces ||--o{ glossaries
 glossaries ||--o{ glossary_terms
@@ -336,7 +338,7 @@ usage_rate_card |o--o{ credit_transactions : "priced by"
 usage_records |o--o{ credit_transactions : "charged for"
 invoices |o--o{ credit_transactions : "billed on"
 transcript_segments |o--o{ credit_transactions : "caused by"
-credit_transactions |o--o| credit_transactions : "reverses"
+credit_transactions |o--o{ credit_transactions : "reverses"
 ' TranscriptCorrection.ReversalCreditTransactionId — a correction that forces a retranslation
 ' refunds the credit spent on the first one.
 credit_transactions |o--o{ transcript_corrections : "refunds"
