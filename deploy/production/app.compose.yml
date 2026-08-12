@@ -89,7 +89,8 @@ services:
       PGPORT: "5432"
       PGUSER: ${POSTGRES_USER:?}
       PGPASSWORD: ${POSTGRES_PASSWORD:?}
-      PGDATABASE: ${POSTGRES_DB:?}
+      # Admin connection, not an application database — see docker-compose.yml.
+      PGDATABASE: postgres
       MIGRATIONS_DIR: /scripts/migrations
       SERVICE_MIGRATIONS_ROOT: /scripts/service-migrations
       RELEASE_ID: ${IMAGE_TAG:?}
@@ -108,12 +109,10 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-
-        tr -d '\r' < /scripts/run-migrations.sh > /tmp/run-migrations.sh &&
         tr -d '\r' < /scripts/provision-service-db-users.sh > /tmp/provision-service-db-users.sh &&
         tr -d '\r' < /scripts/check-database-boundaries.sh > /tmp/check-database-boundaries.sh &&
         tr -d '\r' < /scripts/extract-logical-databases.sh > /tmp/extract-logical-databases.sh &&
         tr -d '\r' < /scripts/run-logical-database-migrations.sh > /tmp/run-logical-database-migrations.sh &&
-        sh /tmp/run-migrations.sh &&
         sh /tmp/provision-service-db-users.sh &&
         sh /tmp/check-database-boundaries.sh &&
         sh /tmp/extract-logical-databases.sh &&
