@@ -25,6 +25,55 @@ export PGPASSWORD
 script_dir="$(CDPATH='' cd -- "$(dirname "$0")" && pwd)"
 check="$script_dir/check-database-boundaries.sh"
 
+# 0. The migrator must claim ownership of every schema its database actually holds.
+#
+#    extract-logical-databases.sh decides what goes into each logical database;
+#    run-logical-database-migrations.sh decides which schemas it takes ownership of before
+#    applying migrations. Those two lists have to be the same list. They were not: auth's
+#    database holds `voice`, the migrator only ever owned `auth`, and so the first migration
+#    that touched voice.voice_consents died on "permission denied for schema voice" — after
+#    the feature had already shipped and every consent grant had been returning 500.
+#
+#    This runs before any cluster work because it needs none, and because a mismatch here
+#    makes everything below it a waste of time.
+extractor="$script_dir/extract-logical-databases.sh"
+runner="$script_dir/run-logical-database-migrations.sh"
+for file in "$extractor" "$runner"; do
+  [ -f "$file" ] || { echo "Missing $file" >&2; exit 1; }
+done
+
+# extract_context warptalk_auth "public auth voice" ...  ->  "warptalk_auth auth voice"
+# `public` is excluded deliberately: it holds extensions and the migration ledger, is shared
+# by every logical database, and handing its ownership to warptalk_migrator is not what
+# "the service owns this schema" means.
+extractor_map="$(
+  sed -n 's/^extract_context \([a-z_]*\) "\([a-z_ ]*\)".*/\1 \2/p' "$extractor" \
+    | sed 's/ public / /; s/ public$//'
+)"
+# apply_service auth "${AUTH_DATABASE:-warptalk_auth}" auth warptalk_auth_runtime "voice"
+runner_map="$(
+  sed -n 's/^apply_service [A-Za-z0-9-]* "\${[A-Z_]*:-\([a-z_]*\)}" \([a-z_]*\) [a-z_]*\( "\([a-z_ ]*\)"\)\{0,1\}.*/\1 \2 \4/p' \
+    "$runner" | sed 's/ *$//'
+)"
+[ -n "$extractor_map" ] || { echo "Could not read the extractor's dispatch table" >&2; exit 1; }
+[ -n "$runner_map" ] || { echo "Could not read the runner's dispatch table" >&2; exit 1; }
+
+echo "$extractor_map" | while read -r database schemas; do
+  expected="$database $schemas"
+  actual="$(echo "$runner_map" | grep "^$database " || true)"
+  [ -n "$actual" ] || {
+    echo "FAIL: $database is extracted but no apply_service line claims it." >&2
+    exit 1
+  }
+  [ "$actual" = "$expected" ] || {
+    echo "FAIL: $database owns [$schemas] after extraction, but the migrator takes ownership" >&2
+    echo "      of [${actual#"$database "}]. A schema the migrator does not own cannot be" >&2
+    echo "      migrated — its first migration will fail with 'permission denied for schema'." >&2
+    exit 1
+  }
+done || exit 1
+echo "  migrator ownership covers every extracted schema"
+
 auth_db="warptalk_boundary_auth_test_$$"
 billing_db="warptalk_boundary_billing_test_$$"
 # Not one of the service logins, so the check must treat it as an operator
