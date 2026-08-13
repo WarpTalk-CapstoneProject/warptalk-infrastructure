@@ -24,10 +24,28 @@
 '   has rows. "Not used yet" is not "not needed".
 '
 ' WHAT IS NOT DRAWN
-'   - No entity exists: refunds, billing_pricing_config, billing_policy_config. They have tables
-'     but no mapped entity, so they have no verifiable relationships.
+'   An entity alone is not enough, and a table alone is not enough. Both ends must exist, and the
+'   first two bullets are the same test failing in opposite directions.
+'   - Table but no entity: refunds, billing_pricing_config, billing_policy_config. No mapped
+'     entity, so they have no verifiable relationships.
+'   - Entity but no table: transactions. Nothing named `transactions` exists in schema
+'     `subscription` — init-db.sql creates plans, subscriptions, credit_transactions,
+'     credit_balance_snapshots, usage_records, payments, refunds, invoices, schema_migrations,
+'     and no migration adds one. The `Transaction` entity is field-for-field identical to
+'     `Payment` plus an ExternalId alias; BillingDbContext has no DbSet for it, no repository
+'     exists, and nothing constructs one. It survives only through the navigation
+'     Subscription.Transactions, which is also why EF still discovers it as an entity type.
+'     Migration 019 records the cause: BillingDbContext was scaffolded against an imagined
+'     `billing` schema (billing.transactions, …) that never existed. Remapping to subscription.*
+'     kept `payments`, which had a real table, and orphaned this one.
+'     Money is `payments`. Credits are `credit_transactions`. There is no third thing.
 '   - Scheduled for removal, unreferenced anywhere and empty in production:
-'     notification_campaigns, email_delivery_logs, push_delivery_logs, voice_consents.
+'     notification_campaigns, email_delivery_logs, push_delivery_logs.
+'     voice_consents WAS on this list and no longer belongs on it: AuthService now writes it
+'     (VoiceConsentRepository, append-only) and TranslationRoomService reads it over gRPC before
+'     any meeting may switch voice cloning on. It is empty in production because the grant
+'     endpoint was returning 500 until 20260813090000, not because nothing uses it — which is
+'     the exact way "no rows" misleads.
 '   - OUT OF PRESENTATION SCOPE, not out of the system: polls, poll_options, poll_votes,
 '     questions, question_votes, breakout_sessions, breakout_assignments,
 '     meeting_chat_moderation_events. These are fully built —
@@ -116,7 +134,6 @@ package "Transcript" #F7F8FA {
 package "Billing" #F7F8FA {
   entity plans
   entity subscriptions
-  entity transactions
   entity payments
   entity invoices
   entity credit_transactions
@@ -224,7 +241,16 @@ translation_room_participants ||--o{ translation_room_audio_routes : "speaks / h
 ' ══ RTC session ══════════════════════════════════════════════════════════════
 ' MeetingRoom.TranslationRoomId required, .ActiveHostId nullable — a room can be hostless after
 ' the host drops.
-translation_rooms ||--o| meeting_rooms : "live session of"
+'
+' Drawn one-to-MANY, and the unique index is the reason it is not one-to-one:
+' meeting_rooms_one_current_per_troom_idx is UNIQUE on (translation_room_id) WHERE is_current
+' (migration 017), so the database permits many rows per translation room and constrains only
+' the CURRENT one. This is the same head-pointer design as the version chains above and is read
+' the same way: what the schema forbids is two LIVE sessions at once, not two rows.
+' Today the code happens to write exactly one — MeetingRoom has no IsCurrent property, so every
+' insert defaults to true, and MeetingRoomService.JoinMeetingAsync is a get-or-create. That is a
+' fact about the current code, not about the schema, so it does not change what is drawn here.
+translation_rooms ||--o{ meeting_rooms : "live session of"
 users |o--o{ meeting_rooms : "active host"
 
 ' MeetingParticipant.UserId nullable, same guest case as the meeting roster.
@@ -296,10 +322,6 @@ subscriptions ||--o{ payments
 payments ||--o{ invoices
 users ||--o{ payments
 users ||--o{ invoices
-
-' Transaction.SubscriptionId + .UserId
-subscriptions ||--o{ transactions
-users ||--o{ transactions
 
 subscriptions ||--o{ credit_balance_snapshots
 
