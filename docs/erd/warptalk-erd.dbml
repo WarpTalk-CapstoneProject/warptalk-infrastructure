@@ -1,0 +1,1503 @@
+// =============================================================================
+// WarpTalk — DBML for dbdiagram.io
+//
+// SOURCE OF TRUTH
+//   Tables and relationships: warptalk-infrastructure/docs/erd/warptalk-erd.puml
+//   Columns:                  diagrams/R2-erd/WarpTalk-Actual-DB-Schema.puml (2026-08-11)
+//                             + service migrations up to 2026-08-13:
+//                               20260812140000_rename_rtc_tables
+//                               20260812200000_add_rtc_participant_display_name
+//                               20260812160000_add_translation_room_active_host
+//                               20260812090000_share_one_room_code_per_series
+//
+// THE REF LIST IS THE ERD, EXACTLY
+//   Every Ref below is a relationship the .puml draws. Real foreign keys the ERD
+//   deliberately leaves undrawn (workspace_id on the two document child tables,
+//   participant_id on chat messages, translation_rooms.active_host_id) are present
+//   as COLUMNS but carry no arrow, so this file and the .puml render the same graph.
+//
+// SCHEMAS ARE DATABASES
+//   Production runs one database per service. The schema prefix here names the
+//   service that owns the table. Any Ref crossing a prefix is LOGICAL: the id is
+//   carried, no Postgres foreign key enforces it — check-database-boundaries.sh
+//   fails the build if someone creates a real one.
+//
+// CARDINALITY
+//   >   many-to-one
+//   -   one-to-one, used only where the child column is UNIQUE or is the PK.
+//       Two of these read one-to-many in the .puml, which infers cardinality from
+//       nullability alone: auth.user_settings.user_id (UNIQUE) and
+//       workspace.workspace_entitlement_snapshots.workspace_id (PK).
+// =============================================================================
+
+Project WarpTalk {
+  database_type: 'PostgreSQL'
+  Note: 'AI Speech Translation Platform for Real-Time Multilingual Communication with Voice Cloning. Eight logical databases, one per service.'
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════════════════════════════════════
+
+Table auth.users {
+  id uuid [pk]
+  email varchar(320) [not null, unique]
+  password_hash varchar(255)
+  full_name varchar(150) [not null]
+  avatar_url varchar(500)
+  phone varchar(20)
+  preferred_language varchar(15) [not null, default: 'vi-VN']
+  timezone varchar(50) [not null, default: 'Asia/Ho_Chi_Minh']
+  is_active boolean [not null, default: true]
+  is_locked boolean [not null, default: false]
+  failed_login_attempts integer [not null, default: 0]
+  locked_until timestamptz
+  email_verified boolean [not null, default: false]
+  email_verified_at timestamptz
+  google_id varchar(255) [unique]
+  last_login_at timestamptz
+  last_login_ip varchar(45)
+  email_verification_token_hash varchar(64)
+  email_verification_token_expires_at timestamptz
+  password_reset_token_hash varchar(64)
+  password_reset_token_expires_at timestamptz
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+}
+
+Table auth.user_settings {
+  id uuid [pk]
+  user_id uuid [not null, unique]
+  default_speak_language varchar(15) [not null, default: 'vi-VN']
+  default_listen_language varchar(15) [not null, default: 'en-US']
+  voice_clone_enabled boolean [not null, default: false]
+  mic_noise_suppression boolean [not null, default: true]
+  default_translation_room_type varchar(20) [not null, default: 'group']
+  auto_record_translation_rooms boolean [not null, default: false]
+  auto_generate_summary boolean [not null, default: true]
+  default_max_participants integer [not null, default: 10]
+  theme varchar(10) [not null, default: 'system']
+  transcript_font_size integer [not null, default: 14]
+  show_original_transcript boolean [not null, default: true]
+  show_translated_transcript boolean [not null, default: true]
+  high_contrast boolean [not null, default: false]
+  screen_reader_mode boolean [not null, default: false]
+  updated_at timestamptz [not null]
+  updated_by uuid
+}
+
+Table auth.roles {
+  id uuid [pk]
+  name varchar(50) [not null, unique]
+  description varchar(255)
+  is_system boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+}
+
+Table auth.permissions {
+  id uuid [pk]
+  code varchar(100) [not null, unique]
+  description varchar(255)
+  group_name varchar(50) [not null]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+}
+
+Table auth.user_roles {
+  id uuid [pk]
+  user_id uuid [not null]
+  role_id uuid [not null]
+  assigned_at timestamptz [not null]
+  assigned_by uuid
+  revoked_at timestamptz
+  revoked_by uuid
+
+  indexes {
+    (user_id, role_id) [unique]
+  }
+  Note: 'workspace_id was dropped in migration 007-03-06-2026: workspace roles live in workspace.workspace_members.'
+}
+
+Table auth.role_permissions {
+  role_id uuid [not null]
+  permission_id uuid [not null]
+  created_at timestamptz [not null]
+  created_by uuid
+
+  indexes {
+    (role_id, permission_id) [pk]
+  }
+}
+
+Table auth.refresh_tokens {
+  id uuid [pk]
+  user_id uuid [not null]
+  token_hash varchar(255) [not null, unique]
+  family_id uuid [not null, default: `gen_random_uuid()`]
+  device_info varchar(255)
+  ip_address varchar(45)
+  expires_at timestamptz [not null]
+  revoked_at timestamptz
+  created_at timestamptz [not null]
+  Note: 'family_id carries reuse detection: replaying a rotated token revokes the whole family.'
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VOICE  (same database as auth)
+// ═══════════════════════════════════════════════════════════════════════════
+
+Table voice.voice_profiles {
+  id uuid [pk]
+  user_id uuid [not null]
+  workspace_id uuid
+  display_name varchar(100)
+  provider varchar(50)
+  embedding_ref varchar(500)
+  language varchar(15)
+  status varchar(20) [not null, default: 'active']
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+  Note: 'A profile is personal (user_id required) and only optionally scoped to a workspace.'
+}
+
+Table voice.voice_samples {
+  id uuid [pk]
+  voice_profile_id uuid [not null]
+  sample_type varchar(30) [not null]
+  file_url varchar(500)
+  duration_seconds integer
+  language varchar(15)
+  contains_raw_audio boolean [not null, default: true]
+  retention_until timestamptz
+  created_at timestamptz [not null]
+  deleted_at timestamptz
+  deleted_by uuid
+}
+
+// The .puml argues in prose that voice_consents is live (AuthService writes it,
+// TranslationRoomService reads it over gRPC before enabling voice cloning) but
+// does not list it as an entity. Uncomment the table and its two Refs to draw it.
+//
+// Table voice.voice_consents {
+//   id uuid [pk]
+//   user_id uuid [not null]
+//   voice_profile_id uuid
+//   consent_type varchar(50) [not null]
+//   consent_status varchar(50) [not null, note: 'GRANTED | REVOKED | EXPIRED']
+//   consent_text_version varchar(50) [not null]
+//   granted_at timestamptz
+//   revoked_at timestamptz
+//   ip_address varchar(45)
+//   user_agent varchar(500)
+//   created_at timestamptz [not null]
+// }
+// Ref: voice.voice_consents.voice_profile_id > voice.voice_profiles.id
+// Ref: voice.voice_consents.user_id > auth.users.id
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKSPACE
+// ═══════════════════════════════════════════════════════════════════════════
+
+Table workspace.workspaces {
+  id uuid [pk]
+  name varchar(150) [not null]
+  slug varchar(100) [not null, unique]
+  owner_id uuid [not null]
+  logo_url varchar(500)
+  allow_external_collaboration boolean [not null, default: false]
+  require_verified_domain_for_internal boolean [not null, default: true]
+  allow_subdomains boolean [not null, default: false]
+  settings jsonb [not null, default: `'{}'`]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+  Note: 'No plan / trial / region columns: that state belongs to subscription.subscriptions.'
+}
+
+Table workspace.workspace_members {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  user_id uuid [not null]
+  role_id uuid [not null]
+  membership_type varchar(20) [not null, default: 'internal']
+  status varchar(20) [not null, default: 'active']
+  can_create_meetings boolean [not null, default: true]
+  joined_at timestamptz [not null]
+  removed_at timestamptz
+  removed_by uuid
+
+  indexes {
+    (workspace_id, user_id) [unique]
+  }
+}
+
+Table workspace.workspace_invitations {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  email varchar(320) [not null]
+  role_id uuid [not null]
+  membership_type varchar(20) [not null, default: 'internal']
+  matched_domain_id uuid
+  invited_by uuid [not null]
+  token_hash varchar(255) [unique]
+  status varchar(20) [not null, default: 'pending']
+  expires_at timestamptz [not null]
+  accepted_at timestamptz
+  delivery_status varchar(50) [not null, default: 'NotSent']
+  provider_message_id varchar(255)
+  last_sent_at timestamptz
+  sent_count integer [not null, default: 0]
+  requested_by uuid
+  reviewed_by uuid
+  reviewed_at timestamptz
+  created_at timestamptz [not null]
+  Note: 'Also carries join requests: requested_by set, token_hash null until an admin approves.'
+}
+
+Table workspace.workspace_verified_domains {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  domain varchar(255) [not null]
+  status varchar(20) [not null, default: 'pending']
+  verification_method varchar(50) [not null]
+  verification_token varchar(255) [not null]
+  verified_at timestamptz
+  verified_by uuid
+  revoked_at timestamptz
+
+  indexes {
+    domain [unique, note: 'partial: WHERE status = verified']
+  }
+}
+
+Table workspace.workspace_documents {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  uploaded_by uuid
+  owner_id uuid
+  name varchar(255) [not null]
+  file_name varchar(255) [not null]
+  file_extension varchar(20) [not null]
+  mime_type varchar(100) [not null]
+  size_bytes bigint [not null]
+  storage_provider varchar(50) [not null]
+  storage_key varchar(500) [not null]
+  source_type varchar(50) [not null]
+  source_id uuid
+  document_type varchar(50) [not null]
+  source_language varchar(20)
+  detected_language varchar(20)
+  business_domain varchar(100)
+  summary text
+  keywords jsonb
+  ai_eligible boolean [not null, default: true]
+  is_ai_allowed boolean [not null, default: true]
+  ai_usage_policy jsonb
+  ingestion_status varchar(30) [not null, default: 'pending']
+  last_indexed_at timestamptz
+  index_version varchar(50)
+  confidentiality_level varchar(30) [not null, default: 'public_internal']
+  retention_state varchar(30) [not null, default: 'active']
+  status varchar(30) [not null, default: 'active']
+  created_at timestamptz [not null]
+  updated_at timestamptz
+  deleted_at timestamptz
+  deleted_by uuid
+}
+
+Table workspace.workspace_document_access_policies {
+  id uuid [pk]
+  document_id uuid [not null]
+  workspace_id uuid [not null]
+  subject_type varchar(30) [not null]
+  subject_id uuid
+  subject_key varchar(150)
+  permission varchar(30) [not null]
+  effect varchar(20) [not null]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+}
+
+Table workspace.workspace_document_audits {
+  id uuid [pk]
+  document_id uuid [not null]
+  workspace_id uuid [not null]
+  actor_id uuid
+  action varchar(50) [not null]
+  action_at timestamptz [not null]
+  metadata jsonb
+  ip_address varchar(64)
+  user_agent varchar(500)
+}
+
+Table workspace.workspace_entitlement_snapshots {
+  workspace_id uuid [pk]
+  entitlements jsonb [not null, default: `'{}'`]
+  plan_slug varchar(80)
+  has_active_subscription boolean [not null, default: false]
+  resolved_at timestamptz [not null]
+  last_event_id uuid [not null]
+  updated_at timestamptz [not null]
+  Note: 'Read-model projected from billing events over the outbox. Never written by hand.'
+}
+
+Table workspace.workspace_admin_actions {
+  id uuid [pk]
+  workspace_id uuid
+  action varchar(30) [not null]
+  reason text [not null]
+  performed_by uuid [not null]
+  performed_at timestamptz [not null]
+  correlation_id varchar(100)
+  source_service varchar(50) [not null, default: 'workspace-service']
+  entity_type varchar(50) [not null, default: 'workspace']
+  entity_id uuid
+  result varchar(20) [not null, default: 'succeeded', note: 'succeeded | failed']
+  before_summary jsonb
+  after_summary jsonb
+  Note: 'workspace_id is nullable: a platform-level action has no workspace.'
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TRANSLATION ROOM  — this is the MEETING
+// ═══════════════════════════════════════════════════════════════════════════
+
+Table translation_room.translation_room_series {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  host_id uuid [not null]
+  recurrence_type varchar(20) [not null, default: 'DAILY', note: 'DAILY | WEEKLY | MONTHLY']
+  recurrence_interval integer [not null, default: 1]
+  recurrence_by_weekdays jsonb
+  recurrence_by_month_day smallint
+  start_time_local time [not null]
+  time_zone varchar(64) [not null]
+  starts_on_local_date date [not null]
+  ends_on_local_date date [not null]
+  status varchar(20) [not null, default: 'ACTIVE', note: 'ACTIVE | CANCELLED | COMPLETED']
+  materialized_through_local_date date
+  title varchar(255) [not null]
+  description text
+  translation_room_type varchar(20) [not null]
+  max_participants integer [not null, default: 0]
+  source_language varchar(15) [not null]
+  target_languages jsonb [not null, default: `'[]'`]
+  settings jsonb [not null, default: `'{}'`]
+  invited_emails jsonb [not null, default: `'[]'`]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  Note: 'A series is a BOOKING, not a meeting. Fields below materialized_through_local_date are the template stamped onto each occurrence.'
+}
+
+Table translation_room.translation_rooms {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  host_id uuid [not null]
+  active_host_id uuid
+  title varchar(255) [not null]
+  description text
+  translation_room_code varchar(12) [not null]
+  status varchar(255) [not null, default: 'SCHEDULED', note: 'SCHEDULED | WAITING | IN_PROGRESS | PAUSED | ENDED | CANCELLED | EXPIRED | FAILED']
+  translation_room_type varchar(20) [not null, default: 'GROUP']
+  max_participants integer [not null, default: 10]
+  source_language varchar(15) [not null]
+  target_languages jsonb [not null, default: `'[]'`]
+  settings jsonb [not null, default: `'{}'`]
+  scheduled_at timestamptz
+  started_at timestamptz
+  ended_at timestamptz
+  duration_seconds integer
+  reminder_30min_sent_at timestamptz
+  reminder_10min_sent_at timestamptz
+  reminder_1min_sent_at timestamptz
+  series_id uuid
+  series_occurrence_local_date date
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+
+  indexes {
+    translation_room_code [unique, note: 'partial: WHERE series_id IS NULL — occurrences of a series share one code']
+    (series_id, series_occurrence_local_date) [unique, note: 'partial: WHERE series_id IS NOT NULL']
+  }
+  Note: 'active_host_id (WT-359) records a host handover; effective host = COALESCE(active_host_id, host_id). host_id owns the booking and is never overwritten.'
+}
+
+Table translation_room.translation_room_participants {
+  id uuid [pk]
+  translation_room_id uuid [not null]
+  user_id uuid
+  display_name varchar(100) [not null]
+  role varchar(20) [not null, default: 'participant', note: 'host | participant']
+  listen_language varchar(15) [not null]
+  speak_language varchar(15) [not null]
+  status varchar(255) [not null, default: 'INVITED', note: 'INVITED | WAITING | CONNECTED | DISCONNECTED | LEFT | KICKED | REJECTED']
+  connection_type varchar(20) [not null, default: 'webrtc']
+  is_translation_audio_enabled boolean [not null, default: true]
+  is_using_voice_clone boolean [not null, default: false]
+  joined_at timestamptz
+  left_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  Note: 'user_id is nullable: a guest can attend without an account.'
+}
+
+Table translation_room.translation_room_invitations {
+  id uuid [pk]
+  translation_room_id uuid [not null]
+  email varchar(255) [not null]
+  status varchar(50) [not null, default: 'PENDING']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (translation_room_id, email) [unique]
+  }
+}
+
+Table translation_room.translation_room_sessions {
+  id uuid [pk]
+  translation_room_id uuid [not null]
+  main_language varchar(15) [not null]
+  audio_url varchar(500)
+  status varchar(20) [not null, default: 'ACTIVE']
+  started_at timestamptz
+  ended_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table translation_room.translation_room_artifacts {
+  id uuid [pk]
+  translation_room_id uuid [not null]
+  artifact_type varchar(255) [not null, note: 'TRANSCRIPT_EXPORT | SUMMARY_EXPORT | DEBUG_LOG | OPTIONAL_RECORDING | AUDIO_SAMPLE']
+  file_url varchar(500)
+  file_format varchar(20)
+  file_size_bytes bigint
+  content text
+  provider_artifact_id varchar(255)
+  contains_raw_audio boolean [not null, default: false]
+  contains_raw_video boolean [not null, default: false]
+  consent_required boolean [not null, default: false]
+  retention_until timestamptz
+  status varchar(20) [not null, default: 'active']
+  created_at timestamptz [not null]
+  created_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+}
+
+Table translation_room.translation_room_audio_routes {
+  id uuid [pk]
+  translation_room_id uuid [not null]
+  source_participant_id uuid [not null]
+  target_participant_id uuid [not null]
+  source_language varchar(15) [not null]
+  target_language varchar(15) [not null]
+  voice_clone_enabled boolean [not null, default: false]
+  stream_id varchar(100)
+  status varchar(20) [not null, default: 'active']
+  is_current boolean [not null, default: true]
+  started_at timestamptz
+  ended_at timestamptz
+
+  indexes {
+    (source_participant_id, target_participant_id) [unique, note: 'partial: WHERE is_current']
+  }
+  Note: 'A route is one speaker to one listener; both participant ids are required.'
+}
+
+Table translation_room.translation_room_feedback {
+  id uuid [pk]
+  translation_room_id uuid [not null]
+  user_id uuid [not null]
+  overall_rating integer [not null]
+  translation_quality integer
+  audio_quality integer
+  voice_clone_quality integer
+  ai_summary_quality integer
+  comments text
+  communication_insights jsonb
+  created_at timestamptz [not null]
+
+  indexes {
+    (translation_room_id, user_id) [unique]
+  }
+}
+
+Table translation_room.supported_languages {
+  code varchar(15) [pk]
+  name varchar(100) [not null]
+  native_name varchar(100)
+  is_active boolean [not null, default: true]
+  Note: 'Lookup read by language CODE, not by foreign key. Deliberately unconnected: an arrow here would assert a constraint the database does not have.'
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RTC SESSION  (schema: meeting) — NOT the meeting. The live LiveKit session.
+// ═══════════════════════════════════════════════════════════════════════════
+
+Table meeting.meeting_rooms {
+  id uuid [pk]
+  translation_room_id uuid [not null]
+  provider_room_name varchar(255) [not null]
+  active_host_id uuid
+  status varchar(255) [not null, default: 'CREATED']
+  is_locked boolean [not null, default: false]
+  mute_on_entry boolean [not null, default: false]
+  active_egress_id text
+  is_current boolean [not null, default: true]
+  is_active boolean [not null, default: true]
+  ended_at timestamptz
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+
+  indexes {
+    translation_room_id [unique, note: 'partial: WHERE is_current — many rows allowed, one live session']
+  }
+  Note: 'The schema permits N sessions per translation room and constrains only the current one.'
+}
+
+Table meeting.rtc_stream_participants {
+  id uuid [pk]
+  meeting_room_id uuid [not null]
+  user_id uuid
+  provider_identity varchar(255) [not null]
+  display_name varchar(255)
+  translation_room_participant_id uuid
+  device_info varchar(255)
+  is_active boolean [not null, default: true]
+  joined_at timestamptz
+  left_at timestamptz
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+  Note: 'Renamed from meeting_participants on 2026-08-12. People with an RTC stream, not the meeting roster - that is translation_room.translation_room_participants. No language columns for the same reason.'
+}
+
+Table meeting.meeting_tracks {
+  id uuid [pk]
+  meeting_participant_id uuid [not null]
+  provider_track_id varchar(255) [not null]
+  media_type varchar(255) [not null, default: 'VIDEO', note: 'AUDIO | VIDEO']
+  is_muted boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  published_at timestamptz
+  unpublished_at timestamptz
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+}
+
+Table meeting.rtc_session_revocations {
+  id uuid [pk]
+  meeting_room_id uuid [not null]
+  invitee_user_id uuid
+  invitee_email varchar(255)
+  group_id uuid
+  workspace_id uuid [not null]
+  status varchar(50) [default: 'PENDING', note: 'written only as REVOKED']
+  expires_at timestamptz
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  Note: 'Renamed from meeting_invitations on 2026-08-12. A deny list for the live session: a row means kicked or rejected and may not rejoin. A ban targets a person OR a group, which is why it cannot fold into translation_room_invitations.'
+}
+
+Table meeting.meeting_chat_messages {
+  id uuid [pk]
+  meeting_room_id uuid [not null]
+  workspace_id uuid [not null]
+  sender_user_id uuid
+  participant_id uuid
+  sender_display_name varchar(255) [not null]
+  sender_type varchar(50) [not null, default: 'user']
+  message_type varchar(50) [not null, default: 'text']
+  original_language varchar(50) [not null]
+  original_text text [not null]
+  translation_enabled boolean [not null, default: false]
+  mentions jsonb [not null, default: `'[]'`]
+  is_hidden boolean [not null, default: false]
+  file_url text
+  file_name varchar(255)
+  file_size_bytes bigint
+  content_type varchar(255)
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  Note: 'sender_user_id and participant_id are nullable: system messages have no sender.'
+}
+
+Table meeting.meeting_chat_translations {
+  id uuid [pk]
+  message_id uuid [not null]
+  meeting_room_id uuid [not null]
+  source_language varchar(50) [not null]
+  target_language varchar(50) [not null]
+  translated_text text [not null]
+  model_used varchar(100)
+  confidence numeric
+  prompt_version integer [not null, default: 1]
+  created_at timestamptz [not null]
+
+  indexes {
+    (message_id, target_language, prompt_version) [unique]
+  }
+  Note: 'Translation cache. prompt_version is part of the key so a prompt change does not serve stale text.'
+}
+
+Table meeting.meeting_chat_assistant_requests {
+  id uuid [pk]
+  trigger_message_id uuid [not null]
+  meeting_room_id uuid [not null]
+  workspace_id uuid [not null]
+  requested_by_user_id uuid [not null]
+  prompt text [not null]
+  context_scope varchar(100) [not null, default: 'current_meeting']
+  status varchar(50) [not null, default: 'queued']
+  created_at timestamptz
+  completed_at timestamptz
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TRANSCRIPT
+// ═══════════════════════════════════════════════════════════════════════════
+
+Table transcript.transcripts {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  translation_room_id uuid [not null]
+  translation_room_session_id uuid
+  version integer [not null, default: 1]
+  status varchar(255) [not null, default: 'RECORDING']
+  source_language varchar(15) [not null]
+  total_segments integer [not null, default: 0]
+  total_duration_ms integer [not null, default: 0]
+  is_current boolean [not null, default: true]
+  previous_transcript_id uuid
+  engine_version varchar(50)
+  last_sequence_order integer [not null, default: 0]
+  is_active boolean [not null, default: true]
+  finalized_at timestamptz
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+
+  indexes {
+    (translation_room_id, version) [unique]
+    translation_room_id [unique, note: 'partial: WHERE is_current']
+  }
+  Note: 'Version chain: previous_transcript_id is nullable and the head is null. No unique index on it, so a branch is possible.'
+}
+
+Table transcript.transcript_segments {
+  id uuid [pk]
+  transcript_id uuid [not null]
+  speaker_participant_id uuid
+  speaker_name varchar(100) [not null]
+  original_text text [not null]
+  original_language varchar(15) [not null]
+  start_time_ms integer [not null]
+  end_time_ms integer [not null]
+  confidence decimal(5,4)
+  sequence_order integer [not null]
+  is_corrected boolean [not null, default: false]
+  is_final boolean [not null, default: true]
+  matched_segment_id uuid
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (transcript_id, sequence_order) [unique]
+  }
+}
+
+Table transcript.transcript_corrections {
+  id uuid [pk]
+  segment_id uuid [not null]
+  user_id uuid [not null]
+  original_text text [not null]
+  corrected_text text [not null]
+  correction_type varchar(255) [not null, note: 'STT | TRANSLATION']
+  status varchar(255) [not null, default: 'PENDING']
+  triggered_retranslation boolean [not null, default: false]
+  translation_content_id uuid
+  reversal_credit_transaction_id uuid
+  reviewed_by uuid
+  reviewed_at timestamptz
+  created_at timestamptz [not null]
+  Note: 'Many corrections per segment and NO version chain: every edit keeps its own row, author and timestamp, which is what makes revert possible.'
+}
+
+Table transcript.transcript_exports {
+  id uuid [pk]
+  transcript_id uuid [not null]
+  user_id uuid [not null]
+  format varchar(10) [not null]
+  file_url varchar(500) [not null]
+  included_languages jsonb [not null, default: `'[]'`]
+  created_at timestamptz [not null]
+}
+
+Table transcript.translation_contents {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  text_hash varchar(64) [not null]
+  target_language varchar(15) [not null]
+  translated_text text [not null]
+  translator_model varchar(100) [not null]
+  confidence decimal(5,4)
+  source_stt_confidence decimal(5,4)
+  is_retranslated boolean [not null, default: false]
+  previous_translation_content_id uuid
+  latency_ms integer
+  status varchar(20) [not null, default: 'pending']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (workspace_id, text_hash, target_language) [unique]
+  }
+  Note: 'Content-addressed translation cache, deduplicated per workspace by text_hash.'
+}
+
+Table transcript.segment_translation_links {
+  segment_id uuid [not null]
+  translation_content_id uuid [not null]
+  target_language varchar(15) [not null]
+  is_current boolean [not null, default: true]
+  delivered_at timestamptz
+  created_at timestamptz [not null]
+
+  indexes {
+    (segment_id, translation_content_id) [pk]
+    (segment_id, target_language) [unique, note: 'partial: WHERE is_current']
+  }
+}
+
+Table transcript.audio_dubbings {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  translation_content_id uuid [not null]
+  text_hash varchar(64) [not null]
+  voice_type varchar(20) [not null, note: 'cloned | default']
+  provider varchar(50) [not null, default: 'cartesia']
+  provider_voice_id varchar(255) [not null]
+  previous_audio_dubbing_id uuid
+  audio_url varchar(500)
+  duration_ms integer
+  status varchar(20) [not null, default: 'pending']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (workspace_id, text_hash, provider_voice_id) [unique]
+  }
+  Note: 'Deliberately NO link to a voice profile: voice_type, provider and provider_voice_id are stored instead, so the file stays attributable after the speaker deletes their profile.'
+}
+
+Table transcript.glossaries {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  name varchar(150) [not null]
+  description text
+  source_language varchar(15) [not null]
+  target_language varchar(15) [not null]
+  term_count integer [not null, default: 0]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+
+  indexes {
+    (workspace_id, name) [unique]
+  }
+}
+
+Table transcript.glossary_terms {
+  id uuid [pk]
+  glossary_id uuid [not null]
+  source_term varchar(255) [not null]
+  target_term varchar(255) [not null]
+  context text
+  domain varchar(50)
+  priority integer [not null, default: 5]
+  definition text
+  usage_note text
+  part_of_speech varchar(50)
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+
+  indexes {
+    (glossary_id, source_term) [unique]
+  }
+}
+
+Table transcript.global_glossary_terms {
+  id uuid [pk]
+  term varchar(255) [not null]
+  preferred_translation varchar(255) [not null]
+  source_language varchar(15) [note: 'NULL = language agnostic']
+  target_language varchar(15) [note: 'NULL = language agnostic']
+  business_domain varchar(100)
+  definition text
+  usage_note text
+  priority integer [not null, default: 5]
+  status varchar(30) [not null, default: 'draft']
+  version integer [not null, default: 1]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+}
+
+Table transcript.global_glossary_audits {
+  id uuid [pk]
+  term_id uuid [not null]
+  action varchar(30) [not null]
+  before_json jsonb
+  after_json jsonb
+  actor_user_id uuid [not null]
+  created_at timestamptz [not null]
+  Note: 'term_id carries no physical foreign key: the audit outlives a hard-deleted term.'
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BILLING  (schema: subscription)
+// ═══════════════════════════════════════════════════════════════════════════
+
+Table subscription.plans {
+  id uuid [pk]
+  name varchar(100) [not null]
+  slug varchar(50) [not null, unique]
+  tier varchar(20) [not null]
+  price decimal(12,2) [not null]
+  currency char(3) [not null, default: 'VND']
+  billing_cycle varchar(20) [not null, default: 'monthly', note: 'monthly | yearly']
+  credits_per_cycle integer [not null]
+  max_participants integer [not null, default: 2]
+  max_languages integer [not null, default: 2]
+  max_active_rooms integer [not null, default: 5]
+  voice_clone_enabled boolean [not null, default: false]
+  ai_assistant_enabled boolean [not null, default: false]
+  glossary_enabled boolean [not null, default: false]
+  dedicated_gpu boolean [not null, default: false]
+  overage_cap_credits integer [not null, default: 0]
+  overage_price_per_credit numeric(12,4) [not null, default: 4.0]
+  low_balance_threshold_credits integer [not null, default: 0]
+  rollover_cap_credits integer [not null, default: 0]
+  invoice_terms_days integer [not null, default: 15]
+  invoice_grace_hours integer [not null, default: 360]
+  features jsonb [not null, default: `'{}'`]
+  sort_order integer [not null, default: 0]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+}
+
+Table subscription.subscriptions {
+  id uuid [pk]
+  user_id uuid [not null]
+  workspace_id uuid
+  plan_id uuid [not null]
+  status varchar(20) [not null, default: 'active']
+  credits_remaining integer [not null, default: 0]
+  credits_used_this_cycle integer [not null, default: 0]
+  current_period_start timestamptz [not null]
+  current_period_end timestamptz [not null]
+  auto_renew boolean [not null, default: true]
+  cancellation_reason text
+  cancelled_at timestamptz
+  trial_ends_at timestamptz
+  entitlement_overrides jsonb
+  credits_per_cycle_override integer
+  contract_price_vnd numeric(14,2)
+  overage_cap_credits_override integer
+  overage_price_per_credit_override numeric(12,4)
+  low_balance_threshold_credits_override integer
+  invoice_terms_days_override integer
+  billing_contact_email varchar(255)
+  overage_credits_this_cycle integer [not null, default: 0]
+  overage_started_at timestamptz
+  service_state varchar(20) [not null, default: 'healthy', note: 'healthy | low_balance | in_overage | suspended']
+  suspended_reason varchar(30) [note: 'overage_cap | invoice_overdue | trial_ended']
+  owner_email_domain varchar(255)
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+
+  indexes {
+    workspace_id [unique, note: 'partial: WHERE is_active AND workspace_id IS NOT NULL — one live subscription per workspace']
+  }
+}
+
+Table subscription.payments {
+  id uuid [pk]
+  subscription_id uuid [not null]
+  user_id uuid [not null]
+  amount decimal(12,2) [not null]
+  tax_amount decimal(12,2) [not null]
+  total_amount decimal(12,2) [not null]
+  currency char(3) [not null, default: 'VND']
+  payment_method varchar(30) [not null]
+  provider varchar(30) [not null, default: 'stripe']
+  provider_transaction_id varchar(1024) [unique]
+  provider_order_id varchar(1024)
+  status varchar(20) [not null, default: 'pending']
+  failure_reason varchar(500)
+  provider_metadata jsonb
+  paid_at timestamptz
+  refunded_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table subscription.invoices {
+  id uuid [pk]
+  payment_id uuid [not null]
+  user_id uuid
+  workspace_id uuid
+  invoice_number varchar(30) [not null, unique]
+  stripe_invoice_id varchar(255)
+  amount numeric(12,2)
+  subtotal numeric(12,2) [not null]
+  tax numeric(12,2) [not null, default: 0]
+  total numeric(12,2) [not null]
+  currency char(3) [not null, default: 'VND']
+  status varchar(20) [not null, default: 'issued']
+  pdf_url varchar(500)
+  invoice_pdf_url varchar(500)
+  hosted_invoice_url varchar(500)
+  line_items jsonb [not null, default: `'[]'`]
+  issued_at timestamptz [not null]
+  due_at timestamptz [not null]
+  paid_at timestamptz
+  created_at timestamptz [not null]
+  Note: 'The invoice belongs to the PAYMENT, not the reverse.'
+}
+
+Table subscription.credit_transactions {
+  id uuid [pk]
+  subscription_id uuid [not null]
+  user_id uuid [not null]
+  workspace_id uuid
+  amount integer [not null]
+  type varchar(20) [not null]
+  charge_type varchar(30)
+  description varchar(255)
+  reference_id uuid
+  reference_type varchar(30)
+  balance_after integer [not null]
+  pricing_rate_card_id uuid
+  usage_record_id uuid
+  invoice_id uuid
+  reversal_of_transaction_id uuid [unique]
+  unit_price_snapshot numeric(18,6)
+  currency char(3)
+  idempotency_key varchar(255)
+  correlation_id varchar(100)
+  status varchar(20) [not null, default: 'committed']
+  triggered_by_participant_id uuid
+  transcript_segment_id uuid
+  created_at timestamptz [not null]
+
+  indexes {
+    (correlation_id, type) [unique, note: 'partial: WHERE correlation_id IS NOT NULL']
+  }
+  Note: 'Three required owners, then six optional links describing WHY the charge happened.'
+}
+
+Table subscription.credit_balance_snapshots {
+  id uuid [pk]
+  subscription_id uuid [not null]
+  credits_remaining integer [not null]
+  credits_used_this_cycle integer [not null]
+  snapshot_at timestamptz [not null]
+}
+
+Table subscription.usage_records {
+  id uuid [pk]
+  subscription_id uuid [not null]
+  user_id uuid
+  workspace_id uuid [not null]
+  translation_room_id uuid
+  segment_id uuid
+  usage_type varchar(30) [not null]
+  unit varchar(20) [not null, default: 'credit']
+  quantity decimal(12,4) [not null, default: 1]
+  credits_consumed integer [not null]
+  duration_seconds integer
+  details jsonb
+  recorded_at timestamptz [not null]
+  Note: 'Usage is always billed to a workspace, but not always traceable to one meeting.'
+}
+
+Table subscription.usage_rate_card {
+  id uuid [pk]
+  charge_type varchar(30) [not null]
+  unit varchar(30)
+  provider varchar(50)
+  model varchar(100)
+  source_language_code varchar(15)
+  target_language_code varchar(15)
+  unit_price numeric(18,6) [not null]
+  provider_unit_cost numeric(18,10)
+  markup_multiplier numeric(10,4)
+  currency char(3) [not null]
+  effective_from timestamptz [not null]
+  effective_to timestamptz [note: 'NULL = currently in force']
+  is_active boolean [not null, default: true]
+  notes text
+
+  indexes {
+    (charge_type, unit, currency, provider, model, source_language_code, target_language_code) [unique, note: 'partial: WHERE is_active AND effective_to IS NULL']
+  }
+}
+
+Table subscription.workspace_entitlement_overrides {
+  workspace_id uuid [not null]
+  entitlement_key varchar(60) [not null]
+  value varchar(40) [not null]
+  set_by uuid
+  updated_at timestamptz [not null]
+
+  indexes {
+    (workspace_id, entitlement_key) [pk]
+  }
+}
+
+Table subscription.sales_inquiries {
+  id uuid [pk]
+  first_name varchar(80) [not null]
+  last_name varchar(80) [not null]
+  work_email varchar(255) [not null]
+  company varchar(160) [not null]
+  request_type varchar(80) [not null]
+  feature_interests jsonb [not null, default: `'[]'`]
+  target_languages jsonb [not null, default: `'[]'`]
+  current_monthly_meeting_volume varchar(80) [not null]
+  expected_monthly_meeting_volume_in_six_months varchar(80)
+  use_case_notes text
+  pricing_estimate_json jsonb [not null, default: `'{}'`]
+  consent boolean [not null]
+  source varchar(80) [not null, default: 'landing_pricing']
+  status varchar(30) [not null, default: 'new', note: 'new | reviewing | quoted | converted | closed']
+  workspace_id uuid
+  subscription_id uuid
+  created_at timestamptz [not null]
+  updated_at timestamptz
+  converted_at timestamptz
+  closed_at timestamptz
+  Note: 'Both ids are nullable: an inquiry can arrive before either exists.'
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASSISTANT
+// ═══════════════════════════════════════════════════════════════════════════
+
+Table assistant.assistant_conversations {
+  id uuid [pk]
+  workspace_id uuid [not null]
+  user_id uuid [not null]
+  title varchar(255) [not null, default: 'New chat']
+  context_scope text
+  created_at timestamptz [not null]
+  last_message_at timestamptz
+  is_archived boolean [not null, default: false]
+}
+
+Table assistant.assistant_messages {
+  id uuid [pk]
+  conversation_id uuid [not null]
+  workspace_id uuid [not null]
+  user_id uuid
+  role varchar(20) [not null, note: 'user | assistant | system | tool']
+  content text [not null, default: '']
+  tool_calls_json text
+  tool_results_json text
+  status varchar(20) [not null, default: 'completed']
+  created_at timestamptz [not null]
+  completed_at timestamptz
+  Note: 'user_id is nullable: the assistant own replies have no user.'
+}
+
+Table assistant.assistant_tool_calls {
+  id uuid [pk]
+  message_id uuid [not null]
+  tool_name varchar(100) [not null]
+  arguments_json text [not null]
+  status varchar(20) [not null, default: 'pending']
+  result_json text
+  created_at timestamptz [not null]
+  completed_at timestamptz
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTIFICATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+Table notification.notification_messages {
+  id uuid [not null]
+  created_at timestamptz [not null]
+  user_id uuid [not null]
+  type varchar(50) [not null]
+  title varchar(255) [not null]
+  content text [not null]
+  action_url varchar(500)
+  payload_json jsonb [not null, default: `'{}'`]
+  is_read boolean [not null, default: false]
+  read_at timestamptz
+
+  indexes {
+    (id, created_at) [pk]
+  }
+  Note: 'PARTITION BY RANGE (created_at): partitions _y2025, _y2026, _y2027, _default. created_at is in the primary key because Postgres requires the partition key there.'
+}
+
+Table notification.notification_preferences {
+  id uuid [pk]
+  user_id uuid [not null]
+  notification_type varchar(50) [not null]
+  email_enabled boolean [not null, default: true]
+  push_enabled boolean [not null, default: true]
+  in_app_enabled boolean [not null, default: true]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (user_id, notification_type) [unique]
+  }
+}
+
+Table notification.notification_templates {
+  id uuid [pk]
+  type varchar(50) [not null]
+  channel varchar(20) [not null]
+  subject varchar(255)
+  body_template text [not null]
+  variables jsonb [not null, default: `'[]'`]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+
+  indexes {
+    (type, channel) [unique]
+  }
+}
+
+Table notification.push_subscriptions {
+  id uuid [pk]
+  user_id uuid [not null]
+  device_token varchar(500) [not null, unique]
+  platform varchar(20) [not null]
+  device_name varchar(100)
+  is_active boolean [not null, default: true]
+  last_used_at timestamptz
+  created_at timestamptz [not null]
+  created_by uuid
+  updated_at timestamptz
+  updated_by uuid
+  deleted_at timestamptz
+  deleted_by uuid
+}
+
+Table notification.admin_notifications {
+  id uuid [pk]
+  title varchar(255) [not null]
+  content text [not null]
+  type varchar(50) [not null]
+  payload jsonb [not null, default: `'{}'`]
+  target_audience_mode varchar(50) [not null]
+  target_audience_data jsonb [not null, default: `'{}'`]
+  status varchar(50) [not null]
+  created_by uuid [not null]
+  updated_by uuid
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+// =============================================================================
+// RELATIONSHIPS
+// =============================================================================
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+Ref: auth.user_settings.user_id - auth.users.id
+Ref: auth.refresh_tokens.user_id > auth.users.id
+Ref: auth.user_roles.user_id > auth.users.id
+Ref: auth.user_roles.role_id > auth.roles.id
+Ref: auth.role_permissions.role_id > auth.roles.id
+Ref: auth.role_permissions.permission_id > auth.permissions.id
+
+// ── Voice ────────────────────────────────────────────────────────────────────
+Ref: voice.voice_profiles.user_id > auth.users.id
+Ref: voice.voice_profiles.workspace_id > workspace.workspaces.id
+Ref: voice.voice_samples.voice_profile_id > voice.voice_profiles.id
+
+// ── Workspace ────────────────────────────────────────────────────────────────
+Ref: workspace.workspaces.owner_id > auth.users.id
+Ref: workspace.workspace_members.workspace_id > workspace.workspaces.id
+Ref: workspace.workspace_members.user_id > auth.users.id
+Ref: workspace.workspace_members.role_id > auth.roles.id
+Ref: workspace.workspace_invitations.workspace_id > workspace.workspaces.id
+Ref: workspace.workspace_invitations.role_id > auth.roles.id
+Ref: workspace.workspace_invitations.matched_domain_id > workspace.workspace_verified_domains.id
+Ref: workspace.workspace_verified_domains.workspace_id > workspace.workspaces.id
+Ref: workspace.workspace_documents.workspace_id > workspace.workspaces.id
+Ref: workspace.workspace_documents.owner_id > auth.users.id
+Ref: workspace.workspace_documents.source_id > workspace.workspace_documents.id
+Ref: workspace.workspace_document_access_policies.document_id > workspace.workspace_documents.id
+Ref: workspace.workspace_document_audits.document_id > workspace.workspace_documents.id
+Ref: workspace.workspace_document_audits.actor_id > auth.users.id
+Ref: workspace.workspace_entitlement_snapshots.workspace_id - workspace.workspaces.id
+Ref: workspace.workspace_admin_actions.workspace_id > workspace.workspaces.id
+
+// ── Translation Room ─────────────────────────────────────────────────────────
+Ref: translation_room.translation_room_series.workspace_id > workspace.workspaces.id
+Ref: translation_room.translation_room_series.host_id > auth.users.id
+Ref: translation_room.translation_rooms.series_id > translation_room.translation_room_series.id
+Ref: translation_room.translation_rooms.workspace_id > workspace.workspaces.id
+Ref: translation_room.translation_rooms.host_id > auth.users.id
+Ref: translation_room.translation_room_participants.translation_room_id > translation_room.translation_rooms.id
+Ref: translation_room.translation_room_participants.user_id > auth.users.id
+Ref: translation_room.translation_room_invitations.translation_room_id > translation_room.translation_rooms.id
+Ref: translation_room.translation_room_sessions.translation_room_id > translation_room.translation_rooms.id
+Ref: translation_room.translation_room_artifacts.translation_room_id > translation_room.translation_rooms.id
+Ref: translation_room.translation_room_feedback.translation_room_id > translation_room.translation_rooms.id
+Ref: translation_room.translation_room_feedback.user_id > auth.users.id
+Ref: translation_room.translation_room_audio_routes.translation_room_id > translation_room.translation_rooms.id
+Ref: translation_room.translation_room_audio_routes.source_participant_id > translation_room.translation_room_participants.id
+Ref: translation_room.translation_room_audio_routes.target_participant_id > translation_room.translation_room_participants.id
+
+// ── RTC session ──────────────────────────────────────────────────────────────
+Ref: meeting.meeting_rooms.translation_room_id > translation_room.translation_rooms.id
+Ref: meeting.meeting_rooms.active_host_id > auth.users.id
+Ref: meeting.rtc_stream_participants.meeting_room_id > meeting.meeting_rooms.id
+Ref: meeting.rtc_stream_participants.user_id > auth.users.id
+Ref: meeting.meeting_tracks.meeting_participant_id > meeting.rtc_stream_participants.id
+Ref: meeting.rtc_session_revocations.meeting_room_id > meeting.meeting_rooms.id
+Ref: meeting.rtc_session_revocations.invitee_user_id > auth.users.id
+Ref: meeting.meeting_chat_messages.meeting_room_id > meeting.meeting_rooms.id
+Ref: meeting.meeting_chat_messages.sender_user_id > auth.users.id
+Ref: meeting.meeting_chat_translations.message_id > meeting.meeting_chat_messages.id
+Ref: meeting.meeting_chat_assistant_requests.trigger_message_id > meeting.meeting_chat_messages.id
+
+// ── Transcript ───────────────────────────────────────────────────────────────
+Ref: transcript.transcripts.workspace_id > workspace.workspaces.id
+Ref: transcript.transcripts.translation_room_id > translation_room.translation_rooms.id
+Ref: transcript.transcripts.previous_transcript_id > transcript.transcripts.id
+Ref: transcript.transcript_segments.transcript_id > transcript.transcripts.id
+Ref: transcript.transcript_segments.speaker_participant_id > translation_room.translation_room_participants.id
+Ref: transcript.transcript_segments.matched_segment_id > transcript.transcript_segments.id
+Ref: transcript.transcript_corrections.segment_id > transcript.transcript_segments.id
+Ref: transcript.transcript_corrections.user_id > auth.users.id
+Ref: transcript.transcript_corrections.translation_content_id > transcript.translation_contents.id
+Ref: transcript.transcript_exports.transcript_id > transcript.transcripts.id
+Ref: transcript.transcript_exports.user_id > auth.users.id
+Ref: transcript.translation_contents.workspace_id > workspace.workspaces.id
+Ref: transcript.translation_contents.previous_translation_content_id > transcript.translation_contents.id
+Ref: transcript.segment_translation_links.segment_id > transcript.transcript_segments.id
+Ref: transcript.segment_translation_links.translation_content_id > transcript.translation_contents.id
+Ref: transcript.audio_dubbings.translation_content_id > transcript.translation_contents.id
+Ref: transcript.audio_dubbings.previous_audio_dubbing_id > transcript.audio_dubbings.id
+Ref: transcript.glossaries.workspace_id > workspace.workspaces.id
+Ref: transcript.glossary_terms.glossary_id > transcript.glossaries.id
+Ref: transcript.global_glossary_audits.term_id > transcript.global_glossary_terms.id
+Ref: transcript.global_glossary_audits.actor_user_id > auth.users.id
+
+// ── Billing ──────────────────────────────────────────────────────────────────
+Ref: subscription.subscriptions.plan_id > subscription.plans.id
+Ref: subscription.subscriptions.workspace_id > workspace.workspaces.id
+Ref: subscription.subscriptions.user_id > auth.users.id
+Ref: subscription.payments.subscription_id > subscription.subscriptions.id
+Ref: subscription.payments.user_id > auth.users.id
+Ref: subscription.invoices.payment_id > subscription.payments.id
+Ref: subscription.invoices.user_id > auth.users.id
+Ref: subscription.credit_balance_snapshots.subscription_id > subscription.subscriptions.id
+Ref: subscription.usage_records.subscription_id > subscription.subscriptions.id
+Ref: subscription.usage_records.workspace_id > workspace.workspaces.id
+Ref: subscription.usage_records.translation_room_id > translation_room.translation_rooms.id
+Ref: subscription.usage_records.segment_id > transcript.transcript_segments.id
+Ref: subscription.credit_transactions.subscription_id > subscription.subscriptions.id
+Ref: subscription.credit_transactions.workspace_id > workspace.workspaces.id
+Ref: subscription.credit_transactions.user_id > auth.users.id
+Ref: subscription.credit_transactions.pricing_rate_card_id > subscription.usage_rate_card.id
+Ref: subscription.credit_transactions.usage_record_id > subscription.usage_records.id
+Ref: subscription.credit_transactions.invoice_id > subscription.invoices.id
+Ref: subscription.credit_transactions.transcript_segment_id > transcript.transcript_segments.id
+Ref: subscription.credit_transactions.reversal_of_transaction_id > subscription.credit_transactions.id
+Ref: transcript.transcript_corrections.reversal_credit_transaction_id > subscription.credit_transactions.id
+Ref: subscription.workspace_entitlement_overrides.workspace_id > workspace.workspaces.id
+Ref: subscription.sales_inquiries.workspace_id > workspace.workspaces.id
+Ref: subscription.sales_inquiries.subscription_id > subscription.subscriptions.id
+
+// ── Assistant ────────────────────────────────────────────────────────────────
+Ref: assistant.assistant_conversations.workspace_id > workspace.workspaces.id
+Ref: assistant.assistant_conversations.user_id > auth.users.id
+Ref: assistant.assistant_messages.conversation_id > assistant.assistant_conversations.id
+Ref: assistant.assistant_messages.user_id > auth.users.id
+Ref: assistant.assistant_tool_calls.message_id > assistant.assistant_messages.id
+
+// ── Notification ─────────────────────────────────────────────────────────────
+Ref: notification.notification_preferences.user_id > auth.users.id
+Ref: notification.notification_messages.user_id > auth.users.id
+Ref: notification.push_subscriptions.user_id > auth.users.id
+
+// =============================================================================
+// TABLE GROUPS — one per package in the .puml, one per production database
+// =============================================================================
+
+TableGroup Auth {
+  auth.users
+  auth.user_settings
+  auth.roles
+  auth.permissions
+  auth.user_roles
+  auth.role_permissions
+  auth.refresh_tokens
+}
+
+TableGroup Voice {
+  voice.voice_profiles
+  voice.voice_samples
+}
+
+TableGroup Workspace {
+  workspace.workspaces
+  workspace.workspace_members
+  workspace.workspace_invitations
+  workspace.workspace_verified_domains
+  workspace.workspace_documents
+  workspace.workspace_document_access_policies
+  workspace.workspace_document_audits
+  workspace.workspace_entitlement_snapshots
+  workspace.workspace_admin_actions
+}
+
+TableGroup TranslationRoom {
+  translation_room.translation_room_series
+  translation_room.translation_rooms
+  translation_room.translation_room_participants
+  translation_room.translation_room_invitations
+  translation_room.translation_room_sessions
+  translation_room.translation_room_artifacts
+  translation_room.translation_room_audio_routes
+  translation_room.translation_room_feedback
+  translation_room.supported_languages
+}
+
+TableGroup RtcSession {
+  meeting.meeting_rooms
+  meeting.rtc_stream_participants
+  meeting.rtc_session_revocations
+  meeting.meeting_tracks
+  meeting.meeting_chat_messages
+  meeting.meeting_chat_translations
+  meeting.meeting_chat_assistant_requests
+}
+
+TableGroup Transcript {
+  transcript.transcripts
+  transcript.transcript_segments
+  transcript.transcript_corrections
+  transcript.transcript_exports
+  transcript.translation_contents
+  transcript.segment_translation_links
+  transcript.audio_dubbings
+  transcript.glossaries
+  transcript.glossary_terms
+  transcript.global_glossary_terms
+  transcript.global_glossary_audits
+}
+
+TableGroup Billing {
+  subscription.plans
+  subscription.subscriptions
+  subscription.payments
+  subscription.invoices
+  subscription.credit_transactions
+  subscription.credit_balance_snapshots
+  subscription.usage_records
+  subscription.usage_rate_card
+  subscription.workspace_entitlement_overrides
+  subscription.sales_inquiries
+}
+
+TableGroup Assistant {
+  assistant.assistant_conversations
+  assistant.assistant_messages
+  assistant.assistant_tool_calls
+}
+
+TableGroup Notification {
+  notification.notification_messages
+  notification.notification_preferences
+  notification.notification_templates
+  notification.push_subscriptions
+  notification.admin_notifications
+}
