@@ -170,6 +170,17 @@ jq -e '
   and (all(.images[]; (.context | length) > 0 and (.dockerfile | length) > 0))
 ' "$IMAGE_MATRIX" >/dev/null || fail "image matrix must define 22 unique linux/amd64 release images"
 
+jq -e '
+  .images[]
+  | select(.name == "frontend")
+  | (.buildArgs // [])
+  | index("NEXT_PUBLIC_GOOGLE_CLIENT_ID") != null
+' "$IMAGE_MATRIX" >/dev/null ||
+  fail "frontend image build must receive NEXT_PUBLIC_GOOGLE_CLIENT_ID"
+
+grep -Fq 'Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID:?}' "$APP_COMPOSE" ||
+  fail "auth-service must receive GOOGLE_CLIENT_ID as Authentication__Google__ClientId"
+
 MATRIX_NAMES="$(jq -r '.images[] | select(.compose != false) | .name' "$IMAGE_MATRIX" | sort)"
 IMAGE_REGISTRY_VALUE="$(
   sed -n 's/^IMAGE_REGISTRY=//p' "$ENV_FILE" |

@@ -105,6 +105,11 @@ case "$(value_of LIVEKIT_URL)" in
   *) fail "LIVEKIT_URL must be a LiveKit Cloud WebSocket URL" ;;
 esac
 
+case "$(value_of GOOGLE_CLIENT_ID)" in
+  *.apps.googleusercontent.com) ;;
+  *) fail "GOOGLE_CLIENT_ID must be a Google OAuth web client ID" ;;
+esac
+
 case "$(value_of ALERT_EMAIL_TO)" in
   *@*.*) ;;
   *) fail "ALERT_EMAIL_TO must be an email address" ;;

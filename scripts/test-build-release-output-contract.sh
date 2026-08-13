@@ -145,4 +145,22 @@ if [ -e "$tmp_dir/release-manifest.json" ]; then
   exit 1
 fi
 
+if PATH="$fixture_bin:$PATH" \
+  IMAGE_REGISTRY=example.invalid/warptalk \
+  IMAGE_TAG=test-release \
+  PUSH_IMAGES=false \
+  ALLOW_DIRTY_RELEASE=true \
+  ONLY_IMAGE=frontend \
+  NEXT_PUBLIC_GOOGLE_CLIENT_ID=web-client.apps.googleusercontent.com \
+  GOOGLE_CLIENT_ID=auth-client.apps.googleusercontent.com \
+  RELEASE_MANIFEST_OUTPUT="$tmp_dir/mismatched-google-manifest.json" \
+  "$repo_root/scripts/build-release.sh" \
+  >"$tmp_dir/mismatched-google-stdout.log" \
+  2>"$tmp_dir/mismatched-google-stderr.log"; then
+  echo "build-release output contract failed: mismatched Google client IDs returned success" >&2
+  exit 1
+fi
+grep -Fq "NEXT_PUBLIC_GOOGLE_CLIENT_ID must match GOOGLE_CLIENT_ID" \
+  "$tmp_dir/mismatched-google-stderr.log"
+
 echo "build-release output contract: PASS"

@@ -228,6 +228,13 @@ process_image() {
   for arg_name in $(echo "$image_entry" | jq -r '.buildArgs[]? // empty'); do
     arg_value="$(printenv "$arg_name" 2>/dev/null || true)"
     [ -n "$arg_value" ] || fail "$arg_name is required to build $image_name"
+    if [ "$arg_name" = "NEXT_PUBLIC_GOOGLE_CLIENT_ID" ]; then
+      runtime_google_client_id="$(printenv GOOGLE_CLIENT_ID 2>/dev/null || true)"
+      [ -n "$runtime_google_client_id" ] ||
+        fail "GOOGLE_CLIENT_ID is required when building $image_name"
+      [ "$arg_value" = "$runtime_google_client_id" ] ||
+        fail "NEXT_PUBLIC_GOOGLE_CLIENT_ID must match GOOGLE_CLIENT_ID when building $image_name"
+    fi
     fingerprint_material="$fingerprint_material|$arg_name=$arg_value"
   done
 
