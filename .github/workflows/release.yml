@@ -409,9 +409,17 @@ jobs:
                 '.roles[$role].changedServices | join(" ")' "$deployment_plan")"
             fi
             # Runtime secrets before the deploy, so the containers this release creates read the
-            # new values. Only the app role: nothing else consumes them, and a secret staged on a
-            # host that has no use for it is a copy nobody is watching.
-            if [ "$role" = "app" ] && [ -n "$runtime_secrets" ]; then
+            # new values.
+            #
+            # EVERY role, not just app. Only the app services consume Stripe, so staging it on data
+            # and infra looks like a needless extra copy — but the copy is already there: all three
+            # hosts hold the same /etc/warptalk/.env.production, built from the same template, and
+            # validate-production-env.sh runs on each of them and demands every template key be
+            # valid. Applying to app alone left data and infra sitting on the placeholder, and
+            # since deploy_host runs data FIRST, the release failed on the data host before the app
+            # host was ever reached. Writing the value everywhere keeps the file identical across
+            # hosts, which is what the validator already assumes.
+            if [ -n "$runtime_secrets" ]; then
               remote_secrets_file="/tmp/warptalk-runtime-secrets-$RELEASE_TAG-$GITHUB_RUN_ID.env"
               printf '%s' "$runtime_secrets" | ssh "$host" \
                 "umask 077; cat > '$remote_secrets_file'; chmod 0600 '$remote_secrets_file'"
