@@ -283,6 +283,11 @@ jobs:
           FORCE_FULL_DEPLOY: ${{ inputs.force_full_deploy }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
+          # Runtime secrets that live in GitHub rather than in a hand-typed line on the host.
+          # Unset ones arrive empty and are skipped, so a repository that has not configured
+          # them deploys exactly as before. Adding another is one line here and one below.
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
         run: |
           set -eu
           case "$RELEASE_TAG" in
@@ -368,6 +373,23 @@ jobs:
             stage_host "$host"
           }
 
+          # The runtime secrets to push, as KEY=VALUE lines. Built here rather than interpolated
+          # into the remote command: a secret on a command line is a secret in the process table
+          # of a production host, visible to every user on it.
+          runtime_secrets=""
+          # A literal newline, built rather than typed: this whole script is a YAML block scalar,
+          # and a line starting at column 0 to close a quote ends the block instead.
+          newline="$(printf '\nx')"
+          newline="${newline%x}"
+          add_runtime_secret() {
+            # An unset GitHub secret is an empty string. Sending it would say nothing and cost a
+            # round trip; apply-runtime-secrets.sh ignores it anyway, so drop it here.
+            [ -n "${2:-}" ] || return 0
+            runtime_secrets="$runtime_secrets$1=$2$newline"
+          }
+          add_runtime_secret STRIPE_SECRET_KEY "${STRIPE_SECRET_KEY:-}"
+          add_runtime_secret STRIPE_WEBHOOK_SECRET "${STRIPE_WEBHOOK_SECRET:-}"
+
           deploy_host() {
             role="$1"
             host="$2"
@@ -385,6 +407,36 @@ jobs:
               deploy_mode=selective
               deploy_services="$(jq -r --arg role "$role" \
                 '.roles[$role].changedServices | join(" ")' "$deployment_plan")"
+            fi
+            # Runtime secrets before the deploy, so the containers this release creates read the
+            # new values. Only the app role: nothing else consumes them, and a secret staged on a
+            # host that has no use for it is a copy nobody is watching.
+            if [ "$role" = "app" ] && [ -n "$runtime_secrets" ]; then
+              remote_secrets_file="/tmp/warptalk-runtime-secrets-$RELEASE_TAG-$GITHUB_RUN_ID.env"
+              printf '%s' "$runtime_secrets" | ssh "$host" \
+                "umask 077; cat > '$remote_secrets_file'; chmod 0600 '$remote_secrets_file'"
+              secrets_result="$(ssh "$host" \
+                "sudo env PRODUCTION_ENV_FILE=/etc/warptalk/.env.production \
+                 RUNTIME_SECRETS_FILE='$remote_secrets_file' \
+                 '$release_dir/scripts/apply-runtime-secrets.sh'" || echo failed)"
+              ssh "$host" "rm -f '$remote_secrets_file'" || true
+
+              case "$secrets_result" in
+                changed)
+                  # A container only re-reads its environment when it is recreated. A selective
+                  # deploy that happens to exclude the billing service would leave the OLD secret
+                  # running and still report success — which is the trap every hand-edit falls
+                  # into. Promote to full rather than rely on anyone remembering.
+                  echo "runtime secrets changed on $role: deploying every service so the new environment takes effect"
+                  deploy_mode=full
+                  deploy_services=""
+                  ;;
+                unchanged) ;;
+                *)
+                  echo "Failed to apply runtime secrets on $role" >&2
+                  return 1
+                  ;;
+              esac
             fi
             remote_token_file="/tmp/warptalk-ghcr-$RELEASE_TAG-$GITHUB_RUN_ID.token"
             printf '%s' "$GHCR_TOKEN" | ssh "$host" \

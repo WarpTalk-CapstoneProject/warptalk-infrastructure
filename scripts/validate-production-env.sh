@@ -74,14 +74,32 @@ image_tag="$(value_of IMAGE_TAG)"
 echo "$image_tag" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{6,127}$' ||
   fail "IMAGE_TAG is not an immutable release identifier"
 
-case "$(value_of STRIPE_SECRET_KEY)" in
+# A prefix is not a credential.
+#
+# This check used to be the prefix alone, and both of the Stripe values that broke production
+# passed it: `whsec_disabled_pending_valid_stripe_key`, a placeholder that is obviously not a
+# secret, and a secret key whose body had a capital O typed as a zero. `sk_test_` with nothing
+# after it passed too.
+#
+# The body is base62 in both — Stripe's own format — so a placeholder with underscores or dashes
+# in it is rejected on shape, and an empty or truncated one on length. A transposed character
+# inside a well-formed body is NOT detectable here and never will be; that is what the live
+# check against Stripe is for. This gate exists to stop the mistakes that are detectable.
+stripe_secret="$(value_of STRIPE_SECRET_KEY)"
+case "$stripe_secret" in
   sk_test_*|sk_live_*) ;;
   *) fail "STRIPE_SECRET_KEY has an invalid prefix" ;;
 esac
-case "$(value_of STRIPE_WEBHOOK_SECRET)" in
+echo "${stripe_secret#sk_????_}" | grep -Eq '^[A-Za-z0-9]{24,}$' ||
+  fail "STRIPE_SECRET_KEY is not a Stripe key body (expected at least 24 base62 characters)"
+
+stripe_webhook="$(value_of STRIPE_WEBHOOK_SECRET)"
+case "$stripe_webhook" in
   whsec_*) ;;
   *) fail "STRIPE_WEBHOOK_SECRET has an invalid prefix" ;;
 esac
+echo "${stripe_webhook#whsec_}" | grep -Eq '^[A-Za-z0-9]{24,}$' ||
+  fail "STRIPE_WEBHOOK_SECRET is not a Stripe signing secret (expected at least 24 base62 characters)"
 case "$(value_of LIVEKIT_URL)" in
   wss://*.livekit.cloud) ;;
   *) fail "LIVEKIT_URL must be a LiveKit Cloud WebSocket URL" ;;
