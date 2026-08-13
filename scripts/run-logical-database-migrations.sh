@@ -37,6 +37,11 @@ database_exists() {
 }
 
 emit_migration_owner_sql() {
+  owned_schema="$1"
+  # The body below is written against :"schema_name". A service can own more than one schema
+  # (auth owns `auth` AND `voice`), so this is emitted once per owned schema with the variable
+  # re-pointed each time, rather than once for the service's namesake schema only.
+  printf '\\set schema_name %s\n' "$owned_schema"
   cat <<'SQL'
 DO $$
 BEGIN
@@ -134,6 +139,17 @@ apply_service() {
   database="$2"
   schema="$3"
   runtime_role="$4"
+  # Schemas this logical database owns BEYOND its namesake, space separated.
+  #
+  # WHY THIS EXISTS
+  #   extract-logical-databases.sh puts `public auth voice` into warptalk_auth, so AuthService
+  #   owns two schemas — but ownership was only ever transferred for the one named here, which
+  #   left `voice` owned by the bootstrap superuser and therefore UNMIGRATABLE. The failure is
+  #   not subtle when you hit it ("permission denied for schema voice") but it is invisible
+  #   until someone writes the first migration that touches it, which is what happened to
+  #   voice.voice_consents. test-database-boundary-isolation.sh pins this list against the
+  #   extractor's own dispatch table so the two cannot drift.
+  extra_schemas="${5:-}"
   dir="$ROOT/$service"
   # WT-294: a missing directory used to be skipped in total silence, which is
   # how transcript, notification, meeting and assistant went from the logical
@@ -161,7 +177,12 @@ apply_service() {
   {
     printf '%s\n' '\set ON_ERROR_STOP on'
     printf "SELECT pg_advisory_lock(hashtext('warptalk-service-migrations:%s'));\n" "$service"
-    emit_migration_owner_sql
+    for owned in $schema $extra_schemas; do
+      emit_migration_owner_sql "$owned"
+    done
+    # Restore the variable the rest of the file reads, so a service with extra schemas still
+    # runs its migrations under its OWN schema's search_path and not the last one owned.
+    printf '\\set schema_name %s\n' "$schema"
     printf "CREATE TABLE IF NOT EXISTS public.service_schema_migrations (service text NOT NULL, version text NOT NULL, checksum text, execution_ms bigint, release text, applied_by text, applied_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(service, version));\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS checksum text;\n"
     printf "ALTER TABLE public.service_schema_migrations ADD COLUMN IF NOT EXISTS execution_ms bigint;\n"
@@ -204,7 +225,7 @@ apply_service() {
   trap - EXIT INT TERM
 }
 
-apply_service auth "${AUTH_DATABASE:-warptalk_auth}" auth warptalk_auth_runtime
+apply_service auth "${AUTH_DATABASE:-warptalk_auth}" auth warptalk_auth_runtime "voice"
 apply_service workspace "${WORKSPACE_DATABASE:-warptalk_workspace}" workspace warptalk_workspace_runtime
 apply_service translation-room "${TRANSLATION_ROOM_DATABASE:-warptalk_translation_room}" translation_room warptalk_translation_room_runtime
 apply_service transcript "${TRANSCRIPT_DATABASE:-warptalk_transcript}" transcript warptalk_transcript_runtime
