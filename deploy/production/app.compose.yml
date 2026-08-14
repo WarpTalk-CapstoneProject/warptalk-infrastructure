@@ -60,7 +60,17 @@ x-ai-environment: &ai-environment
   OPENAI_API_KEY: ${OPENAI_API_KEY:?}
   LOG_LEVEL: INFO
   REDIS_MAX_CONNECTIONS: "10"
-  REDIS_STREAM_MAXLEN: "1000"
+  # A COUNT of entries, and the entries are audio: one tts:results message carries ~113 KB of
+  # WAV. At 1000 that is a 113 MB ceiling for ONE stream, and there is a set of four per room.
+  # On 2026-08-14 it filled this 768 MB Redis to 93%; `allkeys-lru` then began deleting live
+  # meetings' streams to make room, and transcripts stopped mid-session with nothing in any log.
+  REDIS_STREAM_MAXLEN: "200"
+  # Nothing ever deleted a room's streams — 70 abandoned ones, 284 MB, oldest untouched for ten
+  # days. Refreshed on every publish, so it only elapses once a stream has genuinely gone quiet.
+  REDIS_STREAM_TTL_SECONDS: "3600"
+  # A consumer group that stops reading must not pin the trim floor forever. billing-stt-workers
+  # last read stt:results on 2026-08-10 and still held its floor four days later.
+  REDIS_STREAM_GROUP_STALE_AFTER_SECONDS: "3600"
 
 services:
   health-inspector:
