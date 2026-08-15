@@ -205,6 +205,12 @@ services:
       # Read-only: the workspace knowledge view scrolls this workspace's own collection.
       # Indexing still goes out over Redis to embedding-worker — this is the read path back.
       VectorDb__Url: http://${DATA_PRIVATE_IP:?}:6333
+      # Backs the admin System Health screen, which reads the platform's own vitals back out of
+      # Prometheus rather than asking each service how it feels — a service that has lost its
+      # Redis consumer group answers its own health check with a 200 and has done so in
+      # production (WT-402). Prometheus publishes 9090 on the infra private address only, and
+      # the query API is read-only: this deployment does not run --web.enable-admin-api.
+      Monitoring__PrometheusUrl: http://${INFRA_PRIVATE_IP:?}:9090
     depends_on:
       migrator:
         condition: service_completed_successfully
