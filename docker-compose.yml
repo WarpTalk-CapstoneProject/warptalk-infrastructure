@@ -285,6 +285,8 @@ services:
       Storage__S3__EnsureBucketExists: ${WORKSPACE_STORAGE_ENSURE_BUCKET:-false}
       # Read-only: the workspace knowledge view scrolls this workspace's own collection.
       VectorDb__Url: ${VECTOR_DB_URL:-http://qdrant:6333}
+      # Backs the admin System Health screen. Query-only against Prometheus.
+      Monitoring__PrometheusUrl: ${PROMETHEUS_URL:-http://prometheus:9090}
     depends_on:
       migrator:
         condition: service_completed_successfully
