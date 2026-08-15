@@ -496,7 +496,28 @@ services:
       WORKER_HEALTH_NAME: stt
       STT_PROVIDER: ${STT_PROVIDER:?}
       STT_API_KEY: ${STT_API_KEY:?}
-      STT_MODEL: gpt-4o-mini-transcribe
+      # gpt-4o-mini-transcribe cannot take the two things this product depends on.
+      # Measured in production, 15 Aug:
+      #
+      #   session_optional_fields_rejected
+      #   {"model":"gpt-4o-mini-transcribe","has_language":true,"has_keywords":true}
+      #
+      # The session update carrying the room's LANGUAGE HINT and the workspace
+      # GLOSSARY was refused, so STT ran with neither. What that produced, from one
+      # meeting's transcript rows: 24 of 24 segments labelled `vi`, including
+      # "Good morning.", "Do you see ChatGPT? Hello." and a Dutch "Dit is".
+      #
+      # A wrong language label is not cosmetic here — it becomes the translation
+      # worker's source_lang, so a listener asking for Vietnamese was served raw
+      # English with translation SKIPPED, because source and target now matched.
+      # Accuracy against a hand-marked transcript was 36% on Vietnamese.
+      #
+      # stt_worker/model.py already documents this model silently dropping a
+      # glossary curated to stop "Codex" becoming "cô đích". Runtime capability
+      # detection was added to diagnose it; it cannot grant a capability the model
+      # does not have. gpt-transcribe is what shared/config.py has always defaulted
+      # to and what the worker's own docstring names. It costs more per minute.
+      STT_MODEL: gpt-transcribe
     healthcheck: *ai-healthcheck
     deploy:
       resources:
@@ -702,7 +723,23 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: 640M
+          # 640M was not enough and the way it failed hid itself.
+          #
+          # 15 Aug 12:17:07 local, mid-meeting, two people talking:
+          #   Memory cgroup out of memory: Killed process (python)
+          #   anon-rss:628012kB  (~613 MiB against a 640 MiB ceiling)
+          #
+          # Docker reported ExitCode=0 and OOMKilled=false, because the cgroup
+          # killer took a worker thread rather than PID 1 — so every Docker-level
+          # signal said "clean exit" and only `dmesg` knew. RestartCount reached 4
+          # while every other container on the host stayed at 0.
+          #
+          # This process holds torch plus the Silero VAD model plus a rolling audio
+          # buffer PER ROOM, so its footprint grows with concurrency while the
+          # model baseline stays fixed — the one shape a tight ceiling handles
+          # worst. 1536M matches tts-worker, which loads models for the same reason.
+          # The host has ~11.5 GB available, so this is headroom we already own.
+          memory: 1536M
 
   security-worker:
     <<: *service-defaults
