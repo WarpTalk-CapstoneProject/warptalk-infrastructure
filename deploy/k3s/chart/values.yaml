@@ -86,6 +86,10 @@ config:
   ASSISTANT_CHAT_WORKSPACE_SERVICE_URL: http://workspace-service:5106
   ASSISTANT_CHAT_TRANSCRIPT_SERVICE_URL: http://transcript-service:5103
   ASSISTANT_CHAT_TRANSLATION_ROOM_SERVICE_URL: http://translation-room-service:5102
+  # get_platform_analytics only, and always with the caller's own bearer token — the
+  # platform admin policy is enforced server-side on every path behind these.
+  ASSISTANT_CHAT_BILLING_SERVICE_URL: http://billing-service:5107
+  ASSISTANT_CHAT_AUTH_SERVICE_URL: http://auth-service:5101
   GrpcSettings__AuthServiceUrl: http://auth-service:50051
   GrpcSettings__BillingServiceUrl: http://billing-service:50057
   GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
