@@ -40,7 +40,7 @@ config:
   EMBEDDING_DIMENSIONS: "1536"
   OPENAI_CHAT_TRANSLATION_MODEL: gpt-4o-mini
   OpenAI__ChatTranslationModel: gpt-4o-mini
-  STT_MODEL: gpt-4o-mini-transcribe
+  STT_MODEL: gpt-transcribe  # see deploy/production/app.compose.yml — mini refuses the language hint and glossary
   # Both off the mini tier — see app.compose.yml for the measurements. Short version:
   # the mini models receive the ASR-repair hint and ignore it (0/3), the full ones act
   # on it (3/3), and the full realtime model is not measurably slower on ordinary speech.
@@ -75,6 +75,9 @@ config:
   RateLimits__WorkspacePermitLimit: "1000"
   RateLimits__LoginPermitLimit: "5"
   RateLimits__InboxPermitLimit: "30"
+  # WT-405 — see docker-compose.yml. Signing out and refreshing get their own per-address
+  # budget so ordinary traffic cannot refuse them.
+  RateLimits__SessionRecoveryPermitLimit: "60"
   RateLimits__WindowSeconds: "60"
   PGHOST: warptalk-postgres-rw.warptalk-data.svc.cluster.local
   PGPORT: "5432"

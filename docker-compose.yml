@@ -510,6 +510,11 @@ services:
       RateLimits__WorkspacePermitLimit: ${RATE_LIMIT_WORKSPACE_PER_WINDOW:-1000}
       RateLimits__LoginPermitLimit: ${RATE_LIMIT_LOGIN_PER_WINDOW:-5}
       RateLimits__InboxPermitLimit: ${RATE_LIMIT_INBOX_PER_WINDOW:-30}
+      # WT-405: /auth/logout and /auth/refresh, in a partition of their own. They carry no
+      # identity the limiter can key on, so they used to draw on the shared per-address pool
+      # and could be refused by ordinary browsing — which stranded sessions, because a 429'd
+      # logout never clears the server's cookies.
+      RateLimits__SessionRecoveryPermitLimit: ${RATE_LIMIT_SESSION_RECOVERY_PER_WINDOW:-60}
       RateLimits__WindowSeconds: ${RATE_LIMIT_WINDOW_SECONDS:-60}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
     depends_on:
