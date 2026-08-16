@@ -203,16 +203,11 @@ const KNOWN_UNHANDLED = new Map([
         "Mute state is read off the LiveKit track publication rather than this hub event.",
     },
   ],
-  [
-    "ParticipantLanguageChanged",
-    {
-      status: "known-dead",
-      reason:
-        "The listen-language counterpart of ParticipantSpeakLanguageChanged, which the client " +
-        "DOES bind. Listen language is a purely local preference on the web client, so nothing " +
-        "consumes the broadcast. Found by the WT-322 audit; out of scope.",
-    },
-  ],
+  // "ParticipantLanguageChanged" left this list on 16 Aug: the web client binds it now. The old
+  // entry's premise — "listen language is a purely local preference" — was exactly the bug:
+  // hasDubAudience() answers "is anyone listening in another language?" from the OTHERS' listen
+  // languages, so the Voice panel's audience line froze at join-time state until a partner's
+  // change arrived by full refetch, i.e. never. See warptalk-web fix/voice-panel-and-live-language.
   [
     "ParticipantVoiceChanged",
     {
