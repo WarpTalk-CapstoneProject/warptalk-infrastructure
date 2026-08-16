@@ -241,7 +241,7 @@ services:
       # moment anything asked for it, which is why no reminder notification has ever
       # been delivered in production.
       GrpcSettings__NotificationServiceUrl: http://notification-service:50054
-      GrpcSettings__TranscriptServiceUrl: http://transcript-service:50055
+      GrpcSettings__TranscriptServiceUrl: http://transcript-service:50053
       LiveKit__Egress__S3__AccessKey: ${LIVEKIT_EGRESS_S3_ACCESS_KEY:?}
       LiveKit__Egress__S3__Secret: ${LIVEKIT_EGRESS_S3_SECRET:?}
       LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:?}

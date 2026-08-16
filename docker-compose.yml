@@ -315,7 +315,7 @@ services:
       App__FrontendBaseUrl: ${FRONTEND_BASE_URL:-http://localhost:3000}
       GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
       GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
-      GrpcSettings__TranscriptServiceUrl: "http://transcript-service:50055"
+      GrpcSettings__TranscriptServiceUrl: "http://transcript-service:50053"
       GrpcSettings__WorkspaceServiceUrl: "http://workspace-service:50056"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
