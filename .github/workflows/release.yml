@@ -288,6 +288,9 @@ jobs:
           # them deploys exactly as before. Adding another is one line here and one below.
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
         run: |
           set -eu
           case "$RELEASE_TAG" in
@@ -389,6 +392,9 @@ jobs:
           }
           add_runtime_secret STRIPE_SECRET_KEY "${STRIPE_SECRET_KEY:-}"
           add_runtime_secret STRIPE_WEBHOOK_SECRET "${STRIPE_WEBHOOK_SECRET:-}"
+          add_runtime_secret LIVEKIT_URL "${LIVEKIT_URL:-}"
+          add_runtime_secret LIVEKIT_API_KEY "${LIVEKIT_API_KEY:-}"
+          add_runtime_secret LIVEKIT_API_SECRET "${LIVEKIT_API_SECRET:-}"
 
           deploy_host() {
             role="$1"
