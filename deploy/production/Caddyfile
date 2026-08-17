@@ -5,10 +5,21 @@
 
 (security_headers) {
 	header {
+		# 'wasm-unsafe-eval' in script-src is load-bearing, not boilerplate.
+		#
+		# Chrome refuses WebAssembly.instantiate under a script-src that does not allow it, and
+		# two shipped features are WASM: the Krisp noise filter and the MediaPipe background
+		# blur. Without this token both fail at runtime — Krisp falls back to the browser's own
+		# suppression, which is a loudness gate rather than a model, and users report exactly
+		# that ("you have to shout before it picks you up"). Background blur simply never turns
+		# on. WT-194 is the same missing token seen from the MediaPipe side.
+		#
+		# It is far narrower than 'unsafe-eval': it permits WebAssembly compilation and nothing
+		# else — no eval(), no Function() from strings. Do not "simplify" it to 'unsafe-eval'.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
-		Content-Security-Policy "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; frame-src https://accounts.google.com/gsi/; object-src 'none'; form-action 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https: wss: https://accounts.google.com/gsi/; script-src 'self' 'unsafe-inline' blob: https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style https://fonts.googleapis.com; font-src 'self' data: https:; worker-src 'self' blob:"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; frame-src https://accounts.google.com/gsi/; object-src 'none'; form-action 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https: wss: https://accounts.google.com/gsi/; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style https://fonts.googleapis.com; font-src 'self' data: https:; worker-src 'self' blob:"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
 		-Server

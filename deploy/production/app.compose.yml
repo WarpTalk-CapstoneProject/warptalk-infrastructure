@@ -60,7 +60,17 @@ x-ai-environment: &ai-environment
   OPENAI_API_KEY: ${OPENAI_API_KEY:?}
   LOG_LEVEL: INFO
   REDIS_MAX_CONNECTIONS: "10"
-  REDIS_STREAM_MAXLEN: "1000"
+  # A COUNT of entries, and the entries are audio: one tts:results message carries ~113 KB of
+  # WAV. At 1000 that is a 113 MB ceiling for ONE stream, and there is a set of four per room.
+  # On 2026-08-14 it filled this 768 MB Redis to 93%; `allkeys-lru` then began deleting live
+  # meetings' streams to make room, and transcripts stopped mid-session with nothing in any log.
+  REDIS_STREAM_MAXLEN: "200"
+  # Nothing ever deleted a room's streams — 70 abandoned ones, 284 MB, oldest untouched for ten
+  # days. Refreshed on every publish, so it only elapses once a stream has genuinely gone quiet.
+  REDIS_STREAM_TTL_SECONDS: "3600"
+  # A consumer group that stops reading must not pin the trim floor forever. billing-stt-workers
+  # last read stt:results on 2026-08-10 and still held its floor four days later.
+  REDIS_STREAM_GROUP_STALE_AFTER_SECONDS: "3600"
 
 services:
   health-inspector:
@@ -178,6 +188,7 @@ services:
       GrpcSettings__AuthServiceUrl: http://auth-service:50051
       GrpcSettings__BillingServiceUrl: http://billing-service:50057
       GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
+      GrpcSettings__NotificationServiceUrl: http://notification-service:50054
       RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
       RabbitMQ__Username: ${RABBITMQ_USERNAME:?}
@@ -195,6 +206,12 @@ services:
       # Read-only: the workspace knowledge view scrolls this workspace's own collection.
       # Indexing still goes out over Redis to embedding-worker — this is the read path back.
       VectorDb__Url: http://${DATA_PRIVATE_IP:?}:6333
+      # Backs the admin System Health screen, which reads the platform's own vitals back out of
+      # Prometheus rather than asking each service how it feels — a service that has lost its
+      # Redis consumer group answers its own health check with a 200 and has done so in
+      # production (WT-402). Prometheus publishes 9090 on the infra private address only, and
+      # the query API is read-only: this deployment does not run --web.enable-admin-api.
+      Monitoring__PrometheusUrl: http://${INFRA_PRIVATE_IP:?}:9090
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -225,7 +242,7 @@ services:
       # moment anything asked for it, which is why no reminder notification has ever
       # been delivered in production.
       GrpcSettings__NotificationServiceUrl: http://notification-service:50054
-      GrpcSettings__TranscriptServiceUrl: http://transcript-service:50055
+      GrpcSettings__TranscriptServiceUrl: http://transcript-service:50053
       LiveKit__Egress__S3__AccessKey: ${LIVEKIT_EGRESS_S3_ACCESS_KEY:?}
       LiveKit__Egress__S3__Secret: ${LIVEKIT_EGRESS_S3_SECRET:?}
       LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:?}
@@ -486,7 +503,28 @@ services:
       WORKER_HEALTH_NAME: stt
       STT_PROVIDER: ${STT_PROVIDER:?}
       STT_API_KEY: ${STT_API_KEY:?}
-      STT_MODEL: gpt-4o-mini-transcribe
+      # gpt-4o-mini-transcribe cannot take the two things this product depends on.
+      # Measured in production, 15 Aug:
+      #
+      #   session_optional_fields_rejected
+      #   {"model":"gpt-4o-mini-transcribe","has_language":true,"has_keywords":true}
+      #
+      # The session update carrying the room's LANGUAGE HINT and the workspace
+      # GLOSSARY was refused, so STT ran with neither. What that produced, from one
+      # meeting's transcript rows: 24 of 24 segments labelled `vi`, including
+      # "Good morning.", "Do you see ChatGPT? Hello." and a Dutch "Dit is".
+      #
+      # A wrong language label is not cosmetic here — it becomes the translation
+      # worker's source_lang, so a listener asking for Vietnamese was served raw
+      # English with translation SKIPPED, because source and target now matched.
+      # Accuracy against a hand-marked transcript was 36% on Vietnamese.
+      #
+      # stt_worker/model.py already documents this model silently dropping a
+      # glossary curated to stop "Codex" becoming "cô đích". Runtime capability
+      # detection was added to diagnose it; it cannot grant a capability the model
+      # does not have. gpt-transcribe is what shared/config.py has always defaulted
+      # to and what the worker's own docstring names. It costs more per minute.
+      STT_MODEL: gpt-transcribe
     healthcheck: *ai-healthcheck
     deploy:
       resources:
@@ -599,6 +637,12 @@ services:
       ASSISTANT_CHAT_WORKSPACE_SERVICE_URL: http://workspace-service:5106
       ASSISTANT_CHAT_TRANSCRIPT_SERVICE_URL: http://transcript-service:5103
       ASSISTANT_CHAT_TRANSLATION_ROOM_SERVICE_URL: http://translation-room-service:5102
+      # Reached only by get_platform_analytics, and only with the asking user's own bearer
+      # token. Every path behind these is gated by the platform admin policy server-side, so a
+      # normal user's assistant receives exactly the 403 that user would get in a browser —
+      # there is no service credential here to elevate with.
+      ASSISTANT_CHAT_BILLING_SERVICE_URL: http://billing-service:5107
+      ASSISTANT_CHAT_AUTH_SERVICE_URL: http://auth-service:5101
     healthcheck: *ai-healthcheck
     deploy:
       resources:
@@ -692,7 +736,23 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: 640M
+          # 640M was not enough and the way it failed hid itself.
+          #
+          # 15 Aug 12:17:07 local, mid-meeting, two people talking:
+          #   Memory cgroup out of memory: Killed process (python)
+          #   anon-rss:628012kB  (~613 MiB against a 640 MiB ceiling)
+          #
+          # Docker reported ExitCode=0 and OOMKilled=false, because the cgroup
+          # killer took a worker thread rather than PID 1 — so every Docker-level
+          # signal said "clean exit" and only `dmesg` knew. RestartCount reached 4
+          # while every other container on the host stayed at 0.
+          #
+          # This process holds torch plus the Silero VAD model plus a rolling audio
+          # buffer PER ROOM, so its footprint grows with concurrency while the
+          # model baseline stays fixed — the one shape a tight ceiling handles
+          # worst. 1536M matches tts-worker, which loads models for the same reason.
+          # The host has ~11.5 GB available, so this is headroom we already own.
+          memory: 1536M
 
   security-worker:
     <<: *service-defaults
