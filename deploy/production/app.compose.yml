@@ -188,6 +188,7 @@ services:
       GrpcSettings__AuthServiceUrl: http://auth-service:50051
       GrpcSettings__BillingServiceUrl: http://billing-service:50057
       GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
+      GrpcSettings__NotificationServiceUrl: http://notification-service:50054
       RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
       RabbitMQ__Username: ${RABBITMQ_USERNAME:?}
@@ -205,6 +206,12 @@ services:
       # Read-only: the workspace knowledge view scrolls this workspace's own collection.
       # Indexing still goes out over Redis to embedding-worker — this is the read path back.
       VectorDb__Url: http://${DATA_PRIVATE_IP:?}:6333
+      # Backs the admin System Health screen, which reads the platform's own vitals back out of
+      # Prometheus rather than asking each service how it feels — a service that has lost its
+      # Redis consumer group answers its own health check with a 200 and has done so in
+      # production (WT-402). Prometheus publishes 9090 on the infra private address only, and
+      # the query API is read-only: this deployment does not run --web.enable-admin-api.
+      Monitoring__PrometheusUrl: http://${INFRA_PRIVATE_IP:?}:9090
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -235,7 +242,7 @@ services:
       # moment anything asked for it, which is why no reminder notification has ever
       # been delivered in production.
       GrpcSettings__NotificationServiceUrl: http://notification-service:50054
-      GrpcSettings__TranscriptServiceUrl: http://transcript-service:50055
+      GrpcSettings__TranscriptServiceUrl: http://transcript-service:50053
       LiveKit__Egress__S3__AccessKey: ${LIVEKIT_EGRESS_S3_ACCESS_KEY:?}
       LiveKit__Egress__S3__Secret: ${LIVEKIT_EGRESS_S3_SECRET:?}
       LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:?}
@@ -630,6 +637,12 @@ services:
       ASSISTANT_CHAT_WORKSPACE_SERVICE_URL: http://workspace-service:5106
       ASSISTANT_CHAT_TRANSCRIPT_SERVICE_URL: http://transcript-service:5103
       ASSISTANT_CHAT_TRANSLATION_ROOM_SERVICE_URL: http://translation-room-service:5102
+      # Reached only by get_platform_analytics, and only with the asking user's own bearer
+      # token. Every path behind these is gated by the platform admin policy server-side, so a
+      # normal user's assistant receives exactly the 403 that user would get in a browser —
+      # there is no service credential here to elevate with.
+      ASSISTANT_CHAT_BILLING_SERVICE_URL: http://billing-service:5107
+      ASSISTANT_CHAT_AUTH_SERVICE_URL: http://auth-service:5101
     healthcheck: *ai-healthcheck
     deploy:
       resources:

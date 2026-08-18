@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 1080">
+  <defs>
+    <style>
+      text{font-family:Arial,Helvetica,sans-serif;fill:#0b0f14}.lane{font-size:28px;font-weight:700;text-anchor:middle}.label{font-size:21px;font-weight:700;text-anchor:middle}.small{font-size:17px;font-weight:600;text-anchor:middle;fill:#38424d}.node{fill:#fff;stroke:#0b0f14;stroke-width:5}.icon{fill:none;stroke:#0b0f14;stroke-width:7;stroke-linecap:round;stroke-linejoin:round}.flow{fill:none;stroke:#05070a;stroke-width:6;stroke-linejoin:round;marker-end:url(#arrow)}.return{fill:none;stroke:#347eb8;stroke-width:5;stroke-linejoin:round;marker-end:url(#arrowBlue)}
+    </style>
+    <marker id="arrow" markerWidth="11" markerHeight="9" refX="10" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0 0L11 4.5 0 9Z" fill="#05070a"/></marker>
+    <marker id="arrowBlue" markerWidth="11" markerHeight="9" refX="10" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0 0L11 4.5 0 9Z" fill="#347eb8"/></marker>
+    <symbol id="admin" viewBox="-85 -75 170 180"><circle cy="-27" r="39" fill="#05070a"/><path d="M-68 98C-62 39-38 25 0 25s62 14 68 73Z" fill="#05070a"/><path d="M-11 31L0 47l11-16-5 41-6 11-6-11Z" fill="#fff"/></symbol>
+    <symbol id="platform" viewBox="-95 -75 190 180"><rect x="-72" y="-58" width="144" height="102" rx="8" fill="#b8d9f5" stroke="#0b0f14" stroke-width="7"/><rect x="-51" y="-37" width="102" height="62" rx="5" fill="#fff" stroke="#0b0f14" stroke-width="5"/><circle cy="-6" r="25" fill="#7fb3e3" stroke="#0b0f14" stroke-width="6"/><path d="M0-46v15M0 19v15M-42-6h14M28-6h14M-90 66H90M-55 66l-12 22H67L55 66" class="icon"/></symbol>
+    <symbol id="database" viewBox="-85 -75 170 180"><ellipse cy="-38" rx="65" ry="22" fill="#b8d9f5" stroke="#0b0f14" stroke-width="7"/><path d="M-65-38v98c0 27 130 27 130 0v-98" fill="#fff" stroke="#0b0f14" stroke-width="7"/><path d="M-65 8c0 27 130 27 130 0M-65 52c0 27 130 27 130 0" class="icon" stroke-width="6"/></symbol>
+    <symbol id="portal" viewBox="-95 -75 190 150"><rect x="-88" y="-65" width="176" height="120" rx="10" fill="#fff" stroke="#0b0f14" stroke-width="7"/><path d="M-88-31H88" class="icon" stroke-width="6"/><circle cx="-65" cy="-48" r="5" fill="#7fb3e3"/><circle cx="-46" cy="-48" r="5" fill="#7fb3e3"/><circle cx="-27" cy="-48" r="5" fill="#7fb3e3"/><circle cx="-12" cy="6" r="19" fill="#0b0f14"/><path d="M-43 38c4-20 58-20 62 0" fill="#0b0f14"/><path d="M48-1l30 13v31c0 18-14 32-30 39-16-7-30-21-30-39V12Z" fill="#7fb3e3" stroke="#0b0f14" stroke-width="6"/></symbol>
+    <symbol id="chart" viewBox="-95 -75 190 150"><rect x="-88" y="-65" width="176" height="120" rx="10" fill="#fff" stroke="#0b0f14" stroke-width="7"/><path d="M-58 29V0M-24 29v-40M10 29V7" class="icon"/><circle cx="49" cy="-10" r="28" fill="#7fb3e3" stroke="#0b0f14" stroke-width="6"/><path d="M49-38v28h25" class="icon" stroke-width="6"/></symbol>
+    <symbol id="workspace" viewBox="-95 -75 190 150"><circle cx="-16" cy="-8" r="49" fill="#fff" stroke="#0b0f14" stroke-width="7"/><path d="M20 29l51 51" class="icon"/><rect x="-48" y="-28" width="22" height="46" fill="#7fb3e3" stroke="#0b0f14" stroke-width="5"/><rect x="-18" y="-42" width="24" height="60" fill="#fff" stroke="#0b0f14" stroke-width="5"/><rect x="14" y="-18" width="20" height="36" fill="#7fb3e3" stroke="#0b0f14" stroke-width="5"/></symbol>
+    <symbol id="detail" viewBox="-95 -75 190 150"><rect x="-88" y="-65" width="176" height="120" rx="10" fill="#fff" stroke="#0b0f14" stroke-width="7"/><path d="M-88-33H88" class="icon" stroke-width="6"/><rect x="-61" y="-15" width="45" height="43" fill="#7fb3e3" stroke="#0b0f14" stroke-width="5"/><path d="M7-12h55M7 9h55M7 30h38" class="icon" stroke-width="5"/></symbol>
+    <symbol id="pause" viewBox="-80 -75 160 150"><circle cy="-7" r="61" fill="#fff1ef" stroke="#d54232" stroke-width="7"/><rect x="-24" y="-40" width="16" height="65" rx="3" fill="#d54232"/><rect x="8" y="-40" width="16" height="65" rx="3" fill="#d54232"/></symbol>
+    <symbol id="audit" viewBox="-85 -75 170 150"><path d="M-57-68h91l29 29v90H-57Z" fill="#fff" stroke="#0b0f14" stroke-width="7"/><path d="M34-68v29h29M-34-25h68M-34-2h68M-34 21h45" class="icon" stroke-width="6"/><rect x="12" y="18" width="58" height="44" rx="7" fill="#7fb3e3" stroke="#0b0f14" stroke-width="6"/><path d="M26 18V8c0-20 30-20 30 0v10" class="icon" stroke-width="6"/></symbol>
+    <symbol id="book" viewBox="-85 -75 170 150"><path d="M-68-64h61c19 0 30 13 30 32v90h-61c-19 0-30-13-30-32Z" fill="#7fb3e3" stroke="#0b0f14" stroke-width="7"/><path d="M23-64h45V58H23Z" fill="#fff" stroke="#0b0f14" stroke-width="7"/><text x="-22" y="9" font-size="45" font-weight="800" text-anchor="middle" fill="#fff">A</text><text x="46" y="9" font-size="45" font-weight="800" text-anchor="middle">Z</text></symbol>
+    <symbol id="billing" viewBox="-100 -75 200 150"><ellipse cx="-38" cy="12" rx="47" ry="18" fill="#fff" stroke="#0b0f14" stroke-width="6"/><path d="M-85 12v38c0 22 94 22 94 0V12M-85 31c0 22 94 22 94 0" class="icon" stroke-width="6"/><rect x="17" y="-56" width="88" height="65" rx="9" fill="#7fb3e3" stroke="#0b0f14" stroke-width="7"/><path d="M26-33h70M34-7h18" class="icon" stroke-width="6"/></symbol>
+  </defs>
+
+  <rect width="2400" height="1080" fill="#fff"/>
+  <rect x="25" y="25" width="2350" height="1030" fill="#fff" stroke="#0b0f14" stroke-width="6"/>
+  <line x1="290" y1="25" x2="290" y2="1055" stroke="#0b0f14" stroke-width="6"/>
+  <line x1="25" y1="355" x2="2375" y2="355" stroke="#0b0f14" stroke-width="6"/>
+  <line x1="25" y1="705" x2="2375" y2="705" stroke="#0b0f14" stroke-width="6"/>
+
+  <use href="#admin" x="78" y="62" width="160" height="180"/><text class="lane" x="158" y="295">System Admin</text>
+  <use href="#platform" x="63" y="405" width="190" height="180"/><text class="lane" x="158" y="620">WarpTalk</text><text class="lane" x="158" y="654">Platform</text>
+  <use href="#database" x="73" y="765" width="170" height="180"/><text class="lane" x="158" y="988">Platform Data</text>
+
+  <!-- One continuous implementation-backed path. Black = action/request, blue = result/response. -->
+  <path class="flow" d="M430 262V405"/>
+  <path class="flow" d="M515 485H610"/>
+  <path class="return" d="M700 405V272"/>
+  <path class="flow" d="M790 190H880"/>
+  <path class="flow" d="M970 262V405"/>
+  <path class="return" d="M1060 405V272H1175"/>
+  <path class="flow" d="M1355 190H1420"/>
+  <path class="flow" d="M1510 262V405"/>
+  <path class="flow" d="M1510 557V760"/>
+  <path class="return" d="M1625 835H1690V272"/>
+  <path class="flow" d="M1780 190H1845"/>
+  <path class="flow" d="M1935 262V405"/>
+  <path class="return" d="M1935 557V760"/>
+  <path class="flow" d="M2025 190H2090"/>
+  <path class="flow" d="M2180 262V405"/>
+  <path class="return" d="M2180 557V760"/>
+
+  <use href="#portal" x="335" y="90" width="190" height="150"/><text class="label" x="430" y="306">Open Admin Portal</text>
+
+  <g transform="translate(430 483)"><path d="M0-68l69 30v50c0 44-34 71-69 85-35-14-69-41-69-85v-50Z" fill="#fff" stroke="#0b0f14" stroke-width="7"/><circle cy="-14" r="22" fill="#0b0f14"/><path d="M-34 42c4-31 64-31 68 0" fill="#0b0f14"/><circle cx="52" cy="47" r="28" fill="#7fb3e3" stroke="#0b0f14" stroke-width="6"/><path d="M39 47l10 11 17-22" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"/></g>
+  <text class="label" x="430" y="622">Validate Platform Role</text><text class="small" x="430" y="648">actor from authenticated token</text>
+
+  <use href="#chart" x="605" y="410" width="190" height="150"/><text class="label" x="700" y="622">Load Metrics &amp; Alerts</text><text class="small" x="700" y="648">refresh every 60 seconds</text>
+  <use href="#chart" x="605" y="90" width="190" height="150"/><text class="label" x="700" y="298">Review Live Overview</text><text class="small" x="700" y="324">metrics · usage · alerts</text>
+
+  <use href="#workspace" x="875" y="90" width="190" height="150"/><text class="label" x="970" y="298">Search &amp; Select Workspace</text><text class="small" x="970" y="324">filter · sort · open detail</text>
+  <g transform="translate(1060 483)"><rect class="node" x="-112" y="-66" width="224" height="122" rx="10"/><rect x="-82" y="-37" width="53" height="64" fill="#b8d9f5" stroke="#0b0f14" stroke-width="5"/><path d="M-64-18h17M-64 1h17M-4-30h81M-4-5h81M-4 20h59" class="icon" stroke-width="5"/></g>
+  <text class="label" x="1060" y="622">Query Directory &amp; Detail</text><text class="small" x="1060" y="648">workspace + knowledge + history</text>
+
+  <use href="#detail" x="1170" y="90" width="190" height="150"/><text class="label" x="1265" y="292">Review Supported Tabs</text><text class="small" x="1265" y="318">Overview · Knowledge · Audit</text>
+
+  <use href="#pause" x="1430" y="90" width="160" height="150"/><text class="label" x="1510" y="296">Suspend Workspace</text><text class="small" x="1510" y="322">enter mandatory reason</text>
+  <g transform="translate(1510 483)"><rect class="node" x="-120" y="-68" width="240" height="128" rx="12"/><path d="M-87-28H28M-87 0H28M-87 28H5" class="icon" stroke-width="6"/><circle cx="70" cy="3" r="32" fill="#7fb3e3" stroke="#0b0f14" stroke-width="6"/><path d="M56 3l11 12 20-24" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"/></g>
+  <text class="label" x="1510" y="622">Validate &amp; Commit Once</text><text class="small" x="1510" y="648">status change + audit row</text>
+
+  <g transform="translate(1510 835)"><rect x="-175" y="-62" width="135" height="110" rx="12" class="node"/><circle cx="-140" cy="-7" r="21" fill="#66b85a" stroke="#0b0f14" stroke-width="4"/><path d="M-151-7l9 11 17-21" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><text x="-92" y="2" font-size="23" font-weight="700" text-anchor="middle">Active</text><path class="flow" d="M-36-7H8"/><rect x="15" y="-62" width="160" height="110" rx="12" class="node"/><circle cx="51" cy="-7" r="21" fill="#df4b3f" stroke="#0b0f14" stroke-width="4"/><path d="M40-7h22" stroke="#fff" stroke-width="6" stroke-linecap="round"/><text x="117" y="2" font-size="21" font-weight="700" text-anchor="middle">Suspended</text><path d="M85 62h62l16 16v48H85Z" fill="#fff" stroke="#0b0f14" stroke-width="5"/><path d="M100 87h45M100 104h38" class="icon" stroke-width="4"/></g>
+  <text class="label" x="1510" y="1000">Status + Append-only Audit</text>
+
+  <use href="#audit" x="1605" y="90" width="170" height="150"/><text class="label" x="1690" y="296">Verify Banner &amp; Audit</text><text class="small" x="1690" y="322">time · reason · actor</text>
+
+  <use href="#book" x="1850" y="90" width="170" height="150"/><text class="label" x="1935" y="296">Manage Global Glossary</text><text class="small" x="1935" y="322">publish · archive · import</text>
+  <g transform="translate(1935 483)"><rect class="node" x="-112" y="-66" width="224" height="122" rx="10"/><text x="-47" y="9" font-size="43" font-weight="800" text-anchor="middle" fill="#347eb8">A</text><path d="M-5-34v68M-5-34l-17 18M-5-34l17 18M-5 34l-17-18M-5 34l17-18M30-28h48M30-5h48M30 18h36" class="icon" stroke-width="5"/></g>
+  <text class="label" x="1935" y="622">Persist Term &amp; Audit</text><text class="small" x="1935" y="648">published terms enter RAG index</text>
+  <use href="#book" x="1850" y="770" width="170" height="150"/><text class="label" x="1935" y="972">Terms + Audit History</text>
+
+  <use href="#billing" x="2080" y="90" width="200" height="150"/><text class="label" x="2180" y="296">Review Billing Console</text><text class="small" x="2180" y="322">usage · subscriptions · invoices</text>
+  <g transform="translate(2180 483)"><rect class="node" x="-112" y="-66" width="224" height="122" rx="10"/><path d="M-78 27V-2M-44 27v-40M-10 27V7" class="icon" stroke="#347eb8"/><circle cx="50" cy="-4" r="31" fill="#b8d9f5" stroke="#0b0f14" stroke-width="6"/><text x="50" y="9" font-size="38" font-weight="800" text-anchor="middle">$</text></g>
+  <text class="label" x="2180" y="622">Aggregate Billing Data</text><text class="small" x="2180" y="648">usage · rates · ledgers</text>
+  <use href="#billing" x="2080" y="770" width="200" height="150"/><text class="label" x="2180" y="972">Usage · Rates · Subscriptions · Invoices</text>
+</svg>

@@ -266,6 +266,12 @@ services:
       AppBaseUrl: ${APP_BASE_URL:-http://localhost:3000}
       GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
       GrpcSettings__BillingServiceUrl: "http://billing-service:50057"
+      # WT-431 gave workspace-service the notification mesh and wired it into
+      # deploy/production/app.compose.yml, but not here. Program.cs resolves it through
+      # GetRequiredServiceUri, which THROWS outside Development — so the gap is invisible on a dev
+      # machine and fatal anywhere else. The gRPC configuration coverage contract catches exactly
+      # this, and it had been failing every infra PR since.
+      GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
@@ -285,6 +291,8 @@ services:
       Storage__S3__EnsureBucketExists: ${WORKSPACE_STORAGE_ENSURE_BUCKET:-false}
       # Read-only: the workspace knowledge view scrolls this workspace's own collection.
       VectorDb__Url: ${VECTOR_DB_URL:-http://qdrant:6333}
+      # Backs the admin System Health screen. Query-only against Prometheus.
+      Monitoring__PrometheusUrl: ${PROMETHEUS_URL:-http://prometheus:9090}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -313,7 +321,7 @@ services:
       App__FrontendBaseUrl: ${FRONTEND_BASE_URL:-http://localhost:3000}
       GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
       GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
-      GrpcSettings__TranscriptServiceUrl: "http://transcript-service:50055"
+      GrpcSettings__TranscriptServiceUrl: "http://transcript-service:50053"
       GrpcSettings__WorkspaceServiceUrl: "http://workspace-service:50056"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
