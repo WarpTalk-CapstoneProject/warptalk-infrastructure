@@ -100,6 +100,27 @@ case "$stripe_webhook" in
 esac
 echo "${stripe_webhook#whsec_}" | grep -Eq '^[A-Za-z0-9]{24,}$' ||
   fail "STRIPE_WEBHOOK_SECRET is not a Stripe signing secret (expected at least 24 base62 characters)"
+# A placeholder is not a configuration.
+#
+# GOOGLE_CLIENT_ID sat at `google-oauth-disabled.apps.googleusercontent.com` on the production
+# host and broke every Google sign-in for as long as anyone can trace. Nothing objected:
+# app.compose.yml guards it with `${GOOGLE_CLIENT_ID:?}`, which only refuses an EMPTY value, so a
+# string that announces itself as disabled started the service cleanly and reported healthy. The
+# only symptom was a toast reading "Invalid Google token", four layers away from the cause.
+#
+# Two checks, because either alone would have missed it: the suffix rejects a value that is not a
+# Google client id at all, and the numeric project prefix rejects the placeholder — which has the
+# right suffix and would otherwise pass. A wrong-but-well-formed client id is still undetectable
+# here, and that is what the deploy now prevents by construction: release.yml sends the same
+# value the web bundle was built with, so there is no second string to be wrong.
+google_client_id="$(value_of GOOGLE_CLIENT_ID)"
+case "$google_client_id" in
+  *.apps.googleusercontent.com) ;;
+  *) fail "GOOGLE_CLIENT_ID must be a Google OAuth client id" ;;
+esac
+echo "${google_client_id%%-*}" | grep -Eq '^[0-9]{8,}$' ||
+  fail "GOOGLE_CLIENT_ID is not a real client id (expected a numeric project prefix, got '${google_client_id%%-*}')"
+
 case "$(value_of LIVEKIT_URL)" in
   wss://*.livekit.cloud) ;;
   *) fail "LIVEKIT_URL must be a LiveKit Cloud WebSocket URL" ;;
