@@ -668,9 +668,22 @@ services:
       # Runs only for the few segments that pass the gate, so quality matters more
       # than cost — and Luna is both cheaper and stronger than the gpt-4.1 it replaces.
       SUGGESTION_GENERATE_MODEL: gpt-5.6-luna
-      SUGGESTION_COOLDOWN_SECONDS: "45"
-      SUGGESTION_MAX_PER_MEETING: "15"
-      SUGGESTION_MIN_CONFIDENCE: "0.7"
+      # Sensitivity. These five override the code defaults, so the image alone cannot change
+      # them — a tuning change that edits shared/config.py and not this block ships with no
+      # effect in production. Loosened together on 2026-08-19: the feature was reported as
+      # detecting nothing at all in a live meeting, and every one of these was a suppressor
+      # stacked on the same decision.
+      #
+      # Each is an instant, code-free dial: raise them here and redeploy to make hints rarer
+      # without touching warptalk-ai.
+      SUGGESTION_COOLDOWN_SECONDS: "20"
+      SUGGESTION_MAX_PER_MEETING: "30"
+      SUGGESTION_MIN_CONFIDENCE: "0.55"
+      # 5 rejected 48% of real production segments before a token was spent. 4 keeps out
+      # acknowledgements ("ừ đúng rồi") and lets short commitments through.
+      SUGGESTION_MIN_WORDS: "4"
+      # AVG LOGPROB (always <= 0), not a 0-1 score. Above stt_worker's own -0.7 discard floor.
+      SUGGESTION_MIN_STT_CONFIDENCE: "-0.5"
     healthcheck: *ai-healthcheck
     deploy:
       resources:
