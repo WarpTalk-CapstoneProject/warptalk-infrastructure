@@ -149,15 +149,6 @@ const KNOWN_UNEMITTED = new Map([
  */
 const KNOWN_UNHANDLED = new Map([
   [
-    "BillingNotification",
-    {
-      status: "alias",
-      reason:
-        "BillingService and the Gateway both broadcast it, but the web billing pages bind " +
-        "'NewNotification' on the notification hub, which the same Redis message also produces.",
-    },
-  ],
-  [
     "NotificationError",
     {
       status: "alias",
