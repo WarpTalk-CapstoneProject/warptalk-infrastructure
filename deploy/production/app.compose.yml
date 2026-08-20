@@ -524,7 +524,31 @@ services:
       # detection was added to diagnose it; it cannot grant a capability the model
       # does not have. gpt-transcribe is what shared/config.py has always defaulted
       # to and what the worker's own docstring names. It costs more per minute.
-      STT_MODEL: gpt-transcribe
+      #
+      # 2026-08-20 — moved to the STREAMING model, together with STT_STREAMING_ENABLED
+      # below. These two are ONE decision; the middle rows say why. Measured on a 15s
+      # human Vietnamese recording, commit -> completed, n=3:
+      #
+      #   model                 audio arrives          p50
+      #   gpt-transcribe        dumped at turn end   1651ms   <- where this started
+      #   gpt-transcribe        paced at 1x          1003ms
+      #   gpt-live-transcribe   dumped at turn end   4733ms   <- 2.9x WORSE
+      #   gpt-live-transcribe   paced at 1x           774ms   <- 2.13x better
+      #
+      # gpt-live-transcribe consumes audio AS IT IS SPOKEN. Handed a closed VAD chunk
+      # it is far slower, so turning flash mode off while leaving this model on is a
+      # regression rather than a rollback — revert BOTH lines or neither.
+      #
+      # Quality was unchanged by pacing in all four cells (0/3 foreign-script leaks),
+      # which was the open question that kept flash mode dark. Both still send
+      # `languages` + `keywords`, so the room glossary is unaffected.
+      #
+      # Costs $0.017/min against $0.0045 — ~3.8x on ~12% of provider spend.
+      STT_MODEL: gpt-live-transcribe
+      # Send audio to STT while the speaker is still talking, instead of only once VAD
+      # closes the turn. Per-room override `translationRoom:{id}:flash_mode` still wins
+      # in both directions, so a bad room can be moved back without a deploy.
+      STT_STREAMING_ENABLED: "true"
     healthcheck: *ai-healthcheck
     deploy:
       resources:

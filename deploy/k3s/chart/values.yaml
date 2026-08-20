@@ -40,7 +40,10 @@ config:
   EMBEDDING_DIMENSIONS: "1536"
   OPENAI_CHAT_TRANSLATION_MODEL: gpt-4o-mini
   OpenAI__ChatTranslationModel: gpt-4o-mini
-  STT_MODEL: gpt-transcribe  # see deploy/production/app.compose.yml — mini refuses the language hint and glossary
+  # Paired with STT_STREAMING_ENABLED — see deploy/production/app.compose.yml. The streaming
+  # model is 2.9x SLOWER on a closed chunk, so these two revert together or not at all.
+  STT_MODEL: gpt-live-transcribe
+  STT_STREAMING_ENABLED: "true"
   # Both off the mini tier — see app.compose.yml for the measurements. Short version:
   # the mini models receive the ASR-repair hint and ignore it (0/3), the full ones act
   # on it (3/3), and the full realtime model is not measurably slower on ordinary speech.
