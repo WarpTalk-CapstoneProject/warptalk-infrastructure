@@ -61,6 +61,13 @@ config:
   # reasoning model rejects function tools outright.
   ASSISTANT_CHAT_MODEL: gpt-5.6-luna
   SUGGESTION_ENABLED: "true"
+  # Kept in step with deploy/production/app.compose.yml — see the sensitivity block there for
+  # why each of these overrides the code default.
+  SUGGESTION_COOLDOWN_SECONDS: "20"
+  SUGGESTION_MAX_PER_MEETING: "30"
+  SUGGESTION_MIN_CONFIDENCE: "0.55"
+  SUGGESTION_MIN_WORDS: "4"
+  SUGGESTION_MIN_STT_CONFIDENCE: "-0.5"
   SUGGESTION_DECIDE_MODEL: gpt-4o-mini
   SUGGESTION_GENERATE_MODEL: gpt-5.6-luna
   TTS_CACHE_ENABLED: "true"
