@@ -55,7 +55,11 @@ jq -n \
       select(.role == $role) |
       select(($old[.service] // "") != ($new[.service] // ""))
     ]) as $changed_entries |
-    ([$changed_entries[].service] | unique | sort) as $changed |
+    # Every container the changed image backs, not just the first one named. An image can run as
+    # more than one service — the live translation worker and the post-meeting backfill worker are
+    # the same code reading different streams — and leaving the others out of a selective deploy
+    # keeps them on the previous digest while the release reports success.
+    ([$changed_entries[] | ([.service] + (.alsoServices // []))[]] | unique | sort) as $changed |
     {
       deploy: ($full or ($changed | length > 0)),
       fullDeploy: $full,

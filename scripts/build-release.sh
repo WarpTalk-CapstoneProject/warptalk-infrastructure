@@ -288,9 +288,17 @@ process_image() {
   fi
 
   service_name="$(echo "$image_entry" | jq -r '.service')"
+  # Carried through to the manifest because release-override.jq reads it from THERE, not from the
+  # matrix: the deploy runs on the host with only the release bundle in front of it. One image can
+  # legitimately back several containers — the live translation worker and the post-meeting
+  # backfill worker are the same code reading different streams — and a service the override never
+  # names keeps the raw ${IMAGE_REGISTRY}/${IMAGE_TAG} from the host's .env, which is a tag from
+  # July and a 403 that fails the whole deploy.
+  also_services="$(echo "$image_entry" | jq -c '.alsoServices // []')"
   jq -n \
     --arg name "$image_name" \
     --arg service "$service_name" \
+    --argjson also_services "$also_services" \
     --arg ref "$image_ref" \
     --arg digest "$digest" \
     --arg source_repository "$source_repository" \
@@ -300,6 +308,7 @@ process_image() {
     '{
       name: $name,
       service: $service,
+      alsoServices: $also_services,
       ref: $ref,
       digest: $digest,
       sourceRepository: $source_repository,
