@@ -426,7 +426,7 @@ assert_services "$INFRA_JSON" \
 assert_services "$APP_JSON" \
   migrator auth-service workspace-service translation-room-service \
   transcript-service notification-service meeting-service assistant-service \
-  billing-service gateway frontend stt-worker translation-worker tts-worker \
+  billing-service gateway frontend stt-worker translation-worker translation-backfill-worker tts-worker \
   assistant-worker suggestion-worker embedding-worker billing-worker livekit-ingress-worker \
   security-worker caddy
 
