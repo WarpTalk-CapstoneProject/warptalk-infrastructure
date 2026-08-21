@@ -28,6 +28,22 @@ The note describes the release that was just dispatched, and rides to `main` wit
 promotion. That is deliberate: it is documentation, not part of the deployed bundle, and
 holding a release open to commit its own changelog would put a manual step inside the deploy.
 
+## Where the boundary comes from, exactly
+
+Each note ends with the commit it stopped at, per repo, as an HTML comment — invisible wherever
+the markdown renders. The next note starts there.
+
+That is not the same as "the previous promotion", and the difference bit on the very first run:
+two promote PRs were merged before one dispatch, so the notes covered the second and silently
+dropped everything the first carried. Nothing looked wrong. A recorded boundary is the release
+before it, which is the thing actually being asked about.
+
+To backfill, or for a note with no predecessor:
+
+```sh
+node scripts/release-notes.mjs --tag <tag> --from warptalk-web=<sha> --write
+```
+
 ## What it cannot do
 
 It reads commit subjects. A release whose commits are titled `fix: stuff` produces a note that
