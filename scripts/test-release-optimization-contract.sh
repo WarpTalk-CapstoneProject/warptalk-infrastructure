@@ -76,6 +76,61 @@ jq -e '
 ' "$tmp_dir/backend-plan.json" >/dev/null ||
   fail "backend service changes must run the shared database migrator"
 
+# ONE IMAGE, SEVERAL CONTAINERS.
+#
+# An image can back more than one service — the live translation worker and the post-meeting
+# backfill worker are the same code reading different streams. A selective deploy that restarts
+# only the first service named leaves the others running the previous digest while the release
+# reports success, which is a silent partial rollout.
+cat >"$tmp_dir/shared-matrix.json" <<'JSON'
+{
+  "schemaVersion": 1,
+  "platform": "linux/amd64",
+  "images": [
+    {"name":"ai-translation","service":"translation-worker","alsoServices":["translation-backfill-worker"],"role":"app"},
+    {"name":"frontend","service":"frontend","role":"app"}
+  ]
+}
+JSON
+cat >"$tmp_dir/shared-current.json" <<'JSON'
+{
+  "schemaVersion": 1,
+  "repositories": {"warptalk-infrastructure":{"commit":"infra-a"}},
+  "images": [
+    {"name":"ai-translation","service":"translation-worker","alsoServices":["translation-backfill-worker"],"digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+    {"name":"frontend","service":"frontend","digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222"}
+  ]
+}
+JSON
+jq '.images |= map(if .name == "ai-translation" then .digest = "sha256:3333333333333333333333333333333333333333333333333333333333333333" else . end)' \
+  "$tmp_dir/shared-current.json" >"$tmp_dir/shared-desired.json"
+MATRIX_FILE="$tmp_dir/shared-matrix.json" \
+  "$planner" "$tmp_dir/shared-current.json" "$tmp_dir/shared-desired.json" >"$tmp_dir/shared-plan.json"
+jq -e '
+  .roles.app.changedServices == ["translation-backfill-worker", "translation-worker"]
+' "$tmp_dir/shared-plan.json" >/dev/null ||
+  fail "a changed image must restart every service it backs, not only the first one named"
+
+# The same fact on the deploy side: the override has to PIN every one of those services, or the
+# unpinned one falls through to ${IMAGE_REGISTRY}/${IMAGE_TAG} from the host .env — values no
+# release rewrites — and pulls a tag that no longer exists. That is what failed v144.
+cat >"$tmp_dir/override-base.json" <<'JSON'
+{"services":{"translation-worker":{},"translation-backfill-worker":{},"frontend":{},"absent-here":{}}}
+JSON
+jq -n '{images:[
+  {"name":"ai-translation","service":"translation-worker","alsoServices":["translation-backfill-worker"],"ref":"ghcr.io/x/ai-translation:src-a","digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+  {"name":"only-elsewhere","service":"not-on-this-role","ref":"ghcr.io/x/other:src-b","digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222"}
+]}' >"$tmp_dir/override-manifest.json"
+jq --slurpfile base "$tmp_dir/override-base.json" \
+  -f "$repo_root/deploy/production/release-override.jq" \
+  "$tmp_dir/override-manifest.json" >"$tmp_dir/override.json"
+jq -e '
+  .services["translation-worker"].image == "ghcr.io/x/ai-translation:src-a@sha256:1111111111111111111111111111111111111111111111111111111111111111" and
+  .services["translation-backfill-worker"].image == .services["translation-worker"].image and
+  (.services | has("not-on-this-role") | not)
+' "$tmp_dir/override.json" >/dev/null ||
+  fail "the release override must pin every service an image backs, and invent none"
+
 jq '.repositories["warptalk-infrastructure"].commit = "infra-b"' \
   "$tmp_dir/desired.json" >"$tmp_dir/infra-change.json"
 MATRIX_FILE="$tmp_dir/matrix.json" \

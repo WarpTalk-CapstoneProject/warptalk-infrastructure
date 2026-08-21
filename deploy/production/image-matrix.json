@@ -28,7 +28,7 @@
       ]
     },
     { "name": "ai-stt", "service": "stt-worker", "role": "app", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "stt" },
-    { "name": "ai-translation", "service": "translation-worker", "role": "app", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "translation" },
+    { "name": "ai-translation", "service": "translation-worker", "alsoServices": ["translation-backfill-worker"], "role": "app", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "translation" },
     { "name": "ai-tts", "service": "tts-worker", "role": "app", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "tts" },
     { "name": "ai-assistant", "service": "assistant-worker", "role": "app", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "assistant" },
     { "name": "ai-suggestion", "service": "suggestion-worker", "role": "app", "repository": "warptalk-ai", "context": "warptalk-ai", "dockerfile": "Dockerfile", "target": "suggestion" },
