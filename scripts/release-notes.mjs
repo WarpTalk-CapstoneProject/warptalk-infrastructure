@@ -29,10 +29,11 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const args = process.argv.slice(2);
 const infraRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const projectRoot = resolve(infraRoot, "..");
 
@@ -63,8 +64,37 @@ function git(repo, args) {
 }
 
 /**
+ * Where the last note stopped, per repo.
+ *
+ * THE HOLE THIS CLOSES
+ *     "The previous promotion" is only the previous RELEASE when there is exactly one promotion
+ *     per release. The very first run of this script hit the exception: two promote PRs were
+ *     merged before one dispatch, so the notes silently covered the second and dropped
+ *     everything the first had carried. Nothing looked wrong — the file was there and the
+ *     entries in it were true.
+ *
+ *     So each note records the commit it ended at, and the next one starts there. A release is
+ *     bounded by the release before it, which is the thing actually being asked about.
+ */
+function lastRecordedBoundary(repo) {
+  const dir = join(infraRoot, "docs/releases");
+  let files;
+  try {
+    files = readdirSync(dir).filter((name) => name.endsWith(".md") && name !== "README.md").sort();
+  } catch {
+    return null;
+  }
+  for (const name of files.reverse()) {
+    const match = new RegExp(`^<!-- ${repo}: ([0-9a-f]{40}) -->$`, "m")
+      .exec(readFileSync(join(dir, name), "utf8"));
+    if (match) return match[1];
+  }
+  return null;
+}
+
+/**
  * The two most recent promotions of development onto main. The newest is this release; the one
- * before it is where the last release stopped.
+ * before it is the fallback boundary when no previous note recorded one.
  */
 function promoteBoundary(repo) {
   const merges = git(repo, [
@@ -79,19 +109,28 @@ function promoteBoundary(repo) {
 
 function changesFor(repo) {
   const bounds = promoteBoundary(repo);
-  if (!bounds) return [];
-  const range = bounds.from ? `${bounds.from}..${bounds.to}` : bounds.to;
+  if (!bounds) return { changes: [], head: null };
+  // A recorded boundary wins over "the previous promotion": it is where the last note actually
+  // stopped, which is the same thing only when each release had exactly one promotion.
+  // --from <repo>=<sha> overrides both, for a backfill or for the first note, which has no
+  // predecessor to anchor to and would otherwise silently start at the previous promotion.
+  const override = args
+    .filter((arg, index) => args[index - 1] === "--from")
+    .map((arg) => arg.split("="))
+    .find(([name]) => name === repo)?.[1];
+  const from = override ?? lastRecordedBoundary(repo) ?? bounds.from;
+  const range = from ? `${from}..${bounds.to}` : bounds.to;
   const lines = git(repo, ["log", range, "--no-merges", "--format=%s"]).split("\n").filter(Boolean);
 
-  return lines.map((subject) => {
+  const changes = lines.map((subject) => {
     const match = /^(\w+)(?:\(([^)]*)\))?!?:\s*(.+)$/.exec(subject);
     return match
       ? { type: match[1].toLowerCase(), scope: match[2] ?? "", text: match[3] }
       : { type: "other", scope: "", text: subject };
   });
+  return { changes, head: bounds.to };
 }
 
-const args = process.argv.slice(2);
 const tag = args[args.indexOf("--tag") + 1];
 if (!tag || tag.startsWith("--")) {
   console.error("usage: release-notes.mjs --tag <release-tag> [--write]");
@@ -101,8 +140,10 @@ if (!tag || tag.startsWith("--")) {
 const out = [`# ${tag}`, "", `_Generated ${new Date().toISOString().slice(0, 10)} from what was promoted to main._`, ""];
 let total = 0;
 
+const heads = [];
 for (const [repo, label] of REPOS) {
-  const changes = changesFor(repo);
+  const { changes, head } = changesFor(repo);
+  if (head) heads.push(`<!-- ${repo}: ${head} -->`);
   if (changes.length === 0) continue;
   total += changes.length;
 
@@ -128,6 +169,12 @@ for (const [repo, label] of REPOS) {
 
 if (total === 0) {
   out.push("_No commits between this promotion and the previous one._", "");
+}
+
+// Machine-readable, and the reason the next note can start where this one stopped. Kept at the
+// bottom as HTML comments so it is invisible wherever the markdown is rendered.
+if (heads.length > 0) {
+  out.push("", ...heads);
 }
 
 const markdown = out.join("\n");
