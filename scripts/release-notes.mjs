@@ -76,11 +76,34 @@ function git(repo, args) {
  *     So each note records the commit it ended at, and the next one starts there. A release is
  *     bounded by the release before it, which is the thing actually being asked about.
  */
+/**
+ * Notes in release order — oldest first.
+ *
+ * NOT a plain filename sort, which is what this used to do. A note is named
+ * `prod-YYYYMMDD-<slug>-vNNN.md`, so the slug sits BETWEEN the date and the version and a
+ * lexicographic sort orders by slug. Two releases on one day sorted by their words:
+ * `...transcript-language-backfill-v145` came before `...transcript-one-language-v143`, so the
+ * newest note was read as v143, the boundary came from two releases back, and v147's note
+ * re-listed everything v145 had already shipped.
+ *
+ * That is the same failure the boundary footers were added to prevent, one level up: a note that
+ * looks complete, reads as true, and sends a tester to re-check work that shipped days ago.
+ */
+function notesInReleaseOrder(dir) {
+  const version = (name) => {
+    const match = /-v(\d+)\.md$/.exec(name);
+    return match ? Number(match[1]) : -1;
+  };
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(".md") && name !== "README.md")
+    .sort((left, right) => version(left) - version(right) || left.localeCompare(right));
+}
+
 function lastRecordedBoundary(repo) {
   const dir = join(infraRoot, "docs/releases");
   let files;
   try {
-    files = readdirSync(dir).filter((name) => name.endsWith(".md") && name !== "README.md").sort();
+    files = notesInReleaseOrder(dir);
   } catch {
     return null;
   }
