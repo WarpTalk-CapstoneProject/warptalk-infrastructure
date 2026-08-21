@@ -124,6 +124,9 @@ jobs:
       - name: Runtime secret application contract
         working-directory: warptalk-infrastructure
         run: ./scripts/test-apply-runtime-secrets.sh
+      - name: Release notes cover the release they name
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-release-notes-contract.sh
       - name: Shell lint
         working-directory: warptalk-infrastructure
         run: |
