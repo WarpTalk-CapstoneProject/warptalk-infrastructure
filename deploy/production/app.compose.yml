@@ -601,6 +601,35 @@ services:
           cpus: "0.75"
           memory: 768M
 
+  # Same image as translation-worker, different stream. It reads translate:backfill_requests
+  # and fills in the languages a meeting was never translated into while it was running, so a
+  # finished transcript can be read end to end in one language instead of only where that
+  # language happened to be the live target.
+  #
+  # Deliberately NOT folded into translation-worker: that worker's consume loop is on the
+  # meeting's critical path and a backfill is a long batch job. Sharing a process would put a
+  # 178-line catch-up in front of a live sentence somebody is waiting to hear.
+  translation-backfill-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-translation:${IMAGE_TAG:?}
+    command: ["python", "-m", "translation_worker.backfill_worker"]
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: translation-backfill
+      TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:?}
+      TRANSLATION_API_KEY: ${TRANSLATION_API_KEY:?}
+      # Reads back a saved transcript, so nothing here is on a listener's critical path.
+      # The same model translation-worker uses off the realtime socket, for the same reason:
+      # the mini tier cannot use the ASR-repair machinery, and these lines were transcribed
+      # under exactly the conditions that needs.
+      TRANSLATION_MODEL: gpt-4.1
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
   tts-worker:
     <<: *service-defaults
     image: ${IMAGE_REGISTRY:?}/ai-tts:${IMAGE_TAG:?}
