@@ -200,6 +200,38 @@ rm -f "$compose_images_file"
 [ "$MATRIX_NAMES" = "$COMPOSE_IMAGE_NAMES" ] ||
   fail "production Compose image references must exactly match image-matrix.json"
 
+# EVERY SERVICE, not just every image NAME.
+#
+# The comparison above deduplicates: two services running one image satisfy it with a single
+# matrix entry, and the second service is then never pinned. release-override.jq rewrites images
+# per SERVICE, so an unpinned one falls through to ${IMAGE_REGISTRY}/${IMAGE_TAG} — a pair no
+# release rewrites, still holding July's values on production. It pulls a tag that no longer
+# exists, 403s, and takes the whole deploy down with it after every other image is already
+# fetched.
+#
+# That is v144: translation-backfill-worker was added to the Compose file and not to the matrix,
+# and the check above passed because the image it runs was already listed for another service.
+matrix_services_file="$(mktemp)"
+jq -r '.images[] | select(.compose != false) | ([.service] + (.alsoServices // []))[]' \
+  "$IMAGE_MATRIX" | sort -u >"$matrix_services_file"
+
+compose_services_file="$(mktemp)"
+{
+  docker compose --env-file "$ENV_FILE" -f "$APP_COMPOSE" config --format json
+  docker compose --env-file "$ENV_FILE" -f "$DATA_COMPOSE" config --format json
+  docker compose --env-file "$ENV_FILE" -f "$INFRA_COMPOSE" config --format json
+} |
+  jq -r --arg registry "$IMAGE_REGISTRY_VALUE" '
+    .services | to_entries[]
+    | select((.value.image // "") | startswith($registry + "/"))
+    | .key
+  ' | sort -u >"$compose_services_file"
+
+unpinned="$(comm -13 "$matrix_services_file" "$compose_services_file")"
+rm -f "$matrix_services_file" "$compose_services_file"
+[ -z "$unpinned" ] ||
+  fail "these Compose services run a WarpTalk image and are absent from image-matrix.json, so no release would pin them: $(printf '%s' "$unpinned" | tr '\n' ' ')"
+
 grep -q 'ON_ERROR_STOP' "$MIGRATION_RUNNER" ||
   fail "migration runner must stop on the first SQL error"
 grep -q 'pg_advisory_lock' "$MIGRATION_RUNNER" ||
