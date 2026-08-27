@@ -11,9 +11,29 @@ route:
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
+  routes:
+    # WarpTalkDeadLetterPresent fires on the PRESENCE of parked entries, not on new
+    # ones arriving: `redis_stream_length{stream=~".*:(dead-letter|dlq)"} > 0`.
+    #
+    # The MEETING-END sentinel that produced those entries was fixed in
+    # warptalk-ai/shared/control_markers.py, but the entries it had already parked
+    # were deliberately left in the streams as evidence. So the expression stays
+    # true forever, and Alertmanager re-sent the identical mail every
+    # repeat_interval — the only alert mail anyone actually received.
+    #
+    # Muted at the ROUTE, not deleted from the rules: the alert still evaluates and
+    # is still visible in Prometheus and the Alertmanager UI. Only the email is
+    # gone. Drain the dead-letter streams and this block can be removed to get
+    # notification of genuinely new dead letters back.
+    - receiver: dead-letter-muted
+      matchers:
+        - alertname = "WarpTalkDeadLetterPresent"
 
 receivers:
   - name: warptalk-operations
     email_configs:
       - to: __ALERT_EMAIL_TO__
         send_resolved: true
+
+  # Intentionally has no notifier. Alerts routed here are grouped and dropped.
+  - name: dead-letter-muted
