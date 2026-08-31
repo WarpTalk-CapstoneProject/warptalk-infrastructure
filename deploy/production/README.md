@@ -37,15 +37,21 @@ it to `false` only on a host with no tailnet membership, because `ufw --force
 reset` at the top of the firewall section would otherwise drop tailnet SSH and
 break the release workflow's production job.
 
+Each role must also be told **its own** private IP. The containers publish onto that exact
+address, and the bootstrap installs a `docker.service` drop-in that blocks startup until the
+address is actually assigned — see "Private addresses must be static" below.
+
 ```sh
 sudo ROLE=app \
   ADMIN_CIDR="203.0.113.10/32 203.0.113.11/32" \
+  APP_PRIVATE_IP=10.20.0.200 \
   DEPLOY_USER=cloud-user \
   ./scripts/bootstrap-production-host.sh
 
 sudo ROLE=data \
   ADMIN_CIDR="203.0.113.10/32 203.0.113.11/32" \
   APP_PRIVATE_IP=10.20.0.200 \
+  DATA_PRIVATE_IP=10.20.0.20 \
   INFRA_PRIVATE_IP=10.20.0.30 \
   DEPLOY_USER=cloud-user \
   ./scripts/bootstrap-production-host.sh
@@ -54,9 +60,46 @@ sudo ROLE=infra \
   ADMIN_CIDR="203.0.113.10/32 203.0.113.11/32" \
   APP_PRIVATE_IP=10.20.0.200 \
   DATA_PRIVATE_IP=10.20.0.20 \
+  INFRA_PRIVATE_IP=10.20.0.30 \
   DEPLOY_USER=cloud-user \
   ./scripts/bootstrap-production-host.sh
 ```
+
+### Private addresses must be static (WT-595)
+
+Every Data and Infra container publishes onto an absolute private IP
+(`10.20.0.20:5432`, `10.20.0.30:6379`, …) rather than `0.0.0.0`. That is deliberate and must
+stay: Docker writes its own iptables rules ahead of UFW's chains, so publishing onto `0.0.0.0`
+and relying on the UFW source rules would put Postgres and Redis on the public interface with
+the firewall bypassed.
+
+The consequence is that the address has to exist *before* Docker starts a container, because
+publishing a port is a create-time operation. It is not retried: `restart: unless-stopped` covers
+crashes, and a container that never came up did not crash. On 30/08/2026 all three VMs rebooted,
+`eth0` was still waiting on its DHCP lease when `docker.service` came up, and eleven containers
+went to `Exited (255)` and stayed there. Production was down 27 hours. Only the exporters
+survived — they bind no private address — so every dashboard looked healthy.
+
+Two things follow, and both are needed:
+
+1. **Give each VM a static private address.** A lease is a promise about a moment, and every
+   reboot re-opens the race. Pin `10.20.0.200` / `10.20.0.20` / `10.20.0.30` in netplan on the
+   respective hosts rather than accepting them from DHCP.
+2. **Keep the docker drop-in.** `bootstrap-production-host.sh` installs
+   `/usr/local/sbin/warptalk-wait-for-bind-address` and an `ExecStartPre` that blocks docker until
+   the address is assigned (bounded to 120s, then it proceeds and says so in the journal).
+   `After=network-online.target` was already present and lost this race anyway — "the network is
+   up" is not "this interface holds this address". Keep the drop-in after the addresses are
+   static: it costs nothing when the address is already there.
+
+**Recovering a host that booted without its address.** `docker start` on those containers
+*succeeds* and reports healthy — the healthcheck runs inside the container over loopback — while
+`Ports` and `Networks` come back empty and the host has no listener at all. The endpoint config is
+gone from the container's state, and `docker stop && docker start` does not restore it. Only
+`docker compose up -d` recreates it. Do that with the digest-pinned override regenerated (see
+`scripts/deploy-release.sh`), from **each host's own release directory** — the roles can sit on
+different release versions, and reaching for the newest one turns a recovery into an unplanned
+deploy.
 
 On Data and Infra, format a newly attached empty durable disk only after
 confirming its size and device mapping:

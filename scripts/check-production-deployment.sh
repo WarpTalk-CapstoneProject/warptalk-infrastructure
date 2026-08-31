@@ -521,6 +521,27 @@ echo "$INFRA_JSON" | jq -e --arg private_ip "$infra_private_ip" '
   | length == 0
 ' >/dev/null || fail "Infra VM ports must bind only to INFRA_PRIVATE_IP"
 
+# WT-595 — binding to an absolute private IP is only safe if that IP is guaranteed to exist
+# before Docker starts.
+#
+# The two assertions above are what make the Data and Infra VMs bind to a private address instead
+# of 0.0.0.0, and they are correct: Docker writes its own iptables rules ahead of UFW's chains, so
+# publishing onto 0.0.0.0 and "letting UFW handle it" would put Postgres and Redis on the public
+# interface with the firewall bypassed. Binding to the address is the right call.
+#
+# The cost is that the bind is a CREATE-time operation: if the address is not on an interface yet,
+# `docker run` fails outright and `restart: unless-stopped` does not retry it, because nothing
+# crashed. On 30/08/2026 that took production down for 27 hours after a reboot — eth0's DHCP lease
+# arrived after docker.service had started, and eleven containers stayed Exited (255).
+#
+# So the two decisions are a pair, and this is the half that used to be missing.
+grep -Fq 'warptalk-wait-for-bind-address' "$HOST_BOOTSTRAP" ||
+  fail "host bootstrap must install the bind-address waiter (WT-595)"
+grep -Fq '/etc/systemd/system/docker.service.d/10-wait-for-bind-address.conf' "$HOST_BOOTSTRAP" ||
+  fail "host bootstrap must install a docker.service drop-in that waits for the published private IP"
+grep -Fq 'ExecStartPre=/usr/local/sbin/warptalk-wait-for-bind-address' "$HOST_BOOTSTRAP" ||
+  fail "the docker drop-in must block startup on the address, not merely order after network-online.target"
+
 echo "$DATA_JSON" | jq -e '
   [
     .services
