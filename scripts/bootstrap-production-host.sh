@@ -61,6 +61,17 @@ if [ "$ROLE" = "infra" ]; then
   [ -n "$DATA_PRIVATE_IP" ] || fail "DATA_PRIVATE_IP is required for the infra role"
 fi
 
+# WT-595: this host's OWN private address, which its containers publish onto. Required now,
+# because the docker drop-in installed below waits for it — and a host whose own address the
+# operator cannot name is a host where this whole class of failure stays possible.
+case "$ROLE" in
+  app) OWN_PRIVATE_IP="$APP_PRIVATE_IP" ;;
+  data) OWN_PRIVATE_IP="$DATA_PRIVATE_IP" ;;
+  infra) OWN_PRIVATE_IP="$INFRA_PRIVATE_IP" ;;
+esac
+[ -n "$OWN_PRIVATE_IP" ] ||
+  fail "the ${ROLE} role needs its own private IP ($(echo "$ROLE" | tr '[:lower:]' '[:upper:]')_PRIVATE_IP) so Docker can be made to wait for it"
+
 if [ -r /etc/os-release ]; then
   . /etc/os-release
 else
@@ -129,6 +140,71 @@ else
     'net.ipv4.tcp_syncookies=1' \
     >/etc/sysctl.d/99-warptalk.conf
   sysctl --system
+fi
+
+# WT-595 — Docker must not start before the address its containers publish onto exists.
+#
+# On 30/08/2026 all three production VMs rebooted and production stayed down for 27 hours. Every
+# container that publishes to a private IP — postgres, pgbouncer, qdrant, minio, redis, rabbitmq,
+# prometheus, grafana, seq, alertmanager, otel-collector — failed at CREATE time with:
+#
+#   failed to bind host port 10.20.0.20:5432/tcp: cannot assign requested address
+#
+# because eth0 gets its 10.20.0.x address from DHCP and docker.service had already started. This
+# is not a crash, so `restart: unless-stopped` never retried it: the containers sat in
+# Exited (255) until a person intervened. Only the exporters survived, because they bind no
+# private IP — which is why monitoring looked fine.
+#
+# docker.service already carried After=network-online.target and systemd-networkd-wait-online was
+# enabled, and it still lost the race: "the network is up" is not "eth0 holds THIS address".
+# So the condition is stated exactly. ExecStartPre blocks the unit, so nothing docker starts can
+# run before the bind target is assignable.
+#
+# The lasting fix is a STATIC private address on all three VMs — see deploy/production/README.md.
+# This drop-in is what makes a reboot survivable either way, and is deliberately kept even once
+# the addresses are static: it costs nothing when the address is already there, and it turns a
+# reintroduced DHCP lease from a 27-hour outage into a slower boot.
+if [ "$DRY_RUN" = "true" ]; then
+  echo "DRY-RUN: install /usr/local/sbin/warptalk-wait-for-bind-address"
+  echo "DRY-RUN: install /etc/systemd/system/docker.service.d/10-wait-for-bind-address.conf"
+else
+  cat >/usr/local/sbin/warptalk-wait-for-bind-address <<'WAIT_SCRIPT'
+#!/bin/sh
+# Blocks until $1 is assigned to a local interface. WT-595.
+#
+# Bounded: a host that genuinely never gets the address must fail loudly rather than hang the
+# boot forever. Docker then starts anyway and the bind errors are the same as before — but the
+# journal names the cause on line one instead of leaving it to be reconstructed from container
+# exit codes.
+set -eu
+address="${1:?usage: warptalk-wait-for-bind-address <ip>}"
+deadline="${2:-120}"
+elapsed=0
+while [ "$elapsed" -lt "$deadline" ]; do
+  if ip -o address show scope global | grep -Fq " $address/"; then
+    [ "$elapsed" -eq 0 ] ||
+      echo "warptalk-wait-for-bind-address: $address appeared after ${elapsed}s"
+    exit 0
+  fi
+  sleep 1
+  elapsed=$((elapsed + 1))
+done
+echo "warptalk-wait-for-bind-address: $address never appeared in ${deadline}s;" \
+     "containers that publish onto it will fail to bind" >&2
+exit 0
+WAIT_SCRIPT
+  chmod 0755 /usr/local/sbin/warptalk-wait-for-bind-address
+
+  install -m 0755 -d /etc/systemd/system/docker.service.d
+  cat >/etc/systemd/system/docker.service.d/10-wait-for-bind-address.conf <<DROP_IN
+[Unit]
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStartPre=/usr/local/sbin/warptalk-wait-for-bind-address ${OWN_PRIVATE_IP}
+DROP_IN
+  systemctl daemon-reload
 fi
 
 run systemctl enable --now docker

@@ -215,6 +215,49 @@ def evaluate_container_state(
     return CheckResult(service, "pass", "running; application probe required")
 
 
+def evaluate_port_publication(service: str, container: dict[str, Any]) -> CheckResult | None:
+    """WT-595: a container that is Running and healthy while publishing nothing.
+
+    This is the state that made the 30/08/2026 outage take 27 hours. After the VMs rebooted
+    without their DHCP-assigned private address, `docker start` on the exited containers
+    SUCCEEDED and they came up reporting healthy — the healthcheck (`pg_isready`, `redis-cli
+    ping`) runs *inside* the container over loopback, so it knows nothing about whether the host
+    published a port. `HostConfig.PortBindings` still held the full configuration; the live
+    `NetworkSettings.Ports` was empty and the nat chain had no rule. Every cheap signal said the
+    service was fine, and it was unreachable from every client.
+
+    So the check is the disagreement itself: configured to publish, publishing nothing. Nothing
+    else the inspector looks at can see this — which is why it is here rather than in a probe.
+
+    Returns None when there is nothing to say: a container that publishes no ports by design
+    (every .NET service on the App VM reaches its peers over the Compose network) must not be
+    reported as broken for publishing none.
+    """
+    state = container.get("State", {})
+    if not state.get("Running"):
+        return None
+
+    configured = container.get("HostConfig", {}).get("PortBindings") or {}
+    if not configured:
+        return None
+
+    published = container.get("NetworkSettings", {}).get("Ports") or {}
+    live = {port for port, bindings in published.items() if bindings}
+
+    missing = sorted(port for port in configured if port not in live)
+    if not missing:
+        return None
+
+    return CheckResult(
+        service,
+        "critical",
+        "running and healthy but publishing nothing on "
+        + ", ".join(missing)
+        + " — the host has no listener for it. `docker start` cannot repair this; "
+        "recreate with `docker compose up -d` (WT-595)",
+    )
+
+
 def result_exit_code(results: list[CheckResult]) -> int:
     if any(result.status == "critical" for result in results):
         return 2
@@ -392,6 +435,9 @@ def run(args: argparse.Namespace) -> tuple[list[CheckResult], dict[str, list[dic
                 previous_restarts(service, container),
             )
         )
+        unpublished = evaluate_port_publication(service, container)
+        if unpublished is not None:
+            results.append(unpublished)
 
     for service, probe in EXPECTED_SERVICES.items():
         if role != "app":

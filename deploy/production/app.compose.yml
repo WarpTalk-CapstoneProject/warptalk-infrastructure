@@ -141,22 +141,22 @@ services:
       HEALTH_PORT: "5101"
       AppBaseUrl: https://${APP_DOMAIN:?}
       Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID:?}
-      # TEMPORARY — remove once Resend delivery is confirmed working.
+      # WT-597: the temporary AuthSettings__AutoVerifySelfRegistration override is GONE.
       #
-      # AutoVerifySelfRegistration now defaults to false, so registration mints a
-      # verification token and mails it. Delivery is failing, and RegisterAsync
-      # deliberately swallows that failure (the account is already committed, and
-      # returning an error would invite duplicate registrations). ResendVerification
-      # calls the same sender, so it fails the same way. The result is an account
-      # that can never become verified, and "Email not verified" blocks room
-      # creation — a dead end with no way out from inside the product.
+      # It was set here because verification mail was not being delivered, which left a
+      # registered account unable to verify and unable to sign in — and the only resend
+      # endpoint was [Authorize], so it was unreachable by exactly the accounts that
+      # needed it. Auto-verifying every self-registration kept the product usable at the
+      # cost of the spec-137 anti-takeover guard: with it on, anyone could register an
+      # address they do not control and have it treated as proven.
       #
-      # This trades back the spec-137 guard: with auto-verify on, someone who
-      # registers with an address they do not own is treated as verified. That is
-      # a deliberate, temporary choice to keep the product usable while mail is
-      # down, NOT a decision that the guard was unnecessary. Revert this line the
-      # moment a verification email actually arrives.
-      AuthSettings__AutoVerifySelfRegistration: "true"
+      # Both halves of that trade are now settled. Delivery works — password-reset mail
+      # arrives through this same Resend sender and the same transport, which is the
+      # evidence on the ticket. And the dead end is gone: POST /auth/resend-verification-request
+      # is anonymous and rate limited, and /verify-email offers it, so an account whose
+      # first mail went missing has a way forward without a session.
+      #
+      # Registration now mints a token and mails it, as the code has defaulted to all along.
       Resend__ApiKey: ${RESEND_API_KEY:?}
       Resend__FromEmail: ${RESEND_FROM_EMAIL:?}
       Resend__FromName: ${RESEND_FROM_NAME:-WarpTalk}

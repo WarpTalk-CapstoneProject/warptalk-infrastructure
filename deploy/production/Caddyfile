@@ -16,10 +16,25 @@
 		#
 		# It is far narrower than 'unsafe-eval': it permits WebAssembly compilation and nothing
 		# else — no eval(), no Function() from strings. Do not "simplify" it to 'unsafe-eval'.
+		#
+		# `blob:` in frame-src is load-bearing too, for the same reason and from the same family
+		# of bug (WT-600, after WT-194 and the Krisp token above).
+		#
+		# Documents are previewed from the DOWNLOAD BYTES, in the browser, so nothing pending
+		# approval is uploaded anywhere to be converted. A PDF is handed to the browser's own
+		# viewer as `<iframe src={URL.createObjectURL(blob)}>`, and an iframe's src is governed by
+		# frame-src. Without `blob:` Chrome blocked it and drew a broken-file icon — which is what
+		# the report "cannot view an uploaded PDF" was, and only in production, because a dev
+		# server sends no CSP at all.
+		#
+		# This does NOT loosen clickjacking protection: frame-src governs what THIS page may put
+		# in a frame, not who may frame this page. That is frame-ancestors 'none' and
+		# X-Frame-Options DENY, both unchanged above. A blob: URL is same-origin and minted by our
+		# own code from bytes we just fetched.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
-		Content-Security-Policy "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; frame-src https://accounts.google.com/gsi/; object-src 'none'; form-action 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https: wss: https://accounts.google.com/gsi/; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style https://fonts.googleapis.com; font-src 'self' data: https:; worker-src 'self' blob:"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; frame-src 'self' blob: https://accounts.google.com/gsi/; object-src 'none'; form-action 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https: wss: https://accounts.google.com/gsi/; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style https://fonts.googleapis.com; font-src 'self' data: https:; worker-src 'self' blob:"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
 		-Server

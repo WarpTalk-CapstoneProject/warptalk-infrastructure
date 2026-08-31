@@ -13,6 +13,7 @@ from inspector import (  # noqa: E402
     docker_logs,
     detect_role,
     evaluate_container_state,
+    evaluate_port_publication,
     extract_log_findings,
     group_log_findings,
     load_checkpoint,
@@ -20,6 +21,70 @@ from inspector import (  # noqa: E402
     required_services,
     save_checkpoint,
 )
+
+
+class PortPublicationTests(unittest.TestCase):
+    """WT-595 — the state where every other signal says the service is fine."""
+
+    @staticmethod
+    def _container(*, port_bindings, live_ports, running=True):
+        return {
+            "State": {"Status": "running", "Running": running, "Health": {"Status": "healthy"}},
+            "HostConfig": {"PortBindings": port_bindings},
+            "NetworkSettings": {"Ports": live_ports},
+        }
+
+    def test_healthy_container_publishing_nothing_is_critical(self):
+        # Exactly what the Data VM looked like after the reboot: the configuration intact, the
+        # live publication empty, `pg_isready` passing inside the container over loopback.
+        result = evaluate_port_publication(
+            "postgres",
+            self._container(
+                port_bindings={"5432/tcp": [{"HostIp": "10.20.0.20", "HostPort": "5432"}]},
+                live_ports={},
+            ),
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, "critical")
+        self.assertIn("5432/tcp", result.detail)
+        # The repair is the non-obvious half: docker start succeeds and changes nothing.
+        self.assertIn("docker compose up -d", result.detail)
+
+    def test_a_published_container_says_nothing(self):
+        self.assertIsNone(
+            evaluate_port_publication(
+                "postgres",
+                self._container(
+                    port_bindings={"5432/tcp": [{"HostIp": "10.20.0.20", "HostPort": "5432"}]},
+                    live_ports={"5432/tcp": [{"HostIp": "10.20.0.20", "HostPort": "5432"}]},
+                ),
+            )
+        )
+
+    def test_a_service_that_publishes_nothing_by_design_is_not_a_finding(self):
+        # Every .NET service on the App VM reaches its peers over the Compose network and
+        # publishes no host port at all. Reporting those would make the check useless noise.
+        self.assertIsNone(
+            evaluate_port_publication(
+                "auth-service",
+                self._container(port_bindings={}, live_ports={}),
+            )
+        )
+
+    def test_a_stopped_container_is_left_to_the_state_check(self):
+        # A container that is not running is already reported by evaluate_container_state, with a
+        # better message. Two criticals for one fact is how a report stops being read.
+        self.assertIsNone(
+            evaluate_port_publication(
+                "redis",
+                self._container(
+                    port_bindings={"6379/tcp": [{"HostIp": "10.20.0.30", "HostPort": "6379"}]},
+                    live_ports={},
+                    running=False,
+                ),
+            )
+        )
 
 
 class ContainerStateTests(unittest.TestCase):
