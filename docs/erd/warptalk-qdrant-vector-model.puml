@@ -1,0 +1,41 @@
+@startuml warptalk-qdrant-vector-model
+title Production VectorDB - Workspace Collection
+
+' Production VectorDB snapshot.
+' VectorDB is shown as stored collection data only: no source-system arrows,
+' no pipeline arrows, and no relational foreign-key style links.
+
+hide circle
+hide empty members
+skinparam linetype ortho
+skinparam packageStyle rectangle
+skinparam defaultFontName Arial
+skinparam shadowing false
+
+left to right direction
+
+package "VectorDB" #F7F8FA {
+  entity "Collection" as qdrant_collection {
+    * name : workspace_019f0d00-0de0-7000-9000-0000000000aa
+    --
+    workspace : WarpTalk Demo - SEP490
+    chunks_counted : 103
+    meeting_summary : 102
+    document : 1
+    vector_returned : false
+    payload_returned : true
+  }
+
+  entity "Segment" as qdrant_segment {
+    * chunk_id : uuid
+    --
+    collection_name : workspace_019f0d00-0de0-7000-9000-0000000000aa
+    source_type : meeting_summary | document
+    fact_category : risk | requirement | reference | definition | decision | commitment
+    ai_retrieval : true
+    source_title : string
+    payload : json
+  }
+}
+
+@enduml

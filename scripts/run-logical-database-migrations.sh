@@ -211,6 +211,15 @@ apply_service() {
       echo 'COMMIT;'
       printf '%s\n' '\endif'
     done
+    # Migrations run as warptalk_migrator, so ALTER DEFAULT PRIVILEGES covers
+    # newly-created objects but cannot repair tables created before the stable
+    # migration role existed. Re-apply the runtime grants after every migration
+    # batch so a fresh WT-565 table is usable immediately by its service login.
+    for owned in $schema $extra_schemas; do
+      printf "GRANT USAGE ON SCHEMA %s TO %s;\n" "$owned" "$runtime_role"
+      printf "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %s TO %s;\n" "$owned" "$runtime_role"
+      printf "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA %s TO %s;\n" "$owned" "$runtime_role"
+    done
     printf "SELECT pg_advisory_unlock(hashtext('warptalk-service-migrations:%s'));\n" "$service"
   } > "$tmp"
   if ! PGPASSWORD="$PGPASSWORD" psql -X -v ON_ERROR_STOP=1 \

@@ -83,14 +83,14 @@ services:
       MONITOR_DB_PASSWORD: ${MONITOR_DB_PASSWORD:?Set MONITOR_DB_PASSWORD in .env}
     volumes:
       - ./scripts:/scripts:ro
-      - ../warptalk-backend/auth/database/migrations:/service-migrations/auth:ro
-      - ../warptalk-backend/workspace/database/migrations:/service-migrations/workspace:ro
-      - ../warptalk-backend/translation-room/database/migrations:/service-migrations/translation-room:ro
-      - ../warptalk-backend/transcript/database/migrations:/service-migrations/transcript:ro
-      - ../warptalk-backend/notification/database/migrations:/service-migrations/notification:ro
-      - ../warptalk-backend/meeting/database/migrations:/service-migrations/meeting:ro
-      - ../warptalk-backend/assistant/database/migrations:/service-migrations/assistant:ro
-      - ../warptalk-backend/billing/database/migrations:/service-migrations/billing:ro
+      - ${BACKEND_SOURCE_ROOT:-../warptalk-backend}/auth/database/migrations:/service-migrations/auth:ro
+      - ${BACKEND_SOURCE_ROOT:-../warptalk-backend}/workspace/database/migrations:/service-migrations/workspace:ro
+      - ${BACKEND_SOURCE_ROOT:-../warptalk-backend}/translation-room/database/migrations:/service-migrations/translation-room:ro
+      - ${BACKEND_SOURCE_ROOT:-../warptalk-backend}/transcript/database/migrations:/service-migrations/transcript:ro
+      - ${BACKEND_SOURCE_ROOT:-../warptalk-backend}/notification/database/migrations:/service-migrations/notification:ro
+      - ${BACKEND_SOURCE_ROOT:-../warptalk-backend}/meeting/database/migrations:/service-migrations/meeting:ro
+      - ${BACKEND_SOURCE_ROOT:-../warptalk-backend}/assistant/database/migrations:/service-migrations/assistant:ro
+      - ${BACKEND_SOURCE_ROOT:-../warptalk-backend}/billing/database/migrations:/service-migrations/billing:ro
     # Self-heal against CRLF: /scripts is read-only, so copy to a writable
     # tmp path, strip carriage returns, then run. Works even if a Windows
     # checkout left CRLF in run-migrations.sh (no re-clone needed).
@@ -222,7 +222,7 @@ services:
   # ── Auth Service ──────────────────────────────────────────────────
   auth-service:
     build:
-      context: ../warptalk-backend
+      context: ${BACKEND_SOURCE_ROOT:-../warptalk-backend}
       dockerfile: auth/Dockerfile
     container_name: warptalk-auth
     environment:
@@ -257,7 +257,7 @@ services:
   # ── Workspace Service ─────────────────────────────────────────────
   workspace-service:
     build:
-      context: ../warptalk-backend
+      context: ${BACKEND_SOURCE_ROOT:-../warptalk-backend}
       dockerfile: workspace/Dockerfile
     container_name: warptalk-workspace
     environment:
@@ -312,7 +312,7 @@ services:
   # ── TranslationRoom Service ───────────────────────────────────────────────
   translation-room-service:
     build:
-      context: ../warptalk-backend
+      context: ${BACKEND_SOURCE_ROOT:-../warptalk-backend}
       dockerfile: translation-room/Dockerfile
     container_name: warptalk-translation-room
     environment:
@@ -349,7 +349,7 @@ services:
   # ── Transcript Service ────────────────────────────────────────────
   transcript-service:
     build:
-      context: ../warptalk-backend
+      context: ${BACKEND_SOURCE_ROOT:-../warptalk-backend}
       dockerfile: transcript/Dockerfile
     container_name: warptalk-transcript
     environment:
@@ -383,7 +383,7 @@ services:
   # ── Notification Service ──────────────────────────────────────────
   notification-service:
     build:
-      context: ../warptalk-backend
+      context: ${BACKEND_SOURCE_ROOT:-../warptalk-backend}
       dockerfile: notification/Dockerfile
     container_name: warptalk-notification
     environment:
@@ -413,7 +413,7 @@ services:
   # ── Meeting Service ───────────────────────────────────────────────
   meeting-service:
     build:
-      context: ../warptalk-backend
+      context: ${BACKEND_SOURCE_ROOT:-../warptalk-backend}
       dockerfile: meeting/Dockerfile
     container_name: warptalk-meeting
     environment:
@@ -465,17 +465,23 @@ services:
   # ── Assistant Service ─────────────────────────────────────────────
   assistant-service:
     build:
-      context: ../warptalk-backend
+      context: ${BACKEND_SOURCE_ROOT:-../warptalk-backend}
       dockerfile: assistant/Dockerfile
     container_name: warptalk-assistant
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNET_ENV:-Development}
+      AppBaseUrl: ${APP_BASE_URL:-http://localhost:3000}
       ConnectionStrings__AssistantDb: "Host=pgbouncer;Port=6432;Database=warptalk_assistant;Username=warptalk_assistant;Password=${ASSISTANT_DB_PASSWORD:-warptalk-assistant-dev};Search Path=assistant,public;GSS Encryption Mode=Disable"
       Jwt__SecretKey: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
+      GrpcSettings__WorkspaceServiceUrl: "http://workspace-service:50056"
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      DataProtection__KeyRingPath: ${ASSISTANT_DATA_PROTECTION_KEY_RING_PATH:-/var/lib/warptalk/keys}
+      Plugins__GoogleWorkspace__OAuth__ClientId: ${GOOGLE_WORKSPACE_CLIENT_ID:-${GOOGLE_CLIENT_ID:-}}
+      Plugins__GoogleWorkspace__OAuth__ClientSecret: ${GOOGLE_WORKSPACE_CLIENT_SECRET:-}
+      Plugins__GoogleWorkspace__OAuth__RedirectUri: ${GOOGLE_WORKSPACE_REDIRECT_URI:-http://localhost:5200/api/v1/assistant/plugins/google_workspace/oauth/callback}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -483,13 +489,17 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+      workspace-service:
+        condition: service_started
     networks:
       - warptalk-net
+    volumes:
+      - assistant-data-protection-keys:/var/lib/warptalk/keys
 
   # ── API Gateway (YARP + SignalR) ──────────────────────────────────
   gateway:
     build:
-      context: ../warptalk-backend
+      context: ${BACKEND_SOURCE_ROOT:-../warptalk-backend}
       dockerfile: gateway/src/WarpTalk.Gateway/Dockerfile
     container_name: warptalk-gateway
     ports:
@@ -548,7 +558,7 @@ services:
   # ── Billing Service ───────────────────────────────────────────────
   billing-service:
     build:
-      context: ../warptalk-backend
+      context: ${BACKEND_SOURCE_ROOT:-../warptalk-backend}
       dockerfile: billing/Dockerfile
     container_name: warptalk-billing
     environment:
@@ -596,7 +606,7 @@ services:
   # ── Frontend — Next.js Web App ─────────────────────────────────────
   frontend:
     build:
-      context: ../warptalk-web
+      context: ${FRONTEND_SOURCE_ROOT:-../warptalk-web}
       args:
         NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:5200/api/v1}
         NEXT_PUBLIC_SIGNALR_URL: ${FRONTEND_SIGNALR_URL:-http://localhost:5200}
@@ -847,6 +857,7 @@ volumes:
   prometheus-data:
   grafana-data:
   alertmanager-data:
+  assistant-data-protection-keys:
 
 networks:
   warptalk-net:

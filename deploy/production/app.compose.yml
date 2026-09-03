@@ -373,10 +373,19 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:?}
       Jwt__Audience: ${JWT_AUDIENCE:?}
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?}
+      GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
       Redis__ConnectionString: ${INFRA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
+      DataProtection__KeyRingPath: ${ASSISTANT_DATA_PROTECTION_KEY_RING_PATH:-/var/lib/warptalk/keys}
+      Plugins__GoogleWorkspace__OAuth__ClientId: ${GOOGLE_WORKSPACE_CLIENT_ID:?}
+      Plugins__GoogleWorkspace__OAuth__ClientSecret: ${GOOGLE_WORKSPACE_CLIENT_SECRET:?}
+      Plugins__GoogleWorkspace__OAuth__RedirectUri: ${GOOGLE_WORKSPACE_REDIRECT_URI:-https://${APP_DOMAIN:?}/api/v1/assistant/plugins/google_workspace/oauth/callback}
     depends_on:
       migrator:
         condition: service_completed_successfully
+      workspace-service:
+        condition: service_healthy
+    volumes:
+      - assistant-data-protection-keys:/var/lib/warptalk/keys
     healthcheck: *dotnet-healthcheck
     deploy:
       resources:
@@ -861,6 +870,7 @@ services:
           memory: 192M
 
 volumes:
+  assistant-data-protection-keys:
   caddy-data:
   caddy-config:
 
