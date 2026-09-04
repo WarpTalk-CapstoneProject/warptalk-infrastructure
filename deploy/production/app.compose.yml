@@ -374,6 +374,28 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:?}
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?}
       Redis__ConnectionString: ${INFRA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
+      # Plugin OAuth callbacks land the browser here; the service refuses to start outside
+      # Development when this is missing or points at localhost.
+      AppBaseUrl: https://${APP_DOMAIN:?}
+      # WT-602: the one redirect URI every kind='mcp' plugin shares, and the Client ID Metadata
+      # Document that identifies WarpTalk to authorization servers supporting CIMD. Both are
+      # served through the gateway on the API domain; the document URL must be https and carry
+      # a path, and changing it is a new client identity (see McpClientMetadataController).
+      Plugins__Mcp__Client__RedirectUri: https://${API_DOMAIN:?}/api/v1/assistant/plugins/mcp/oauth/callback
+      Plugins__Mcp__Client__ClientMetadataUrl: https://${API_DOMAIN:?}/oauth/client-metadata/v1.json
+      Plugins__Mcp__Client__JwksUrl: https://${API_DOMAIN:?}/oauth/client-metadata/jwks.json
+      Plugins__Mcp__Client__ClientUri: https://${APP_DOMAIN:?}
+      # Native Google Drive & Calendar plugin (WT-565). Optional: the row stays visible but
+      # cannot connect until these are set.
+      Plugins__GoogleWorkspace__OAuth__ClientId: ${GOOGLE_WORKSPACE_CLIENT_ID:-}
+      Plugins__GoogleWorkspace__OAuth__ClientSecret: ${GOOGLE_WORKSPACE_CLIENT_SECRET:-}
+      Plugins__GoogleWorkspace__OAuth__RedirectUri: https://${API_DOMAIN:?}/api/v1/assistant/plugins/google_workspace/oauth/callback
+      # Every plugin secret and user token in assistant.plugins / plugin_connections is
+      # encrypted with this key ring. Without a persisted ring each deploy would mint a new
+      # one and silently orphan everything written before it.
+      DataProtection__KeyRingPath: /var/lib/warptalk/keys
+    volumes:
+      - assistant-data-protection-keys:/var/lib/warptalk/keys
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -863,6 +885,7 @@ services:
 volumes:
   caddy-data:
   caddy-config:
+  assistant-data-protection-keys:
 
 networks:
   app-net:
