@@ -374,6 +374,9 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:?}
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?}
       Redis__ConnectionString: ${INFRA_PRIVATE_IP:?}:6379,password=${REDIS_PASSWORD:?}
+      # Workspace policy (AllowAnyPlugins) is read over gRPC; GetRequiredServiceUri throws
+      # outside Development when this is missing.
+      GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
       # Plugin OAuth callbacks land the browser here; the service refuses to start outside
       # Development when this is missing or points at localhost.
       AppBaseUrl: https://${APP_DOMAIN:?}
