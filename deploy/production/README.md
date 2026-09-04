@@ -208,6 +208,86 @@ The migration runner uses `ON_ERROR_STOP` and a PostgreSQL advisory lock.
 Application services use Data for PostgreSQL/MinIO/Qdrant and Infra for
 Redis/RabbitMQ/OTLP.
 
+### WT-603: the meeting migration is not backward compatible
+
+`scripts/service-migrations/meeting/20260903120000_remove_retired_collaboration_features.sql`
+drops the retired Polls/Q&A/Breakouts tables **and renames**
+`meeting.meeting_tracks.meeting_participant_id` to `rtc_stream_participant_id`,
+with the matching index and foreign-key constraint renames.
+
+There is no expand phase. The old and the new column name never coexist, so:
+
+- the **previous** `meeting-service` image fails every write to `meeting_tracks`
+  once the migration has been applied, and
+- the **new** image fails every such write until it has.
+
+That window is not idle. `MeetingWebhookService.HandleTrackPublished` inserts a
+`meeting_tracks` row on every LiveKit `track_published` webhook, i.e. every time
+anyone turns on a camera or a microphone in a live room. The default order in
+`scripts/deploy-release.sh` runs `compose run --rm migrator` (line 214) *before*
+`compose up -d` (lines 217-221), so between those two steps the old
+`meeting-service` is still serving traffic against the renamed schema.
+
+**Preflight, before migrating.** Run the row-count query from the migration
+header through the approved database diagnostic path and export anything that
+must be retained:
+
+```sql
+  SELECT 'poll_votes', count(*) FROM meeting.poll_votes
+  UNION ALL SELECT 'poll_options', count(*) FROM meeting.poll_options
+  UNION ALL SELECT 'polls', count(*) FROM meeting.polls
+  UNION ALL SELECT 'question_votes', count(*) FROM meeting.question_votes
+  UNION ALL SELECT 'questions', count(*) FROM meeting.questions
+  UNION ALL SELECT 'breakout_assignments', count(*) FROM meeting.breakout_assignments
+  UNION ALL SELECT 'breakout_sessions', count(*) FROM meeting.breakout_sessions;
+```
+
+The DROPs are irreversible. Also take the verified backup that the rollback
+section below requires before any destructive migration.
+
+**Mitigation.** Deploy in an off-peak window with no live meetings, and stop
+`meeting-service` before the migrator so that no old build can write the renamed
+schema. From `deploy/production` on App:
+
+```sh
+docker compose --env-file .env.production -f app.compose.yml pull
+docker compose --env-file .env.production -f app.compose.yml stop meeting-service
+docker compose --env-file .env.production -f app.compose.yml run --rm migrator
+docker compose --env-file .env.production -f app.compose.yml up -d
+```
+
+The final `up -d` recreates `meeting-service` from the new image, so no explicit
+`start` is needed.
+
+With the guarded release script, stop the service first and then let the script
+run its own migration gate:
+
+```sh
+docker compose --env-file /etc/warptalk/.env.production \
+  -f /opt/warptalk/current/deploy/production/app.compose.yml \
+  stop meeting-service
+
+DEPLOY_ROLE=app \
+RELEASE_MANIFEST=/etc/warptalk/release-manifest.json \
+PRODUCTION_ENV_FILE=/etc/warptalk/.env.production \
+  /opt/warptalk/current/scripts/deploy-release.sh
+```
+
+`stop` targets the running container, so it does not need the immutable image
+override that `deploy-release.sh` generates internally (`$override`, a `mktemp`
+file built from `RELEASE_MANIFEST`); the base compose file is enough. The script
+then runs `migrator` while `meeting-service` is down and brings it back up on
+the new image in the same run.
+
+Meetings that are live when `meeting-service` stops lose their track bookkeeping
+either way. Stopping it first only converts silent write failures into a short,
+visible outage of one service, which is why the off-peak window matters more than
+the command order.
+
+Rollback is restore-forward. `ALTER TABLE ... RENAME COLUMN` can be reversed by
+a compensating migration, but the seven `DROP TABLE` statements cannot; recover
+those from the pre-migration backup.
+
 ## DNS, acceptance and rollback
 
 Point `APP_DOMAIN` and `API_DOMAIN` to `45.115.16.201`, then verify DNS and
