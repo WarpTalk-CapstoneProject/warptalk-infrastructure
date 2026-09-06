@@ -8,7 +8,7 @@ FROM postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148
 # changes this layer's cache key and fails the build loudly if it is unavailable, rather
 # than silently reinstalling the vulnerable one. Raise the floor on the next advisory.
 RUN apk upgrade --no-cache \
-    && apk add --no-cache 'libcrypto3>=3.5.8-r0' 'libssl3>=3.5.8-r0' \
+    && apk add --no-cache 'libcrypto3>=3.5.8-r0' 'libssl3>=3.5.8-r0' 'libuuid>=2.42.3-r0' \
     && rm -f /usr/local/bin/gosu
 
 COPY scripts /scripts
