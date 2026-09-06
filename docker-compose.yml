@@ -476,6 +476,9 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      # Workspace policy (AllowAnyPlugins) is read over gRPC; GetRequiredServiceUri throws
+      # outside Development when this is missing.
+      GrpcSettings__WorkspaceServiceUrl: "http://workspace-service:50056"
     depends_on:
       migrator:
         condition: service_completed_successfully

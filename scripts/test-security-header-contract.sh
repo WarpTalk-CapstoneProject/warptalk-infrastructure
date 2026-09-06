@@ -16,11 +16,15 @@ grep -Fq "frame-ancestors 'none'" "$caddy"
 grep -Fq "frame-ancestors 'none'" "$traefik"
 grep -Fq "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://accounts.google.com/gsi/client" "$caddy"
 grep -Fq "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style https://fonts.googleapis.com" "$caddy"
-grep -Fq "frame-src https://accounts.google.com/gsi/" "$caddy"
+# WT-600: `blob:` is what lets the in-browser PDF preview render at all — an iframe over an
+# object URL is governed by frame-src, and without it Chrome shows a broken-file icon in
+# production only. Pinned as a whole directive so removing the token fails here rather than in a
+# bug report about uploaded documents.
+grep -Fq "frame-src 'self' blob: https://accounts.google.com/gsi/" "$caddy"
 grep -Fq "connect-src 'self' https: wss: https://accounts.google.com/gsi/" "$caddy"
 grep -Fq "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://accounts.google.com/gsi/client" "$traefik"
 grep -Fq "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style https://fonts.googleapis.com" "$traefik"
-grep -Fq "frame-src https://accounts.google.com/gsi/" "$traefik"
+grep -Fq "frame-src 'self' blob: https://accounts.google.com/gsi/" "$traefik"
 grep -Fq "connect-src 'self' https: wss: https://accounts.google.com/gsi/" "$traefik"
 grep -Fq "content-security-policy:" "$smoke"
 

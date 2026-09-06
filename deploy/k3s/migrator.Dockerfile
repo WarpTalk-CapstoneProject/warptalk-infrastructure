@@ -1,6 +1,14 @@
 FROM postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
 
+# The explicit openssl floor is not redundant with `apk upgrade`. The release build pins
+# this base image by digest and passes `--cache-from` against a registry BuildKit cache
+# (scripts/build-release.sh), so this RUN layer is a cache hit on every rebuild and the
+# upgrade never actually re-runs -- which is how CVE-2026-14456 (libcrypto3/libssl3
+# 3.5.7-r0) survived a rebuild and blocked the release gate. Naming the fixed version
+# changes this layer's cache key and fails the build loudly if it is unavailable, rather
+# than silently reinstalling the vulnerable one. Raise the floor on the next advisory.
 RUN apk upgrade --no-cache \
+    && apk add --no-cache 'libcrypto3>=3.5.8-r0' 'libssl3>=3.5.8-r0' \
     && rm -f /usr/local/bin/gosu
 
 COPY scripts /scripts
