@@ -121,6 +121,29 @@ esac
 echo "${google_client_id%%-*}" | grep -Eq '^[0-9]{8,}$' ||
   fail "GOOGLE_CLIENT_ID is not a real client id (expected a numeric project prefix, got '${google_client_id%%-*}')"
 
+# The Google Workspace plugin's OAuth client (WT-565), checked the same way and for the same
+# reason. This pair was consumed by app.compose.yml as `${GOOGLE_WORKSPACE_CLIENT_ID:-}` and
+# defined by nothing — not the template, not generate-prod-env.sh, not release.yml — so the
+# assistant service started healthy with an EMPTY client id and the only symptom was Google's
+# consent screen answering "Missing required parameter: client_id" at the end of the flow.
+# Because the key was absent from the template, the "missing environment key" loop above could
+# not see the gap either. Defining it there and checking it here closes both halves.
+#
+# The third case is the one a reader will hit: GOOGLE_CLIENT_ID is the auth-service SIGN-IN
+# client and carries no Drive or Calendar scopes. Pasting it here yields a client id that passes
+# every shape check and still cannot mint a Drive token, so reject the duplicate outright.
+google_workspace_client_id="$(value_of GOOGLE_WORKSPACE_CLIENT_ID)"
+case "$google_workspace_client_id" in
+  *.apps.googleusercontent.com) ;;
+  *) fail "GOOGLE_WORKSPACE_CLIENT_ID must be a Google OAuth client id" ;;
+esac
+echo "${google_workspace_client_id%%-*}" | grep -Eq '^[0-9]{8,}$' ||
+  fail "GOOGLE_WORKSPACE_CLIENT_ID is not a real client id (expected a numeric project prefix, got '${google_workspace_client_id%%-*}')"
+[ "$google_workspace_client_id" != "$google_client_id" ] ||
+  fail "GOOGLE_WORKSPACE_CLIENT_ID must not be the auth-service GOOGLE_CLIENT_ID (that client has no Drive/Calendar scopes)"
+
+require_length GOOGLE_WORKSPACE_CLIENT_SECRET 24
+
 case "$(value_of LIVEKIT_URL)" in
   wss://*.livekit.cloud) ;;
   *) fail "LIVEKIT_URL must be a LiveKit Cloud WebSocket URL" ;;
