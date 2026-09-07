@@ -225,6 +225,20 @@ const KNOWN_UNHANDLED = new Map([
         "these. Found by the WT-322 audit; out of scope.",
     },
   ]),
+  ...["BreakoutsStarted", "BreakoutsEnded"].map((name) => [
+    name,
+    {
+      status: "known-dead",
+      reason:
+        "The third member of the same set, and the one the WT-322 audit missed because the " +
+        "breakout client was still mounted when that audit ran. It is not any more: " +
+        "use-breakouts.ts, breakouts.service.ts and breakout-setup-modal.tsx went with the " +
+        "retired room collaboration UI, alongside the polls and Q&A clients already listed " +
+        "above. TranslationRoomRedisSubscriberService still relays both events, and no " +
+        "backend service exposes a breakout endpoint for anything to drive them, so the relay " +
+        "is the last piece of the feature left standing.",
+    },
+  ]),
 ]);
 
 // ---------------------------------------------------------------------------
