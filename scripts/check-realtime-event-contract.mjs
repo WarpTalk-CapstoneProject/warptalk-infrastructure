@@ -225,18 +225,31 @@ const KNOWN_UNHANDLED = new Map([
         "these. Found by the WT-322 audit; out of scope.",
     },
   ]),
+  // A BRIDGE, AND IT MUST NOT OUTLIVE ITS OTHER HALF.
+  //
+  // Unlike the Poll* and Question* entries above, the backend feature here is INTACT on
+  // development: BreakoutsController exposes api/v1/meetings/rooms/{id}/breakouts, BreakoutsService
+  // publishes both of these events, and BreakoutExpiryWorker ends sessions on its own. What went
+  // away is only the client — use-breakouts.ts, breakouts.service.ts, breakout-setup-modal.tsx and
+  // the two connection.on bindings — removed with the retired room collaboration UI in warptalk-web.
+  //
+  // So these two are unhandled because a coordinated removal is half done, not because the feature
+  // is dead. The backend half is warptalk-backend#330, which deletes the whole Polls/Q&A/Breakouts
+  // slice including the Gateway relay branches. On the day that lands, the rot check below turns
+  // every name here into a stale-entry failure — these two AND the six Poll*/Question* entries
+  // above it. Whoever merges #330 removes all eight in the same window; leaving them is what makes
+  // the next unrelated web PR go red for reasons its author cannot see.
   ...["BreakoutsStarted", "BreakoutsEnded"].map((name) => [
     name,
     {
       status: "known-dead",
       reason:
-        "The third member of the same set, and the one the WT-322 audit missed because the " +
-        "breakout client was still mounted when that audit ran. It is not any more: " +
-        "use-breakouts.ts, breakouts.service.ts and breakout-setup-modal.tsx went with the " +
-        "retired room collaboration UI, alongside the polls and Q&A clients already listed " +
-        "above. TranslationRoomRedisSubscriberService still relays both events, and no " +
-        "backend service exposes a breakout endpoint for anything to drive them, so the relay " +
-        "is the last piece of the feature left standing.",
+        "The breakout client was removed with the retired room collaboration UI in warptalk-web " +
+        "(use-breakouts.ts, breakouts.service.ts, breakout-setup-modal.tsx and both connection.on " +
+        "bindings), so nothing binds these. The BACKEND feature is still live on development — " +
+        "BreakoutsController, BreakoutsService and BreakoutExpiryWorker all stand and both events " +
+        "are still published. This entry is a bridge for the window between the web removal and " +
+        "warptalk-backend#330, which deletes the server half; delete it when #330 lands.",
     },
   ]),
 ]);
