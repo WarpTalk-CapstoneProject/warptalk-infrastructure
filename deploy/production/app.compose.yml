@@ -388,10 +388,12 @@ services:
       Plugins__Mcp__Client__ClientMetadataUrl: https://${API_DOMAIN:?}/oauth/client-metadata/v1.json
       Plugins__Mcp__Client__JwksUrl: https://${API_DOMAIN:?}/oauth/client-metadata/jwks.json
       Plugins__Mcp__Client__ClientUri: https://${APP_DOMAIN:?}
-      # Native Google Drive & Calendar plugin (WT-565). Optional: the row stays visible but
-      # cannot connect until these are set.
-      Plugins__GoogleWorkspace__OAuth__ClientId: ${GOOGLE_WORKSPACE_CLIENT_ID:-}
-      Plugins__GoogleWorkspace__OAuth__ClientSecret: ${GOOGLE_WORKSPACE_CLIENT_SECRET:-}
+      # Native Google Drive & Calendar plugin (WT-565). `:?` rather than `:-`, because the
+      # optional reading cost a release: an unset client id started the service cleanly, showed
+      # the plugin row as connectable, and failed only on Google's consent screen with "Missing
+      # required parameter: client_id". Refusing to start names the missing key at deploy time.
+      Plugins__GoogleWorkspace__OAuth__ClientId: ${GOOGLE_WORKSPACE_CLIENT_ID:?}
+      Plugins__GoogleWorkspace__OAuth__ClientSecret: ${GOOGLE_WORKSPACE_CLIENT_SECRET:?}
       Plugins__GoogleWorkspace__OAuth__RedirectUri: https://${API_DOMAIN:?}/api/v1/assistant/plugins/google_workspace/oauth/callback
       # Every plugin secret and user token in assistant.plugins / plugin_connections is
       # encrypted with this key ring. Without a persisted ring each deploy would mint a new
