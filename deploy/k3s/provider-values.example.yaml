@@ -37,3 +37,12 @@ costObservability:
     voiceCloneUsd: "CHANGE_ME"
     livekitUsd: "CHANGE_ME"
     objectStorageGb: "CHANGE_ME"
+# The assistant service's data protection key ring, which encrypts every plugin secret and user
+# OAuth token. Both replicas read one ring, so this must name a ReadWriteMany class - the block
+# class used for the data chart cannot satisfy the claim, and an empty value would land it on
+# whatever the cluster calls default. A PVC spec is immutable once created, so correcting this
+# later means deleting the claim, which discards the ring.
+workloads:
+  assistant-service:
+    persistence:
+      storageClass: CHANGE_ME-rwx

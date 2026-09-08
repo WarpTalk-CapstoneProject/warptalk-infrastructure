@@ -15,6 +15,7 @@ required_files=(
   "$CHART_DIR/templates/pdbs.yaml"
   "$CHART_DIR/templates/hpas.yaml"
   "$CHART_DIR/templates/ingress.yaml"
+  "$CHART_DIR/templates/pvcs.yaml"
   "$CHART_DIR/templates/certificate.yaml"
   "$CHART_DIR/templates/security-headers.yaml"
   "$CHART_DIR/templates/telemetry.yaml"
@@ -175,6 +176,59 @@ if printf '%s\n' "$frontend_document" | grep -Fq "secretKeyRef:"; then
 fi
 [[ "$(grep -Fc "name: RabbitMq__Username" "$deployment_documents")" -eq 3 ]] || {
   echo "RabbitMQ credentials must be scoped to the three RabbitMQ consumers" >&2
+  exit 1
+}
+
+# The assistant plugin surface. Every key below was in deploy/production/app.compose.yml and in
+# no k3s file: the chart would have started assistant-service with no plugin client identity and
+# an in-memory key ring, which is the failure that does not announce itself.
+assistant_document="$(awk 'BEGIN { RS="---" } /kind: Deployment/ && /name: assistant-service/ && !/HorizontalPodAutoscaler/ { print }' "$RENDERED_FILE")"
+[[ -n "$assistant_document" ]] || {
+  echo "could not find the assistant-service Deployment in the rendered chart" >&2
+  exit 1
+}
+for assistant_key in \
+  Plugins__Mcp__Client__RedirectUri \
+  Plugins__Mcp__Client__ClientMetadataUrl \
+  Plugins__Mcp__Client__JwksUrl \
+  Plugins__Mcp__Client__ClientUri \
+  Plugins__GoogleWorkspace__OAuth__RedirectUri \
+  Plugins__GoogleWorkspace__OAuth__ClientId \
+  Plugins__GoogleWorkspace__OAuth__ClientSecret \
+  DataProtection__KeyRingPath; do
+  printf '%s\n' "$assistant_document" | grep -Fq "$assistant_key" || {
+    echo "assistant-service must carry $assistant_key, as production compose does" >&2
+    exit 1
+  }
+done
+printf '%s\n' "$assistant_document" | grep -Fq "claimName: assistant-service-keyring" || {
+  echo "the assistant key ring must outlive the pod, or a rollout orphans every plugin token written before it" >&2
+  exit 1
+}
+printf '%s\n' "$assistant_document" | grep -Fq "fsGroup:" || {
+  echo "a root-owned key ring volume is unwritable by a non-root container; the pod needs fsGroup" >&2
+  exit 1
+}
+# The claim itself, not the template that writes it: assistant-service runs more than one pod, so
+# anything short of RWX gives one of them a key ring the other is not reading.
+keyring_claim="$(awk 'BEGIN { RS="---" } /kind: PersistentVolumeClaim/ && /assistant-service-keyring/ { print }' "$RENDERED_FILE")"
+printf '%s\n' "$keyring_claim" | grep -Fq "accessModes: [ReadWriteMany]" || {
+  echo "the assistant key ring claim must be ReadWriteMany while the workload runs more than one pod" >&2
+  exit 1
+}
+printf '%s\n' "$keyring_claim" | grep -Fq "helm.sh/resource-policy: keep" || {
+  echo "uninstalling the release must not take the key ring with it" >&2
+  exit 1
+}
+printf '%s\n' "$assistant_document" | grep -Fq "mountPath: /var/lib/warptalk/keys"
+# The CIMD document has to reach the gateway, or an authorization server cannot resolve the client
+# id the service advertises. Checking the path alone would pass with it routed to the frontend,
+# which is exactly the bug.
+ingress_document="$(awk 'BEGIN { RS="---" } /kind: Ingress/ { print }' "$RENDERED_FILE")"
+printf '%s\n' "$ingress_document" |
+  grep -A4 -F "path: /oauth/client-metadata" |
+  grep -Fq "name: gateway" || {
+  echo "/oauth/client-metadata must route to the gateway, not the frontend" >&2
   exit 1
 }
 for secret_key in \

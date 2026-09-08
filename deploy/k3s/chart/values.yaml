@@ -334,11 +334,43 @@ workloads:
     cpuLimit: "1"
     memoryLimit: 768Mi
     autoscaling: {enabled: true, min: 2, max: 5, cpu: 70}
+    # The plugin surface (WT-565/WT-602). These sit on the workload rather than in the shared
+    # ConfigMap because this is the only service that reads them, and a key ring path means
+    # nothing to a pod without the claim below. Values go through `tpl`, so global.domain stays
+    # the one place the host is written down: this chart serves a single host with /api and
+    # /oauth routed to the gateway, where production compose splits APP_DOMAIN from API_DOMAIN.
+    env:
+      Plugins__Mcp__Client__RedirectUri: https://{{ .Values.global.domain }}/api/v1/assistant/plugins/mcp/oauth/callback
+      Plugins__Mcp__Client__ClientMetadataUrl: https://{{ .Values.global.domain }}/oauth/client-metadata/v1.json
+      Plugins__Mcp__Client__JwksUrl: https://{{ .Values.global.domain }}/oauth/client-metadata/jwks.json
+      Plugins__Mcp__Client__ClientUri: https://{{ .Values.global.domain }}
+      # Kept in step with deploy/production/app.compose.yml. WT-646 moves this to the
+      # provider-scoped /plugins/oauth/google/callback when the split catalog lands; both
+      # files move together, and Cloud Console has to learn the new URI first.
+      Plugins__GoogleWorkspace__OAuth__RedirectUri: https://{{ .Values.global.domain }}/api/v1/assistant/plugins/google_workspace/oauth/callback
+      # Every plugin secret and user token in assistant.plugins / plugin_connections is encrypted
+      # with this ring. Program.cs takes the path silently when it is absent and keeps the keys in
+      # memory, so an unset value here is not an error anywhere - it is a rollout that orphans
+      # every token written before it.
+      DataProtection__KeyRingPath: /var/lib/warptalk/keys
+    persistence:
+      name: keyring
+      mountPath: /var/lib/warptalk/keys
+      size: 1Gi
+      # Both replicas read one ring, so this has to be RWX. pvcs.yaml refuses the combination
+      # that would hand each pod its own keys instead.
+      accessMode: ReadWriteMany
+      storageClass: ""
     secretEnv:
       ConnectionStrings__AssistantDb: ASSISTANT_CONNECTION_STRING
       Jwt__SecretKey: JWT_SECRET
       Grpc__InternalSecret: GRPC_INTERNAL_SECRET
       Redis__ConnectionString: Redis__ConnectionString
+      # A secretKeyRef to a key the runtime secret does not carry leaves the pod in
+      # CreateContainerConfigError, which is the loud half of the lesson from the release where
+      # an unset client id started cleanly and died on Google's consent screen instead.
+      Plugins__GoogleWorkspace__OAuth__ClientId: GOOGLE_WORKSPACE_CLIENT_ID
+      Plugins__GoogleWorkspace__OAuth__ClientSecret: GOOGLE_WORKSPACE_CLIENT_SECRET
   stt-worker:
     image: ai-stt
     workerHealthName: stt
