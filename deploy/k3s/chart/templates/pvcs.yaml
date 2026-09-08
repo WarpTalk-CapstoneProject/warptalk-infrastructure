@@ -1,0 +1,32 @@
+{{- /*
+A workload that declares `persistence` keeps something across a pod's life. So far that is one
+thing: the assistant service's data protection key ring, which encrypts every plugin secret and
+user OAuth token in the assistant schema. An emptyDir would satisfy the mount and lose the ring on
+the next rollout, and the service does not complain — it mints a new one and the rows written by
+the old one stop decrypting. Hence a claim, kept past `helm uninstall`.
+*/ -}}
+{{- range $name, $app := .Values.workloads }}
+{{- with $app.persistence }}
+{{- if and (gt (int $app.replicas) 1) (ne .accessMode "ReadWriteMany") }}
+{{- fail (printf "workloads.%s runs %d replicas and mounts a persistent volume, so persistence.accessMode must be ReadWriteMany — with ReadWriteOnce the second pod cannot read what the first one wrote. Either point storageClass at an RWX class or drop the workload (and its autoscaling minimum) to one replica." $name (int $app.replicas)) }}
+{{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-{{ .name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    {{- include "warptalk.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ .accessMode }}]
+  {{- with .storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .size }}
+{{- end }}
+{{- end }}

@@ -9,6 +9,10 @@ credentials never belong in Git.
 - Kubernetes/K3s `>= 1.29.0`.
 - At least three failure-domain-separated nodes for quorum workloads.
 - A replicated NVMe `StorageClass`.
+- A `ReadWriteMany` `StorageClass` for the assistant service's data protection key
+  ring. Both replicas read one ring, so `pvcs.yaml` refuses to render the
+  ReadWriteOnce-with-two-replicas combination that would hand each pod its own keys
+  and orphan every plugin token the other one wrote.
 - A provider LoadBalancer implementation for Traefik.
 - A production `ClusterSecretStore`.
 - DNS for the application domain.

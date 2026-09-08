@@ -68,6 +68,10 @@ spec:
             - configMapRef:
                 name: warptalk-runtime
           env:
+          {{- range $envName, $value := $app.env }}
+            - name: {{ $envName }}
+              value: {{ tpl $value $ | quote }}
+          {{- end }}
           {{- range $envName, $secretKey := $app.secretEnv }}
             - name: {{ $envName }}
               valueFrom:
@@ -138,11 +142,20 @@ spec:
             - name: application-cache
               mountPath: {{ . }}
             {{- end }}
+            {{- with $app.persistence }}
+            - name: {{ $name }}-{{ .name }}
+              mountPath: {{ .mountPath }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
         {{- with $app.writableCachePath }}
         - name: application-cache
           emptyDir: {}
+        {{- end }}
+        {{- with $app.persistence }}
+        - name: {{ $name }}-{{ .name }}
+          persistentVolumeClaim:
+            claimName: {{ $name }}-{{ .name }}
         {{- end }}
 {{- end }}

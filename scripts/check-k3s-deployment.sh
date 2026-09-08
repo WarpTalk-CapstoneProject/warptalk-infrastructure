@@ -177,6 +177,36 @@ fi
   echo "RabbitMQ credentials must be scoped to the three RabbitMQ consumers" >&2
   exit 1
 }
+
+# The assistant plugin surface. Every key below was in deploy/production/app.compose.yml and in
+# no k3s file: the chart would have started assistant-service with no plugin client identity and
+# an in-memory key ring, which is the failure that does not announce itself.
+assistant_document="$(awk 'BEGIN { RS="---" } /kind: Deployment/ && /name: assistant-service/ { print }' "$RENDERED_FILE")"
+for assistant_key in \
+  Plugins__Mcp__Client__RedirectUri \
+  Plugins__Mcp__Client__ClientMetadataUrl \
+  Plugins__Mcp__Client__JwksUrl \
+  Plugins__Mcp__Client__ClientUri \
+  Plugins__GoogleWorkspace__OAuth__RedirectUri \
+  Plugins__GoogleWorkspace__OAuth__ClientId \
+  Plugins__GoogleWorkspace__OAuth__ClientSecret \
+  DataProtection__KeyRingPath; do
+  printf '%s\n' "$assistant_document" | grep -Fq "$assistant_key" || {
+    echo "assistant-service must carry $assistant_key, as production compose does" >&2
+    exit 1
+  }
+done
+printf '%s\n' "$assistant_document" | grep -Fq "claimName: assistant-service-keyring" || {
+  echo "the assistant key ring must outlive the pod, or a rollout orphans every plugin token written before it" >&2
+  exit 1
+}
+grep -Fq "kind: PersistentVolumeClaim" "$RENDERED_FILE"
+grep -Fq "helm.sh/resource-policy: keep" "$RENDERED_FILE"
+grep -Fq "mountPath: /var/lib/warptalk/keys" "$RENDERED_FILE"
+# The CIMD document has to be reachable, or an authorization server cannot resolve the client id
+# the service advertises.
+grep -Fq "path: /oauth/client-metadata" "$RENDERED_FILE"
+grep -Fq "ReadWriteMany" "$CHART_DIR/templates/pvcs.yaml"
 for secret_key in \
   AUTH_CONNECTION_STRING \
   WORKSPACE_CONNECTION_STRING \
