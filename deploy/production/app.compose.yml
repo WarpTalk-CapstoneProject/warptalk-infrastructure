@@ -394,7 +394,17 @@ services:
       # required parameter: client_id". Refusing to start names the missing key at deploy time.
       Plugins__GoogleWorkspace__OAuth__ClientId: ${GOOGLE_WORKSPACE_CLIENT_ID:?}
       Plugins__GoogleWorkspace__OAuth__ClientSecret: ${GOOGLE_WORKSPACE_CLIENT_SECRET:?}
-      Plugins__GoogleWorkspace__OAuth__RedirectUri: https://${API_DOMAIN:?}/api/v1/assistant/plugins/google_workspace/oauth/callback
+      # WT-646: one redirect URI for the whole provider - google_drive, google_calendar and
+      # google_meet share this OAuth client, and the plugin key travels in the protected
+      # state. Google matches this string exactly on both legs, so it has to be registered
+      # in Cloud Console before a deploy carrying it.
+      Plugins__GoogleWorkspace__OAuth__RedirectUri: https://${API_DOMAIN:?}/api/v1/assistant/plugins/oauth/google/callback
+      # The retired per-plugin URI, kept only long enough to redeem codes that were already
+      # authorized against it when this deploy landed. Google matches the token exchange
+      # against the URI the consent started with, so a flow in flight can be finished with
+      # nothing else. An authorization code lives minutes: once a deploy has settled,
+      # delete this line, the legacy route and the Cloud Console entry together.
+      Plugins__GoogleWorkspace__OAuth__LegacyRedirectUri: https://${API_DOMAIN:?}/api/v1/assistant/plugins/google_workspace/oauth/callback
       # Every plugin secret and user token in assistant.plugins / plugin_connections is
       # encrypted with this key ring. Without a persisted ring each deploy would mint a new
       # one and silently orphan everything written before it.

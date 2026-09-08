@@ -344,10 +344,17 @@ workloads:
       Plugins__Mcp__Client__ClientMetadataUrl: https://{{ .Values.global.domain }}/oauth/client-metadata/v1.json
       Plugins__Mcp__Client__JwksUrl: https://{{ .Values.global.domain }}/oauth/client-metadata/jwks.json
       Plugins__Mcp__Client__ClientUri: https://{{ .Values.global.domain }}
-      # Kept in step with deploy/production/app.compose.yml. WT-646 moves this to the
-      # provider-scoped /plugins/oauth/google/callback when the split catalog lands; both
-      # files move together, and Cloud Console has to learn the new URI first.
-      Plugins__GoogleWorkspace__OAuth__RedirectUri: https://{{ .Values.global.domain }}/api/v1/assistant/plugins/google_workspace/oauth/callback
+      # Kept in step with deploy/production/app.compose.yml: one redirect URI for the whole
+      # provider, with the plugin key in the protected state. Google matches it exactly on both
+      # the authorization request and the token exchange, so Cloud Console has to carry this
+      # exact string - a deployment whose console entry names the old per-plugin path cannot
+      # connect any Google plugin at all.
+      Plugins__GoogleWorkspace__OAuth__RedirectUri: https://{{ .Values.global.domain }}/api/v1/assistant/plugins/oauth/google/callback
+      # The retired per-plugin URI, which only finishes consents that were already authorized
+      # against it when the deploy landed. Both URIs have to be registered in Cloud Console while
+      # this is set; an authorization code lives minutes, so once a deploy has settled, delete
+      # this line, the legacy route and the console entry together.
+      Plugins__GoogleWorkspace__OAuth__LegacyRedirectUri: https://{{ .Values.global.domain }}/api/v1/assistant/plugins/google_workspace/oauth/callback
       # Every plugin secret and user token in assistant.plugins / plugin_connections is encrypted
       # with this ring. Program.cs takes the path silently when it is absent and keeps the keys in
       # memory, so an unset value here is not an error anywhere - it is a rollout that orphans
