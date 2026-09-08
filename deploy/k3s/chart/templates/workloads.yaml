@@ -31,6 +31,14 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+        {{- with $app.persistence }}
+        # A freshly provisioned volume belongs to root, and kubelet only re-groups it when fsGroup
+        # says so. The .NET images run as $APP_UID (1654) with a read-only root filesystem, so
+        # without this the first write to the key ring throws and every plugin connect 500s -
+        # after readiness has already passed, because nothing touches the ring at startup.
+        fsGroup: {{ .fsGroup | default 1654 }}
+        fsGroupChangePolicy: OnRootMismatch
+        {{- end }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -70,7 +78,7 @@ spec:
           env:
           {{- range $envName, $value := $app.env }}
             - name: {{ $envName }}
-              value: {{ tpl $value $ | quote }}
+              value: {{ tpl (toString $value) $ | quote }}
           {{- end }}
           {{- range $envName, $secretKey := $app.secretEnv }}
             - name: {{ $envName }}

@@ -4,11 +4,21 @@ thing: the assistant service's data protection key ring, which encrypts every pl
 user OAuth token in the assistant schema. An emptyDir would satisfy the mount and lose the ring on
 the next rollout, and the service does not complain — it mints a new one and the rows written by
 the old one stop decrypting. Hence a claim, kept past `helm uninstall`.
+
+A PVC spec is immutable once created, and `resource-policy: keep` means Helm will never replace it
+for you, so both guards below run before the first install rather than after the first incident.
 */ -}}
 {{- range $name, $app := .Values.workloads }}
 {{- with $app.persistence }}
-{{- if and (gt (int $app.replicas) 1) (ne .accessMode "ReadWriteMany") }}
-{{- fail (printf "workloads.%s runs %d replicas and mounts a persistent volume, so persistence.accessMode must be ReadWriteMany — with ReadWriteOnce the second pod cannot read what the first one wrote. Either point storageClass at an RWX class or drop the workload (and its autoscaling minimum) to one replica." $name (int $app.replicas)) }}
+{{- $peak := int $app.replicas }}
+{{- if and $app.autoscaling $app.autoscaling.enabled }}
+{{- $peak = max $peak (int $app.autoscaling.max) }}
+{{- end }}
+{{- if and (gt $peak 1) (ne .accessMode "ReadWriteMany") }}
+{{- fail (printf "workloads.%s can run %d pods at once and mounts a persistent volume, so persistence.accessMode must be ReadWriteMany — with ReadWriteOnce the second pod either cannot attach the volume or quietly gets a ring the first one is not reading. Either point persistence.storageClass at an RWX class, or drop both replicas and autoscaling.max to 1." $name $peak) }}
+{{- end }}
+{{- if and $.Values.global.production (not .storageClass) }}
+{{- fail (printf "workloads.%s.persistence.storageClass is empty, so the claim would land on whatever the cluster calls default — usually the block class, which cannot satisfy ReadWriteMany. Name the RWX class in the provider values file; the spec is immutable afterwards, so this is not a decision that can be corrected in place." $name) }}
 {{- end }}
 ---
 apiVersion: v1
