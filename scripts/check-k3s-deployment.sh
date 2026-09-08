@@ -192,7 +192,7 @@ for assistant_key in \
   Plugins__Mcp__Client__ClientMetadataUrl \
   Plugins__Mcp__Client__JwksUrl \
   Plugins__Mcp__Client__ClientUri \
-  Plugins__GoogleWorkspace__OAuth__RedirectUri \
+  Plugins__GoogleWorkspace__OAuth__RedirectUri \n  Plugins__GoogleWorkspace__OAuth__LegacyRedirectUri \
   Plugins__GoogleWorkspace__OAuth__ClientId \
   Plugins__GoogleWorkspace__OAuth__ClientSecret \
   DataProtection__KeyRingPath; do
