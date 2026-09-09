@@ -334,6 +334,9 @@ services:
       Smtp__Password: ${SMTP_PASSWORD}
       Smtp__FromEmail: ${SMTP_FROM_EMAIL}
       Smtp__FromName: ${SMTP_FROM_NAME}
+      # DOCX -> PDF for exported biên bản. Optional: with this unset the service still serves
+      # Word files, and the PDF button reports the format as unavailable rather than failing.
+      Gotenberg__Url: ${GOTENBERG_URL:-http://gotenberg:3000}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -343,6 +346,35 @@ services:
         condition: service_healthy
       auth-service:
         condition: service_started
+      gotenberg:
+        condition: service_started
+    networks:
+      - warptalk-net
+
+  # ── Gotenberg — DOCX to PDF ───────────────────────────────────────
+  # LibreOffice behind an HTTP call, as its own container.
+  #
+  # The exported biên bản is written once, as .docx, and the PDF is a CONVERSION of that file —
+  # never a second layout rendered from the same data. Two renderers would agree the day they were
+  # written and drift from then on, and a signed record whose Word copy and PDF copy differ is
+  # worse than having no PDF at all.
+  #
+  # A sidecar rather than LibreOffice inside translation-room-service: soffice wants a writable
+  # HOME, dislikes concurrency, and leaves processes behind when a document hangs it. Here that
+  # costs one container restart instead of the API's memory and file descriptors.
+  gotenberg:
+    image: gotenberg/gotenberg:8.21.1
+    container_name: warptalk-gotenberg
+    # Conversion only. Chromium's HTML/URL routes stay off because nothing here needs them, and a
+    # browser that fetches arbitrary URLs on request is a server-side request forgery engine.
+    command:
+      - gotenberg
+      - --chromium-disable-javascript=true
+      - --api-timeout=60s
+    # No published port: only translation-room-service talks to it, over the internal network.
+    expose:
+      - "3000"
+    restart: unless-stopped
     networks:
       - warptalk-net
 
