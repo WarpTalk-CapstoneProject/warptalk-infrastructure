@@ -12,6 +12,13 @@ data:
   AllowedOrigins__0: {{ printf "https://%s" .Values.global.domain | quote }}
   AppBaseUrl: {{ printf "https://%s" .Values.global.domain | quote }}
   App__FrontendBaseUrl: {{ printf "https://%s" .Values.global.domain | quote }}
+  # WT-644: the page LiveKit's recorder opens instead of its built-in grid layout. Without it
+  # RoomComposite records the mixed room — the speech PLUS every tts_worker dub, all languages at
+  # once — because the egress request has no include/exclude field (livekit/egress#923). The
+  # template subscribes to people only; see deploy/production/app.compose.yml for the full note.
+  # Derived from global.domain like the URLs above, because the recorder's headless Chrome runs in
+  # LiveKit's network and has to be able to reach it.
+  LiveKit__Egress__TemplateBaseUrl: {{ printf "https://%s/egress/composite" .Values.global.domain | quote }}
   Stripe__SuccessUrl: {{ printf "https://%s/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}" .Values.global.domain | quote }}
   Stripe__CancelUrl: {{ printf "https://%s/workspace/payment/plans" .Values.global.domain | quote }}
   {{- range $key, $value := .Values.config }}
