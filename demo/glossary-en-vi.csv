@@ -1,0 +1,29 @@
+Term,Translation,Definition,UsageNote
+PO,đơn đặt hàng,Purchase order - chứng từ khách hàng phát hành để đặt hàng chính thức,Mua bán - dạng nói tắt của purchase order
+SOW,phạm vi công việc,Statement of work - tài liệu mô tả chi tiết công việc phải thực hiện,Hợp đồng - dạng nói tắt của statement of work
+SLA,cam kết mức dịch vụ,Service level agreement - cam kết về chất lượng và thời gian phản hồi,Hợp đồng - dạng nói tắt của service level agreement
+NDA,thoả thuận bảo mật thông tin,Non-disclosure agreement - cam kết không tiết lộ thông tin đối tác,Pháp lý - dạng nói tắt của non-disclosure agreement
+MSA,hợp đồng khung dịch vụ,Master service agreement - hợp đồng khung áp dụng cho nhiều đơn hàng,Hợp đồng - dạng nói tắt của master service agreement
+UAT,kiểm thử chấp nhận người dùng,User acceptance testing - khách hàng kiểm tra trước khi ký nghiệm thu,Dự án - dạng nói tắt của user acceptance testing
+purchase order,đơn đặt hàng,Chứng từ khách hàng phát hành để đặt hàng chính thức,Mua bán - dạng nói đầy đủ của PO
+statement of work,phạm vi công việc,Tài liệu mô tả chi tiết công việc phải thực hiện,Hợp đồng - dạng nói đầy đủ của SOW
+service level agreement,cam kết mức dịch vụ,Cam kết về mức chất lượng và thời gian phản hồi,Hợp đồng - dạng nói đầy đủ của SLA
+non-disclosure agreement,thoả thuận bảo mật thông tin,Cam kết không tiết lộ thông tin của đối tác,Pháp lý - dạng nói đầy đủ của NDA
+master service agreement,hợp đồng khung dịch vụ,Hợp đồng khung áp dụng cho nhiều đơn hàng về sau,Hợp đồng - dạng nói đầy đủ của MSA
+user acceptance testing,kiểm thử chấp nhận người dùng,Giai đoạn khách hàng kiểm tra trước khi ký nghiệm thu,Dự án - dạng nói đầy đủ của UAT
+milestone payment,thanh toán theo mốc,Thanh toán khi hoàn thành từng mốc bàn giao,Tài chính - gắn với biên bản nghiệm thu
+accounts receivable,công nợ phải thu,Khoản khách hàng còn nợ công ty,Tài chính - phải phân biệt với công nợ phải trả
+accounts payable,công nợ phải trả,Khoản công ty còn nợ nhà cung cấp,Tài chính - phải phân biệt với công nợ phải thu
+change request,yêu cầu thay đổi phạm vi,Đề nghị thay đổi so với phạm vi đã thống nhất trong hợp đồng,Dự án - đọc tắt là CR
+scope creep,phình phạm vi công việc,Phạm vi mở rộng dần mà không điều chỉnh hợp đồng,Dự án - không dịch theo nghĩa đen
+go-live,đưa vào vận hành chính thức,Thời điểm hệ thống bắt đầu phục vụ người dùng thật,Dự án - không dịch là phát trực tiếp
+rate card,bảng giá nhân sự,Bảng đơn giá theo từng vị trí và cấp bậc,Thương mại - dùng khi báo giá cho khách
+man-month,người-tháng,Đơn vị ước lượng khối lượng công việc,Thương mại - dùng khi ước lượng dự án
+quarterly business review,họp đánh giá kinh doanh hàng quý,Buổi rà soát kết quả hợp tác với khách hàng mỗi quý,Thương mại - đọc tắt là QBR
+cash flow,dòng tiền,Dòng tiền vào và ra trong kỳ báo cáo,Tài chính
+working capital,vốn lưu động,Phần vốn dùng cho hoạt động thường ngày,Tài chính
+headcount,định biên nhân sự,Số lượng nhân sự được duyệt cho từng bộ phận,Nhân sự - đồng nghĩa với headcount plan
+onboarding,quy trình tiếp nhận nhân sự mới,Quy trình đưa người mới vào việc,Nhân sự - không dịch theo nghĩa đen
+probation,thử việc,Giai đoạn trước khi ký hợp đồng chính thức,Nhân sự
+bill of lading,vận đơn,Chứng từ vận chuyển hàng hoá,Xuất nhập khẩu - đọc tắt là BL
+customs declaration,tờ khai hải quan,Hồ sơ khai báo hàng hoá xuất nhập khẩu,Xuất nhập khẩu

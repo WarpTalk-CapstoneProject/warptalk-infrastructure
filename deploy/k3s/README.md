@@ -9,6 +9,15 @@ credentials never belong in Git.
 - Kubernetes/K3s `>= 1.29.0`.
 - At least three failure-domain-separated nodes for quorum workloads.
 - A replicated NVMe `StorageClass`.
+- A `ReadWriteMany` `StorageClass` for the assistant service's data protection key
+  ring, named in `workloads.assistant-service.persistence.storageClass` in the
+  provider values file. Both replicas read one ring, so `pvcs.yaml` refuses to render
+  the ReadWriteOnce-with-more-than-one-pod combination that would hand each pod its own
+  keys, and refuses an empty class in production rather than letting the claim land on
+  whatever the cluster calls default. Choose it before the first install: a PVC spec is
+  immutable, `helm.sh/resource-policy: keep` means Helm will not replace it, and
+  deleting the claim to change the class discards the ring - which orphans every plugin
+  secret and user OAuth token encrypted with it.
 - A provider LoadBalancer implementation for Traefik.
 - A production `ClusterSecretStore`.
 - DNS for the application domain.

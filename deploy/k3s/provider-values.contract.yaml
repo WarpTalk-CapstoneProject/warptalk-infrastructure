@@ -33,3 +33,7 @@ costObservability:
     voiceCloneUsd: "100"
     livekitUsd: "100"
     objectStorageGb: "100"
+workloads:
+  assistant-service:
+    persistence:
+      storageClass: contract-rwx

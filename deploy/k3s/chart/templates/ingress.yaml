@@ -28,6 +28,16 @@ spec:
               service:
                 name: gateway
                 port: {number: 5200}
+          # The Client ID Metadata Document and its JWKS. An MCP authorization server fetches
+          # these by URL to learn who WarpTalk is, and the gateway forwards /oauth/client-metadata
+          # to the assistant service; without this rule they resolve to the frontend and CIMD
+          # registration falls back to DCR, or fails outright where DCR is not offered.
+          - path: /oauth/client-metadata
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port: {number: 5200}
           - path: /
             pathType: Prefix
             backend:
