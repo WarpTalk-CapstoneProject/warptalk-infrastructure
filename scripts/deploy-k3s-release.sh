@@ -109,11 +109,17 @@ image_count="$(grep -Ec '^[[:space:]]+image: ".+@sha256:[a-f0-9]{64}"$' "$render
 expected_image_count="$(jq '[.images[] | select(.k3s != false)] | length' "$matrix_file")"
 otel_image_count="$(grep -Fc "$OTEL_COLLECTOR_IMAGE_DIGEST" "$rendered_file")"
 sql_exporter_image_count="$(grep -Fc "$SQL_EXPORTER_IMAGE_DIGEST" "$rendered_file")"
+# The document converter is a third-party image like the two above: it is not built from this
+# release, so it is pinned in addons.lock.env rather than in the image matrix, and the count below
+# has to know about it or every release fails on an image it deliberately added.
+gotenberg_image_count="$(grep -Fc "$GOTENBERG_IMAGE_DIGEST" "$rendered_file")"
 [ "$otel_image_count" -eq 1 ] ||
   fail "rendered release must contain one locked telemetry collector image"
 [ "$sql_exporter_image_count" -eq 3 ] ||
   fail "rendered release must contain three locked SQL cost exporters"
-platform_image_count=$((otel_image_count + sql_exporter_image_count))
+[ "$gotenberg_image_count" -eq 1 ] ||
+  fail "rendered release must contain one locked document converter image"
+platform_image_count=$((otel_image_count + sql_exporter_image_count + gotenberg_image_count))
 expected_total_image_count=$((expected_image_count + platform_image_count))
 [ "$image_count" -eq "$expected_total_image_count" ] ||
   fail "rendered $image_count immutable images; expected $expected_image_count release plus $platform_image_count locked platform images"
