@@ -254,17 +254,86 @@ services:
       Smtp__Password: ${SMTP_PASSWORD:?}
       Smtp__FromEmail: ${SMTP_FROM_EMAIL:?}
       Smtp__FromName: ${SMTP_FROM_NAME:-WarpTalk}
+      # DOCX -> PDF for the exported biên bản. The backend reads Gotenberg:Url and falls back
+      # to this variable; UNSET is a supported state, and it is the state production has been
+      # in since the feature shipped — the service serves the .docx and answers every PDF
+      # request 503, forever, with nothing in any log calling that a fault. The default is the
+      # internal service below, so the only way to be dark now is to set it to something wrong.
+      Gotenberg__Url: ${GOTENBERG_URL:-http://gotenberg:3000}
     depends_on:
       migrator:
         condition: service_completed_successfully
       auth-service:
         condition: service_healthy
+      # service_started, not service_healthy: a converter that cannot start must cost the PDF
+      # button, not the room service. The 503 path is the designed degradation — waiting on
+      # this container to be healthy would turn an optional format into a startup dependency.
+      gotenberg:
+        condition: service_started
     healthcheck: *dotnet-healthcheck
     deploy:
       resources:
         limits:
           cpus: "0.75"
           memory: 640M
+
+  # ── Gotenberg — DOCX to PDF ─────────────────────────────────────────────────
+  # LibreOffice behind an HTTP call, as its own container. The exported biên bản is written
+  # once, as .docx, and the PDF is a CONVERSION of that file — never a second layout rendered
+  # from the same data. See docker-compose.yml for the full reasoning; the short version is
+  # that two renderers would agree the day they were written and drift from then on, and a
+  # signed record whose Word copy and PDF copy differ is worse than having no PDF at all.
+  #
+  # Third-party image, so it is pinned by digest like migrator and caddy, and it is absent
+  # from image-matrix.json on purpose: no release rewrites this tag.
+  gotenberg:
+    <<: *service-defaults
+    image: gotenberg/gotenberg:8.21.1@sha256:91486863744f7420ca985ee6cef7c216910e40faffd378f3da7c0fad724d01ba
+    # Conversion only. Chromium's HTML/URL routes stay off because nothing here needs them, and
+    # a browser that fetches arbitrary URLs on request is a server-side request forgery engine
+    # sitting on app-net, one hop from every service's private port.
+    #
+    # --libreoffice-start-timeout is the one flag docker-compose.yml does not carry, because it
+    # only bites where a CPU limit exists. Gotenberg starts soffice lazily and, by default,
+    # restarts it after every 10 conversions, so a COLD start is not a boot-time event — it
+    # recurs during ordinary use. Measured against this exact digest, read-only, cap-dropped,
+    # with one document in flight: 0.50 CPU took 59s to start soffice, 1.0 CPU took 17s, and
+    # the stock 20s start timeout answers 503 the moment it is missed. That 503 is byte-for-byte
+    # the one an unconfigured converter returns, so a too-tight limit here would look exactly
+    # like the bug this file is fixing. Hence 1.0 CPU below AND a timeout with room in it.
+    command:
+      - gotenberg
+      - --chromium-disable-javascript=true
+      - --api-timeout=60s
+      - --libreoffice-start-timeout=60s
+    # No published port, and none may be added: only translation-room-service talks to it, over
+    # app-net. The App VM's port contract is that caddy alone publishes.
+    expose:
+      - "3000"
+    # service-defaults gives every service a read-only root and one 64 MiB /tmp. soffice needs
+    # more than that: it wants a writable HOME, and it writes both a throwaway user profile and
+    # the document under TMPDIR. Both get a tmpfs rather than a relaxed root filesystem.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+      - /home/gotenberg:rw,noexec,nosuid,size=64m
+    # Its own check rather than the shared *dotnet-healthcheck anchor, which hard-codes
+    # /health/ready and $HEALTH_PORT. /health here reports chromium and libreoffice separately
+    # and the API serves it before either has been started, so a green check means "the
+    # converter is reachable", not "a conversion will succeed".
+    healthcheck:
+      test: ["CMD", "curl", "--silent", "--fail", "http://127.0.0.1:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          # See the command block: below 1.0 the first conversion after a soffice restart 503s.
+          # Memory is the opposite story — the same measurement peaked at 132 MiB converting a
+          # biên bản, so 512M is deliberate headroom rather than a measured ceiling.
+          cpus: "1.0"
+          memory: 512M
 
   transcript-service:
     <<: *service-defaults

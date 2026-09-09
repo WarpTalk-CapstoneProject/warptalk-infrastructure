@@ -29,3 +29,31 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: monitoring
   policyTypes: [Ingress]
+---
+# Gotenberg is the only workload in this namespace carrying a browser and a document converter,
+# and translation-room-service is the only pod with any business calling it. Nothing routes to it
+# from outside: it has no Ingress path, and traefik reaches it only through the rule above.
+#
+# READ THE UNION, NOT THE NAME. NetworkPolicies are additive, and allow-warptalk-internal already
+# admits every pod in this namespace to every pod labelled part-of: warptalk, gotenberg included.
+# So this rule records who the caller is meant to be; today it does not exclude anyone else.
+# Making it exclusive means taking gotenberg out of that broad selector, which changes how this
+# chart labels a workload — a deliberate decision, not a tidy-up, and not one to make in the
+# change that is only trying to stop production answering 503 to every PDF.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gotenberg-from-translation-room
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gotenberg
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: translation-room-service
+      ports:
+        - protocol: TCP
+          port: 3000
+  policyTypes: [Ingress]

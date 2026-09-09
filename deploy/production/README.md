@@ -4,7 +4,7 @@ The Vietnix resource pool is deployed as three independently managed VMs:
 
 | VM | Capacity | Storage | Workload |
 |---|---:|---:|---|
-| App | 8 vCPU / 16 GiB | 60 GiB root | Caddy, web, gateway, .NET services, AI workers |
+| App | 8 vCPU / 16 GiB | 60 GiB root | Caddy, web, gateway, .NET services, AI workers, Gotenberg |
 | Data | 2 vCPU / 8 GiB | 20 GiB root + 35 GiB durable | PostgreSQL, PgBouncer, MinIO, Qdrant |
 | Infra | 2 vCPU / 4 GiB | 20 GiB root + 15 GiB durable | Redis, RabbitMQ, telemetry and dashboards |
 

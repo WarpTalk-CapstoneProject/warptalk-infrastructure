@@ -422,7 +422,7 @@ echo "$INFRA_JSON" | jq -e '
 ' >/dev/null || fail "every third-party Infra image must be pinned by digest"
 
 echo "$APP_JSON" | jq -e '
-  [.services.migrator.image, .services.caddy.image]
+  [.services.migrator.image, .services.caddy.image, .services.gotenberg.image]
   | all(test("@sha256:[0-9a-f]{64}$"))
 ' >/dev/null || fail "App-side third-party images must be pinned by digest"
 
@@ -460,7 +460,7 @@ assert_services "$APP_JSON" \
   transcript-service notification-service meeting-service assistant-service \
   billing-service gateway frontend stt-worker translation-worker translation-backfill-worker tts-worker \
   assistant-worker suggestion-worker embedding-worker billing-worker livekit-ingress-worker \
-  security-worker caddy
+  security-worker gotenberg caddy
 
 assert_services "$SINGLE_HOST_JSON" \
   postgres redis rabbitmq qdrant auth-service workspace-service gateway frontend caddy
@@ -696,6 +696,23 @@ echo "$APP_JSON" | jq -e '
     and (.["ConnectionStrings__TranscriptDb"] | contains("Username=warptalk_transcript"))
     and (.["ConnectionStrings__TranscriptDb"] | contains("Username=postgres") | not)
 ' >/dev/null || fail "transcript-service must use its least-privilege database login"
+
+# The converter is OPTIONAL to the backend by design: with Gotenberg:Url unset the minutes
+# export still serves .docx and reports PDF as unavailable, so nothing fails a health check, no
+# deploy stops, and no log line calls it a fault. That is why the feature shipped and stayed
+# dark here for the whole life of the release — only a comparison between the service that
+# converts and the service that is meant to do the converting can see it.
+echo "$APP_JSON" | jq -e '
+  (.services["translation-room-service"].environment["Gotenberg__Url"] // "")
+  | test("^http://gotenberg:3000$")
+' >/dev/null || fail "translation-room-service must point at the internal gotenberg converter, or every PDF export answers 503"
+
+echo "$APP_JSON" | jq -e '
+  (.services.gotenberg.expose // []) as $exposed
+  | ((.services.gotenberg.command // []) | join(" ")) as $command
+  | ($exposed | map(tostring) == ["3000"])
+    and ($command | contains("--chromium-disable-javascript=true"))
+' >/dev/null || fail "gotenberg must stay internal on 3000 with Chromium scripting disabled"
 
 echo "$APP_JSON" | jq -e '
   .services["meeting-service"].environment

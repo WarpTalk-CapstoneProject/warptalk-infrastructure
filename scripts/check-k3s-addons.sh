@@ -15,6 +15,7 @@ source "$LOCK_FILE"
 required_variables=(
   HELM_IMAGE KUBECONFORM_IMAGE
   OTEL_COLLECTOR_VERSION OTEL_COLLECTOR_IMAGE_DIGEST SQL_EXPORTER_IMAGE_DIGEST
+  GOTENBERG_VERSION GOTENBERG_IMAGE_DIGEST
   CNPG_CHART_VERSION CNPG_CHART_SHA256
   BARMAN_PLUGIN_VERSION BARMAN_PLUGIN_MANIFEST_SHA256
   RABBITMQ_OPERATOR_VERSION RABBITMQ_OPERATOR_MANIFEST_SHA256
@@ -39,6 +40,25 @@ done
 grep -Fq "$SQL_EXPORTER_IMAGE_DIGEST" \
   "$ROOT_DIR/deploy/k3s/chart/values.yaml" || {
   echo "K3s chart is missing the locked SQL exporter image digest" >&2
+  exit 1
+}
+
+grep -Fq "$GOTENBERG_IMAGE_DIGEST" \
+  "$ROOT_DIR/deploy/k3s/chart/values.yaml" || {
+  echo "K3s chart is missing the locked Gotenberg image digest" >&2
+  exit 1
+}
+
+# Local, production and k3s must convert with one build of LibreOffice. A PDF is the signed copy
+# of a biên bản, and two versions of soffice do not lay out a table identically forever.
+grep -Fq "$GOTENBERG_IMAGE_DIGEST" \
+  "$ROOT_DIR/deploy/production/app.compose.yml" || {
+  echo "production compose is missing the locked Gotenberg image digest" >&2
+  exit 1
+}
+grep -Fq "$GOTENBERG_IMAGE_DIGEST" \
+  "$ROOT_DIR/docker-compose.yml" || {
+  echo "local compose is missing the locked Gotenberg image digest" >&2
   exit 1
 }
 
