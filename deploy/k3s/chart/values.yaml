@@ -203,6 +203,14 @@ workloads:
       Smtp__Password: SMTP_PASSWORD
       Smtp__FromEmail: SMTP_FROM_EMAIL
       Smtp__FromName: SMTP_FROM_NAME
+    # On the workload rather than in the shared ConfigMap, for the same reason the assistant
+    # plugin keys are: this is the only service that reads it. The backend treats an absent
+    # Gotenberg:Url as a supported state — the minutes export still serves .docx and reports PDF
+    # as unavailable — so an unset value fails no probe, stops no rollout and writes no log line.
+    # It simply answers 503 to every PDF download for the life of the release, which is what this
+    # chart did from the day the feature shipped. See templates/gotenberg.yaml for the converter.
+    env:
+      Gotenberg__Url: http://gotenberg:3000
   transcript-service:
     image: transcript-service
     replicas: 2
@@ -523,6 +531,21 @@ workloads:
     autoscaling: {enabled: false}
     secretEnv:
       REDIS_PASSWORD: REDIS_PASSWORD
+
+# DOCX -> PDF for the exported biên bản. A third-party image, so it is pinned by digest and
+# locked in deploy/k3s/addons.lock.env like the collector and the SQL exporter, rather than
+# living in .Values.workloads — nothing in a WarpTalk release rewrites this tag.
+gotenberg:
+  replicas: 2
+  image: gotenberg/gotenberg:8.21.1@sha256:91486863744f7420ca985ee6cef7c216910e40faffd378f3da7c0fad724d01ba
+  resources:
+    # The CPU limit is load-bearing, not a guess. Gotenberg starts LibreOffice lazily and
+    # restarts it after every 10 conversions, so a cold start recurs in ordinary use; measured
+    # against this digest with one document in flight, that start took 59s at 0.5 CPU and 17s at
+    # 1 CPU, against a stock 20s start timeout that answers 503 the moment it is missed. Memory
+    # is the opposite: the same run peaked at 132Mi, so 512Mi is headroom, not a measurement.
+    requests: {cpu: 200m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
 
 ingress:
   enabled: true

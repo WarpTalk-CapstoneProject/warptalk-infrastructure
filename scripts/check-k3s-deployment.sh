@@ -19,6 +19,8 @@ required_files=(
   "$CHART_DIR/templates/certificate.yaml"
   "$CHART_DIR/templates/security-headers.yaml"
   "$CHART_DIR/templates/telemetry.yaml"
+  "$CHART_DIR/templates/gotenberg.yaml"
+  "$CHART_DIR/templates/network-policy.yaml"
   "$CHART_DIR/templates/metrics-exporter-monitor.yaml"
   "$CHART_DIR/templates/observability-assets.yaml"
   "$CHART_DIR/templates/cost-observability.yaml"
@@ -222,6 +224,35 @@ printf '%s\n' "$keyring_claim" | grep -Fq "helm.sh/resource-policy: keep" || {
   exit 1
 }
 printf '%s\n' "$assistant_document" | grep -Fq "mountPath: /var/lib/warptalk/keys"
+
+# The minutes PDF converter, and the same shape of omission as the assistant keys above: an unset
+# Gotenberg:Url is a SUPPORTED state in the backend, so the chart rendered, deployed and passed
+# every probe while answering 503 to every PDF download. Only a comparison between the workload
+# that converts and the workload that asks it to can see that.
+translation_room_document="$(awk 'BEGIN { RS="---" } /kind: Deployment/ && /name: translation-room-service/ { print }' "$RENDERED_FILE")"
+printf '%s\n' "$translation_room_document" | grep -Fq "http://gotenberg:3000" || {
+  echo "translation-room-service must point at the internal gotenberg converter, or every PDF export answers 503" >&2
+  exit 1
+}
+gotenberg_document="$(awk 'BEGIN { RS="---" } /kind: Deployment/ && /name: gotenberg/ { print }' "$RENDERED_FILE")"
+[[ -n "$gotenberg_document" ]] || {
+  echo "could not find the gotenberg Deployment in the rendered chart" >&2
+  exit 1
+}
+printf '%s\n' "$gotenberg_document" | grep -Fq -- "--chromium-disable-javascript=true" || {
+  echo "gotenberg must run with Chromium scripting disabled: a browser that fetches arbitrary URLs on request is an SSRF engine inside the cluster" >&2
+  exit 1
+}
+printf '%s\n' "$gotenberg_document" | grep -Fq "readOnlyRootFilesystem: true"
+grep -Fq "name: allow-gotenberg-from-translation-room" "$RENDERED_FILE"
+# Internal only. The converter takes a document and returns a document; nothing outside the
+# cluster has any business reaching it, and an Ingress path would be the way that happened.
+if printf '%s\n' "$(awk 'BEGIN { RS="---" } /kind: Ingress/ { print }' "$RENDERED_FILE")" |
+  grep -Fq "name: gotenberg"; then
+  echo "gotenberg must not be routed through the ingress" >&2
+  exit 1
+fi
+
 # The CIMD document has to reach the gateway, or an authorization server cannot resolve the client
 # id the service advertises. Checking the path alone would pass with it routed to the frontend,
 # which is exactly the bug.

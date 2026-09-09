@@ -1,0 +1,134 @@
+{{/*
+LibreOffice behind an HTTP call, as its own workload.
+
+Its own template rather than an entry in .Values.workloads, following the collector and the cost
+exporters: that map builds every image out of global.imageRegistry + global.imageTag and requires
+an @sha256 imageRef per workload in production, which is the release contract for WarpTalk's own
+services. Gotenberg is a third-party image on a locked digest that no release rewrites, and it
+has no envFrom on the runtime ConfigMap because there is nothing in there it reads.
+
+The exported biên bản is written once, as .docx, and the PDF is a CONVERSION of that file — never
+a second layout rendered from the same data. See docker-compose.yml for the long form; a signed
+record whose Word copy and PDF copy disagree is worse than having no PDF at all.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gotenberg
+  labels:
+    app.kubernetes.io/name: gotenberg
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gotenberg.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gotenberg
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gotenberg
+        {{- include "warptalk.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: warptalk
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: gotenberg
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: gotenberg
+      containers:
+        - name: gotenberg
+          image: {{ .Values.gotenberg.image | quote }}
+          imagePullPolicy: IfNotPresent
+          # Conversion only. Chromium's HTML/URL routes stay off because nothing here needs them,
+          # and a browser that fetches arbitrary URLs on request is a server-side request forgery
+          # engine inside the cluster network. --libreoffice-start-timeout is raised above its
+          # 20s default for the reason recorded beside the CPU limit in values.yaml; it matches
+          # deploy/production/app.compose.yml and is the one flag local compose does not carry,
+          # because local runs under no CPU limit at all.
+          args:
+            - gotenberg
+            - --chromium-disable-javascript=true
+            - --api-timeout=60s
+            - --libreoffice-start-timeout=60s
+          ports:
+            - name: http
+              containerPort: 3000
+          # /health is served by the API before either converter has been started, so this says
+          # the process is reachable, not that a conversion will succeed. Readiness on anything
+          # heavier would take the pod out of service during the routine soffice restart.
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            {{- toYaml .Values.gotenberg.resources | nindent 12 }}
+          # soffice needs more than a read-only root: it wants a writable HOME, and it writes both
+          # a throwaway user profile and the document itself under TMPDIR. Node-backed rather than
+          # medium: Memory, so a large document cannot be charged against the memory limit and
+          # OOM-kill the conversion it belongs to.
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: home, mountPath: /home/gotenberg}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+        - name: home
+          emptyDir: {sizeLimit: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gotenberg
+  labels:
+    app.kubernetes.io/name: gotenberg
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gotenberg
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gotenberg
+  labels:
+    app.kubernetes.io/name: gotenberg
+    {{- include "warptalk.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gotenberg
