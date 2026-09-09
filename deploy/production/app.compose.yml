@@ -334,6 +334,23 @@ services:
       LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:?}
       LiveKit__Egress__S3__Region: ${LIVEKIT_EGRESS_S3_REGION:?}
       LiveKit__Egress__S3__Endpoint: ${LIVEKIT_EGRESS_S3_ENDPOINT:?}
+      # WT-644 — WHAT THE RECORDING CONTAINS.
+      #
+      # Unset (which it was in every environment, including this one) LiveKit records the room
+      # with its built-in grid layout. RoomComposite records the MIXED room, and tts_worker
+      # publishes one bot participant per (speaker, target language) into it — so every recording
+      # ever made here is the original speech with every translation playing over the top of it.
+      # No field on the egress request can filter that; livekit/egress#923 is the open request for
+      # one.
+      #
+      # This points the recorder at our own template page, whose subscriptions decide what is
+      # encoded — it takes people and refuses the ai-interpreter-/AIBot_ identities (see
+      # warptalk-web src/app/egress/composite and lib/meeting/egress-participants.ts). The page is
+      # public by necessity: the recorder is a headless Chrome with no session, and it can only
+      # join the room its egress-minted token already names.
+      #
+      # Clearing this line is the entire rollback, back to the mixed-language file.
+      LiveKit__Egress__TemplateBaseUrl: https://${APP_DOMAIN:?}/egress/composite
       Smtp__Host: ${SMTP_HOST:?}
       Smtp__Port: ${SMTP_PORT:-587}
       Smtp__Username: ${SMTP_USERNAME:?}

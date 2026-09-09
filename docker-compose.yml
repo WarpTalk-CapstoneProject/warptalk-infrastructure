@@ -23,6 +23,19 @@ services:
   postgres:
     image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     container_name: warptalk-postgres
+    # THE DATA PLANE COMES BACK BY ITSELF, AND THE APPLICATION SERVICES DO NOT.
+    #
+    # 2026-09-06: Docker Desktop was shut down and every container here died at the same instant
+    # with exit 255. Nothing in this file carried a restart policy, so nothing came back — while
+    # warptalk-ai/docker-compose.yml sets `restart: unless-stopped` on every worker, so THOSE came
+    # back and spent three days crash-looping against a `redis` host that no longer existed. That
+    # asymmetry is the bug: the workers depend on this stack and cannot wait for it politely.
+    #
+    # Deliberately only the four stateful services (plus the pooler in front of one). One-shot jobs
+    # must not be restarted, the application services are rebuilt often enough that starting them
+    # should stay a decision, and the observability tier was SIGKILLed under memory pressure —
+    # bringing that back automatically would recreate the pressure.
+    restart: unless-stopped
     command:
       - postgres
       - -c
@@ -114,6 +127,7 @@ services:
   pgbouncer:
     image: edoburu/pgbouncer:v1.25.2-p0@sha256:7d7a27d9e90985cab5cf42256f5c13a3120baa4b055b69df37beb272b89b2340
     container_name: warptalk-pgbouncer
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-warptalk}
       POOL_MODE: transaction
@@ -136,6 +150,7 @@ services:
   redis:
     image: redis:7.4.9-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     container_name: warptalk-redis
+    restart: unless-stopped
     command: >
       redis-server
         --requirepass ${REDIS_PASSWORD}
@@ -158,6 +173,7 @@ services:
   rabbitmq:
     image: rabbitmq:4.3.2-management-alpine@sha256:0753b75ce99094c385483d89449d532a0544fb85e4942a478b21cc497ab66d33
     container_name: warptalk-rabbitmq
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-warptalk}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-warptalk-dev-rabbitmq}
@@ -176,6 +192,7 @@ services:
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: warptalk-minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-warptalk-admin}
@@ -266,6 +283,7 @@ services:
       AppBaseUrl: ${APP_BASE_URL:-http://localhost:3000}
       GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
       GrpcSettings__BillingServiceUrl: "http://billing-service:50057"
+      GrpcSettings__TranslationRoomServiceUrl: "http://translation-room-service:50052"
       # WT-431 gave workspace-service the notification mesh and wired it into
       # deploy/production/app.compose.yml, but not here. Program.cs resolves it through
       # GetRequiredServiceUri, which THROWS outside Development — so the gap is invisible on a dev
@@ -328,12 +346,27 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      # WT-644: S3ArtifactUrlSigner reads these to mint the short-lived link the record page plays
+      # a recording from. They were set for this service in deploy/production and in the helm
+      # chart but NOT here, so on the local stack every recording download threw "S3 signing
+      # credentials are not configured" (or, worse, handed back LiveKit's unsigned object URL) —
+      # recording playback could not work locally at all. Same five values the meeting service
+      # already gets below; empty by default, which simply leaves recording unusable rather than
+      # failing to start.
+      LiveKit__Egress__S3__AccessKey: ${LIVEKIT_EGRESS_S3_ACCESS_KEY:-}
+      LiveKit__Egress__S3__Secret: ${LIVEKIT_EGRESS_S3_SECRET:-}
+      LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:-}
+      LiveKit__Egress__S3__Region: ${LIVEKIT_EGRESS_S3_REGION:-}
+      LiveKit__Egress__S3__Endpoint: ${LIVEKIT_EGRESS_S3_ENDPOINT:-}
       Smtp__Host: ${SMTP_HOST}
       Smtp__Port: ${SMTP_PORT:-587}
       Smtp__Username: ${SMTP_USERNAME}
       Smtp__Password: ${SMTP_PASSWORD}
       Smtp__FromEmail: ${SMTP_FROM_EMAIL}
       Smtp__FromName: ${SMTP_FROM_NAME}
+      # DOCX -> PDF for exported biên bản. Optional: with this unset the service still serves
+      # Word files and the PDF button reports the format as unavailable.
+      Gotenberg__Url: ${GOTENBERG_URL:-http://gotenberg:3000}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -343,6 +376,35 @@ services:
         condition: service_healthy
       auth-service:
         condition: service_started
+      gotenberg:
+        condition: service_started
+    networks:
+      - warptalk-net
+
+  # ── Gotenberg — DOCX to PDF ───────────────────────────────────────
+  # LibreOffice behind an HTTP call, as its own container.
+  #
+  # The exported biên bản is written once, as .docx, and the PDF is a CONVERSION of that file —
+  # never a second layout rendered from the same data. Two renderers would agree the day they were
+  # written and drift from then on, and a signed record whose Word copy and PDF copy differ is
+  # worse than having no PDF at all.
+  #
+  # A sidecar rather than LibreOffice inside translation-room-service: soffice wants a writable
+  # HOME, dislikes concurrency, and leaves processes behind when a document hangs it. Here that
+  # costs one container restart instead of the API's memory and file descriptors.
+  gotenberg:
+    image: gotenberg/gotenberg:8.21.1
+    container_name: warptalk-gotenberg
+    # Conversion only. Chromium's HTML/URL routes are disabled because nothing here needs them and
+    # a browser that fetches arbitrary URLs on request is a server-side request forgery engine.
+    command:
+      - gotenberg
+      - --chromium-disable-javascript=true
+      - --api-timeout=60s
+    # No published port: only translation-room-service talks to it, over the internal network.
+    expose:
+      - "3000"
+    restart: unless-stopped
     networks:
       - warptalk-net
 
@@ -433,6 +495,11 @@ services:
       LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:-}
       LiveKit__Egress__S3__Region: ${LIVEKIT_EGRESS_S3_REGION:-}
       LiveKit__Egress__S3__Endpoint: ${LIVEKIT_EGRESS_S3_ENDPOINT:-}
+      # WT-644: the recording template — see .env.example for why this is empty by default here.
+      # Unset means LiveKit's built-in grid layout, which records every tts_worker dub alongside
+      # the speech; set means warptalk-web /egress/composite, which subscribes to people only.
+      # It has to be reachable from LiveKit Cloud, so localhost is not a value.
+      LiveKit__Egress__TemplateBaseUrl: ${LIVEKIT_EGRESS_TEMPLATE_BASE_URL:-}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
       Smtp__Host: ${SMTP_HOST}
       Smtp__Port: ${SMTP_PORT:-587}
