@@ -363,7 +363,7 @@ services:
   # HOME, dislikes concurrency, and leaves processes behind when a document hangs it. Here that
   # costs one container restart instead of the API's memory and file descriptors.
   gotenberg:
-    image: gotenberg/gotenberg:8.21.1
+    image: gotenberg/gotenberg:8.21.1@sha256:91486863744f7420ca985ee6cef7c216910e40faffd378f3da7c0fad724d01ba
     container_name: warptalk-gotenberg
     # Conversion only. Chromium's HTML/URL routes stay off because nothing here needs them, and a
     # browser that fetches arbitrary URLs on request is a server-side request forgery engine.
