@@ -81,10 +81,19 @@ spec:
             httpGet: {path: /health, port: http}
             initialDelaySeconds: 10
             periodSeconds: 10
+          # Deliberately slack, because of the version pinned above. Gotenberg only learned to
+          # tolerate a transient probe failure and to cache a successful probe result in 8.33.0;
+          # on 8.21.1 a /health that answers slowly while LibreOffice is busy is indistinguishable
+          # from a dead process, and the default 1s timeout with 3 strikes is enough to have
+          # Kubernetes restart a pod that was merely under load — killing the conversions in
+          # flight with it. Five seconds and six strikes is ~2 minutes of unresponsiveness before
+          # the pod is declared dead, which a real hang still reaches.
           livenessProbe:
             httpGet: {path: /health, port: http}
             initialDelaySeconds: 30
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
