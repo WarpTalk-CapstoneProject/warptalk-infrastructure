@@ -89,7 +89,10 @@ services:
 
   minio:
     <<: *data-service-defaults
-    image: minio/minio:RELEASE.2025-07-23T15-54-02Z@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0
+    # quay.io, not Docker Hub: docker.io/minio/minio was removed (pull access denied, repository does
+    # not exist), which failed release v208 at `compose pull` on this host. Same tag, same digest -
+    # MinIO publishes identical manifests to quay.io, so the running image is byte-for-byte unchanged.
+    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
@@ -114,7 +117,8 @@ services:
     networks: [data-net]
 
   minio-init:
-    image: minio/mc:RELEASE.2025-07-21T05-28-08Z@sha256:fb8f773eac8ef9d6da0486d5dec2f42f219358bcb8de579d1623d518c9ebd4cc
+    # quay.io for the same reason as the minio service above; digest unchanged.
+    image: quay.io/minio/mc:RELEASE.2025-07-21T05-28-08Z@sha256:fb8f773eac8ef9d6da0486d5dec2f42f219358bcb8de579d1623d518c9ebd4cc
     init: true
     read_only: true
     tmpfs:
