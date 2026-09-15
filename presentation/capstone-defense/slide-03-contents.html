@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WarpTalk — Table of Contents</title>
+  <style>
+    :root { --ink:#111113; --muted:#8f8c94; --soft-1:#f7f6f8; --soft-2:#eeecef; --soft-3:#e4e2e6; --purple:#7448ff; }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; background:#ddd; font-family:"Avenir Next","Helvetica Neue",Arial,sans-serif; color:var(--ink); }
+    .slide { width:1920px; height:1080px; overflow:hidden; background:#fff; padding:54px 78px 42px; }
+
+    .top { height:58px; display:flex; justify-content:space-between; align-items:flex-start; }
+    .brands { display:flex; align-items:center; gap:26px; }
+    .warptalk { width:180px; height:43px; object-fit:contain; object-position:left center; }
+    .fpt { width:105px; height:44px; object-fit:contain; object-position:left center; }
+    .meta { text-align:right; color:#8b8890; font-size:11px; line-height:1.35; letter-spacing:.1em; text-transform:uppercase; }
+    .meta strong { display:block; color:var(--ink); font-size:12px; font-weight:680; }
+
+    .heading { height:248px; display:grid; grid-template-columns:1fr 655px; gap:90px; align-items:end; padding:42px 3px 32px; }
+    .kicker { margin-bottom:15px; color:var(--muted); font-size:11px; font-weight:680; letter-spacing:.13em; text-transform:uppercase; }
+    h1 { margin:0; font-size:91px; line-height:.86; letter-spacing:-6.5px; font-weight:570; }
+    .summary { margin:0 0 1px; max-width:630px; color:var(--muted); font-size:27px; line-height:1.18; letter-spacing:-1px; }
+    .summary strong { color:var(--ink); font-weight:620; }
+
+    .contents { height:660px; display:grid; grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(2,1fr); gap:16px; }
+    .item { position:relative; isolation:isolate; min-width:0; border-radius:22px; padding:23px 25px 22px; background:var(--soft-1); display:flex; flex-direction:column; overflow:hidden; }
+    .item > * { position:relative; z-index:2; }
+    .roman { color:#8f8c94; font-size:11px; font-weight:680; letter-spacing:.12em; text-transform:uppercase; }
+    .item.active { color:#fff; background:
+      radial-gradient(ellipse 310px 190px at 10% 105%, rgba(149,211,255,.82), transparent 67%),
+      radial-gradient(ellipse 300px 220px at 100% -5%, rgba(119,67,255,.82), transparent 70%),
+      linear-gradient(140deg,#6576ee 0%,#4565ff 55%,#3545e7 100%); }
+    .item.active::before { content:""; position:absolute; inset:0; z-index:0; opacity:.32; mix-blend-mode:soft-light; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.9'/%3E%3C/svg%3E"); }
+    .item.active::after { content:""; position:absolute; z-index:1; left:-12%; top:58%; width:125%; height:44px; border-radius:50%; background:rgba(255,255,255,.82); filter:blur(18px); transform:rotate(-7deg); opacity:.62; }
+    .item.active .roman { color:rgba(255,255,255,.76); }
+    .title { margin:39px 0 0; max-width:310px; font-size:31px; line-height:.98; letter-spacing:-1.5px; font-weight:570; }
+    .note { margin:12px 0 0; max-width:310px; color:#8f8c94; font-size:15px; line-height:1.24; letter-spacing:-.25px; }
+    .number { margin-top:auto; color:#aaa7af; font-size:79px; line-height:.78; letter-spacing:-5px; font-weight:390; }
+    .active .title { color:#fff; }
+    .active .note { color:rgba(255,255,255,.7); }
+    .active .number { color:#fff; }
+
+    .footer { height:60px; display:flex; justify-content:space-between; align-items:flex-end; padding:0 3px 3px; }
+    .footer-note { color:#9a979f; font-size:11px; letter-spacing:.12em; text-transform:uppercase; }
+    .page { color:#8c8992; font-size:11px; letter-spacing:.12em; text-transform:uppercase; }
+    .page strong { margin-left:10px; color:var(--ink); font-size:20px; font-weight:570; letter-spacing:-.5px; }
+  </style>
+</head>
+<body>
+  <main class="slide" aria-label="WarpTalk table of contents">
+    <header class="top">
+      <div class="brands"><img class="warptalk" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+      <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+    </header>
+
+    <section class="heading">
+      <div><div class="kicker">Presentation structure</div><h1>Table of<br />contents</h1></div>
+      <p class="summary">From the communication problem to a <strong>validated system</strong> built for real-time multilingual conversations.</p>
+    </section>
+
+    <section class="contents">
+      <article class="item active"><span class="roman">Section I</span><h2 class="title">Context &amp;<br />Problems</h2><p class="note">Why language barriers still disrupt live communication.</p><span class="number">01</span></article>
+      <article class="item"><span class="roman">Section II</span><h2 class="title">Proposed<br />Solution</h2><p class="note">How WarpTalk translates speech while preserving voice identity.</p><span class="number">02</span></article>
+      <article class="item"><span class="roman">Section III</span><h2 class="title">System<br />Architecture</h2><p class="note">The services and data flow behind the platform.</p><span class="number">03</span></article>
+      <article class="item"><span class="roman">Section IV</span><h2 class="title">Tech<br />Stack</h2><p class="note">Technologies selected for scale, latency, and reliability.</p><span class="number">04</span></article>
+      <article class="item"><span class="roman">Section V</span><h2 class="title">Functional<br />Requirements</h2><p class="note">The capabilities required across each user role.</p><span class="number">05</span></article>
+      <article class="item"><span class="roman">Section VI</span><h2 class="title">Core<br />Workflows</h2><p class="note">How users move through the system’s primary flows.</p><span class="number">06</span></article>
+      <article class="item"><span class="roman">Section VII</span><h2 class="title">Project<br />Achievements</h2><p class="note">Delivery outcomes, validation, and lessons learned.</p><span class="number">07</span></article>
+      <article class="item"><span class="roman">Section VIII</span><h2 class="title">Questions &amp;<br />Answers</h2><p class="note">Discussion with the review committee.</p><span class="number">08</span></article>
+    </section>
+
+    <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Contents <strong>03</strong></span></footer>
+  </main>
+</body>
+</html>

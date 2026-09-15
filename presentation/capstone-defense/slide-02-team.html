@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WarpTalk — Team Members</title>
+  <style>
+    :root { --ink:#111113; --muted:#8f8c94; --soft:#eeecef; --purple:#7448ff; --purple-soft:#eeeaff; }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; background:#ddd; font-family:"Avenir Next","Helvetica Neue",Arial,sans-serif; color:var(--ink); }
+    .slide { width:1920px; height:1080px; overflow:hidden; background:#fff; padding:54px 78px 42px; }
+
+    .top { height:58px; display:flex; justify-content:space-between; align-items:flex-start; }
+    .brands { display:flex; align-items:center; gap:26px; }
+    .warptalk { width:180px; height:43px; object-fit:contain; object-position:left center; }
+    .fpt { width:105px; height:44px; object-fit:contain; object-position:left center; }
+    .meta { text-align:right; color:#8b8890; font-size:11px; line-height:1.35; letter-spacing:.1em; text-transform:uppercase; }
+    .meta strong { display:block; color:var(--ink); font-size:12px; font-weight:680; }
+
+    .heading { height:292px; display:grid; grid-template-columns:1fr 650px; gap:90px; align-items:end; padding:54px 3px 38px; }
+    .kicker { margin-bottom:17px; color:var(--muted); font-size:11px; font-weight:680; letter-spacing:.13em; text-transform:uppercase; }
+    h1 { margin:0; font-size:100px; line-height:.84; letter-spacing:-7px; font-weight:570; }
+    .summary { margin:0 0 2px; max-width:625px; color:var(--muted); font-size:27px; line-height:1.18; letter-spacing:-1px; }
+    .summary strong { color:var(--ink); font-weight:620; }
+
+    .members { height:570px; display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+    .member { min-width:0; border-radius:23px; padding:27px 28px 25px; background:var(--soft); display:flex; flex-direction:column; }
+    .member.leader, .member.dark, .member.white { color:var(--ink); background:var(--soft); }
+
+    .role { color:#77747d; font-size:11px; font-weight:680; letter-spacing:.12em; text-transform:uppercase; }
+    .leader .role { color:var(--purple); }
+    .dark .role { color:#77747d; }
+    .name { margin:58px 0 0; font-size:41px; line-height:.98; letter-spacing:-2.3px; font-weight:570; }
+    .student-id { margin-top:15px; color:#939099; font-size:15px; font-weight:590; letter-spacing:.12em; }
+    .dark .student-id { color:#939099; }
+    .number { margin-top:auto; font-size:124px; line-height:.76; letter-spacing:-9px; font-weight:380; color:#aaa7af; }
+    .leader .number { color:#aaa7af; }
+    .dark .number { color:#aaa7af; }
+
+    .footer { height:106px; display:flex; justify-content:space-between; align-items:flex-end; padding:0 3px 3px; }
+    .footer-note { color:#9a979f; font-size:11px; letter-spacing:.12em; text-transform:uppercase; }
+    .page { color:#8c8992; font-size:11px; letter-spacing:.12em; text-transform:uppercase; }
+    .page strong { margin-left:10px; color:var(--ink); font-size:20px; font-weight:570; letter-spacing:-.5px; }
+  </style>
+</head>
+<body>
+  <main class="slide" aria-label="WarpTalk team members">
+    <header class="top">
+      <div class="brands"><img class="warptalk" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+      <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+    </header>
+
+    <section class="heading">
+      <div><div class="kicker">The people behind WarpTalk</div><h1>Team<br />members</h1></div>
+      <p class="summary">Four students building <strong>real-time multilingual communication</strong> through AI speech translation and voice cloning.</p>
+    </section>
+
+    <section class="members">
+      <article class="member leader"><span class="role">Team leader</span><h2 class="name">Huynh<br />Thai Tu</h2><span class="student-id">SE183307</span><span class="number">01</span></article>
+      <article class="member"><span class="role">Member</span><h2 class="name">Ngo Xuan<br />Hanh Nhi</h2><span class="student-id">SE192260</span><span class="number">02</span></article>
+      <article class="member dark"><span class="role">Member</span><h2 class="name">Huynh<br />Ngoc Ky</h2><span class="student-id">SE182995</span><span class="number">03</span></article>
+      <article class="member white"><span class="role">Member</span><h2 class="name">Tran Manh<br />Tuan</h2><span class="student-id">SE180360</span><span class="number">04</span></article>
+    </section>
+
+    <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Team introduction <strong>02</strong></span></footer>
+  </main>
+</body>
+</html>
