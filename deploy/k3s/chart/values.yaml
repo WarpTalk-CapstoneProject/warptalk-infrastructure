@@ -96,6 +96,9 @@ config:
   ASSISTANT_CHAT_WORKSPACE_SERVICE_URL: http://workspace-service:5106
   ASSISTANT_CHAT_TRANSCRIPT_SERVICE_URL: http://transcript-service:5103
   ASSISTANT_CHAT_TRANSLATION_ROOM_SERVICE_URL: http://translation-room-service:5102
+  # WT-688: the MCP tool endpoint WarpBot calls to run a workspace's plugin tools.
+  # Same in-cluster address the gateway routes the assistant cluster at.
+  ASSISTANT_CHAT_ASSISTANT_SERVICE_URL: http://assistant-service:5108
   # get_platform_analytics only, and always with the caller's own bearer token — the
   # platform admin policy is enforced server-side on every path behind these.
   ASSISTANT_CHAT_BILLING_SERVICE_URL: http://billing-service:5107
