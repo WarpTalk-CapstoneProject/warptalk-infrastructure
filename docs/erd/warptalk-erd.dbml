@@ -1275,7 +1275,11 @@ Table notification.admin_notifications {
   payload jsonb [not null, default: `'{}'`]
   target_audience_mode varchar(50) [not null]
   target_audience_data jsonb [not null, default: `'{}'`]
-  status varchar(50) [not null]
+  status varchar(50) [not null, note: 'Pending | Sent | Failed']
+  sent_at timestamptz [note: 'set when the last delivery chunk is written']
+  delivered_count int [not null, default: 0]
+  delivery_chunk_count int [not null, default: 1]
+  delivered_chunk_count int [not null, default: 0]
   created_by uuid [not null]
   updated_by uuid
   created_at timestamptz [not null]
