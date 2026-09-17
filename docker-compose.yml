@@ -546,6 +546,9 @@ services:
       # Workspace policy (AllowAnyPlugins) is read over gRPC; GetRequiredServiceUri throws
       # outside Development when this is missing.
       GrpcSettings__WorkspaceServiceUrl: "http://workspace-service:50056"
+      # Plugin marketplace: a member's request notifies the workspace Owner, and the Owner's
+      # decision notifies the member, through the notification service's SendNotification RPC.
+      GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
     depends_on:
       migrator:
         condition: service_completed_successfully
