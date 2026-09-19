@@ -1,0 +1,50 @@
+# Production Kubernetes Application Helm Values
+# Tuned for WarpTalk 3-VM Cluster (App Node: 8 vCPU / 16 GB RAM)
+
+global:
+  domain: warptalk.io.vn
+  imageRegistry: ghcr.io/warptalk
+
+secret:
+  externalSecret:
+    enabled: true
+    secretStoreName: warptalk-production-secret-store
+    remoteKey: warptalk/production/runtime
+    postgresRemoteKey: warptalk/production/postgres-superuser
+    redisRemoteKey: warptalk/production/redis
+    qdrantRemoteKey: warptalk/production/qdrant
+
+ingress:
+  className: traefik
+  tlsSecretName: warptalk-tls
+  certManager:
+    enabled: true
+    clusterIssuerName: warptalk-letsencrypt
+    email: admin@warptalk.io.vn
+
+# Workloads tuned for 16GB App Node RAM budget
+workloads:
+  frontend:
+    replicas: 2
+    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
+  gateway:
+    replicas: 2
+    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
+  stt-worker:
+    replicas: 2
+    autoscaling: {enabled: false}
+  translation-worker:
+    replicas: 2
+    autoscaling: {enabled: false}
+  tts-worker:
+    replicas: 2
+    autoscaling: {enabled: false}
+  livekit-ingress-worker:
+    replicas: 2
+    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
+  assistant-worker:
+    replicas: 2
+    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
+  assistant-service:
+    persistence:
+      storageClass: longhorn-rwx
