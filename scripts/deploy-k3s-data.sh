@@ -176,12 +176,8 @@ require_secret_keys() {
 }
 
 if [ "$K3S_DRY_RUN" = "true" ]; then
-  if [ "$K3S_SECRET_SOURCE" = "github" ]; then
-    require_secret_keys "$DATA_NAMESPACE" warptalk-postgres-superuser username password
-    require_secret_keys "$DATA_NAMESPACE" warptalk-backup-credentials ACCESS_KEY_ID SECRET_ACCESS_KEY ENDPOINT_URL
-    require_secret_keys "$DATA_NAMESPACE" warptalk-redis-auth password
-    require_secret_keys "$DATA_NAMESPACE" warptalk-qdrant-auth api-key
-  fi
+  # The secrets themselves were validated by materialize-k8s-runtime-secrets.sh (in a dry run
+  # they are not written), so only the charts are checked here.
   helm_data upgrade --install warptalk-data "$data_chart" --dry-run=server >/dev/null
   "$helm_locked" upgrade --install warptalk-redis bitnami/redis \
     --version "$REDIS_CHART_VERSION" --namespace "$DATA_NAMESPACE" --dry-run=server \

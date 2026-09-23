@@ -219,18 +219,31 @@ fi
 kubectl auth can-i create deployments.apps --namespace "$NAMESPACE" | grep -Fxq yes ||
   fail "current Kubernetes identity cannot deploy into $NAMESPACE"
 
+# In a dry run the data platform may legitimately not exist yet (its own dry run created nothing),
+# so its absence is reported instead of failing; a real deploy requires all of it.
+require_or_note() {
+  if [ "$K3S_DRY_RUN" = "true" ]; then
+    echo "K3s release (dry run): $* - a real deploy would stop here" >&2
+    return 0
+  fi
+  fail "$*"
+}
 for service in \
   warptalk-postgres-pooler-rw \
   warptalk-redis \
   warptalk-qdrant; do
-  kubectl get service "$service" --namespace "$DATA_NAMESPACE" >/dev/null ||
-    fail "required data service is unavailable: $DATA_NAMESPACE/$service"
+  kubectl get service "$service" --namespace "$DATA_NAMESPACE" >/dev/null 2>&1 ||
+    require_or_note "required data service is unavailable: $DATA_NAMESPACE/$service"
 done
-kubectl get service warptalk-rabbitmq --namespace "$NAMESPACE" >/dev/null ||
-  fail "required messaging service is unavailable: $NAMESPACE/warptalk-rabbitmq"
-kubectl get secret warptalk-rabbitmq-default-user --namespace "$NAMESPACE" >/dev/null ||
-  fail "RabbitMQ generated credentials are unavailable"
-if [ "$K3S_SECRET_SOURCE" = "github" ]; then
+kubectl get service warptalk-rabbitmq --namespace "$NAMESPACE" >/dev/null 2>&1 ||
+  require_or_note "required messaging service is unavailable: $NAMESPACE/warptalk-rabbitmq"
+kubectl get secret warptalk-rabbitmq-default-user --namespace "$NAMESPACE" >/dev/null 2>&1 ||
+  require_or_note "RabbitMQ generated credentials are unavailable"
+if [ "$K3S_SECRET_SOURCE" = "github" ] && [ "$K3S_DRY_RUN" = "true" ] &&
+  ! kubectl get secret "${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" --namespace "$NAMESPACE" >/dev/null 2>&1; then
+  # materialize-k8s-runtime-secrets.sh already validated the content against the contract.
+  echo "K3s release (dry run): runtime secret not written yet (dry run); its content was validated offline" >&2
+elif [ "$K3S_SECRET_SOURCE" = "github" ]; then
   # Materialized by the release job before this script; its absence is a job defect, not
   # something to paper over. The pre-install migration hook reads it before any pod starts.
   K3S_NAMESPACE="$NAMESPACE" \
@@ -299,19 +312,23 @@ post_deploy_checks() {
     K3S_RUNTIME_SECRET_NAME="${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" \
     "$runtime_secret_check" || return 1
 
-  if [ "$K3S_MANAGED_TLS" = "true" ]; then
-    kubectl wait --for=condition=Ready \
-      "certificate/$K3S_TLS_SECRET_NAME" \
-      --namespace "$NAMESPACE" \
-      --timeout=5m || return 1
+  # Before the cutover the public names resolve to compose's Caddy, so an HTTP-01 challenge for
+  # them cannot reach this cluster and the certificate cannot issue yet.
+  if [ "${K3S_PUBLIC_INGRESS:-true}" = "true" ]; then
+    if [ "$K3S_MANAGED_TLS" = "true" ]; then
+      kubectl wait --for=condition=Ready \
+        "certificate/$K3S_TLS_SECRET_NAME" \
+        --namespace "$NAMESPACE" \
+        --timeout=5m || return 1
+    fi
+    kubectl get secret "$K3S_TLS_SECRET_NAME" --namespace "$NAMESPACE" \
+      -o json |
+      jq -e '
+        .type == "kubernetes.io/tls" and
+        (.data["tls.crt"] | length > 0) and
+        (.data["tls.key"] | length > 0)
+      ' >/dev/null || return 1
   fi
-  kubectl get secret "$K3S_TLS_SECRET_NAME" --namespace "$NAMESPACE" \
-    -o json |
-    jq -e '
-      .type == "kubernetes.io/tls" and
-      (.data["tls.crt"] | length > 0) and
-      (.data["tls.key"] | length > 0)
-    ' >/dev/null || return 1
 
   RELEASE_MANIFEST="$RELEASE_MANIFEST" \
     K3S_DOMAIN="$K3S_DOMAIN" \
@@ -321,6 +338,7 @@ post_deploy_checks() {
     K3S_TLS_SECRET_NAME="$K3S_TLS_SECRET_NAME" \
     K3S_MANAGED_TLS="$K3S_MANAGED_TLS" \
     K3S_SECRET_SOURCE="$K3S_SECRET_SOURCE" \
+    K3S_PUBLIC_INGRESS="${K3S_PUBLIC_INGRESS:-true}" \
     "$acceptance_check"
 }
 

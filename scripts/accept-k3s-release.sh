@@ -16,6 +16,10 @@ SECRET_SOURCE="${K3S_SECRET_SOURCE:-external-secrets}"
 # expected to spread over as many of these as there are replicas; with one App node that is one.
 APP_NODE_SELECTOR="${K3S_APP_NODE_SELECTOR:-node.warptalk.io/role=app}"
 ROLLOUT_TIMEOUT="${K3S_ROLLOUT_TIMEOUT:-300s}"
+# Whether Traefik owns the public domain yet. Before the cutover the domain still points at
+# compose's Caddy, so the public probes would test the wrong stack; they are skipped, and the
+# Traefik Service must then carry NO externalIP (a mismatch either way fails).
+PUBLIC_INGRESS="${K3S_PUBLIC_INGRESS:-true}"
 REPORT="${K3S_ACCEPTANCE_REPORT:-${TMPDIR:-/tmp}/warptalk-k3s-acceptance.json}"
 
 script_dir="$(CDPATH='' cd -- "$(dirname "$0")" && pwd)"
@@ -208,17 +212,19 @@ for resource in \
     jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
       >/dev/null || fail "$resource is not Ready"
 done
-if [ "$MANAGED_TLS" = "true" ]; then
-  kubectl get "certificate/$TLS_SECRET_NAME" --namespace "$NAMESPACE" -o json |
-    jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
-      >/dev/null || fail "certificate/$TLS_SECRET_NAME is not Ready"
+if [ "$PUBLIC_INGRESS" = "true" ]; then
+  if [ "$MANAGED_TLS" = "true" ]; then
+    kubectl get "certificate/$TLS_SECRET_NAME" --namespace "$NAMESPACE" -o json |
+      jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
+        >/dev/null || fail "certificate/$TLS_SECRET_NAME is not Ready"
+  fi
+  kubectl get secret "$TLS_SECRET_NAME" --namespace "$NAMESPACE" -o json |
+    jq -e '
+      .type == "kubernetes.io/tls" and
+      (.data["tls.crt"] | length > 0) and
+      (.data["tls.key"] | length > 0)
+    ' >/dev/null || fail "TLS Secret is missing or invalid"
 fi
-kubectl get secret "$TLS_SECRET_NAME" --namespace "$NAMESPACE" -o json |
-  jq -e '
-    .type == "kubernetes.io/tls" and
-    (.data["tls.crt"] | length > 0) and
-    (.data["tls.key"] | length > 0)
-  ' >/dev/null || fail "TLS Secret is missing or invalid"
 K3S_NAMESPACE="$NAMESPACE" \
   K3S_RUNTIME_SECRET_NAME="$RUNTIME_SECRET_NAME" \
   "$script_dir/check-k3s-runtime-secret.sh" >/dev/null
@@ -253,26 +259,35 @@ kubectl get configmap warptalk-grafana-dashboard \
 traefik_service="$(kubectl get service traefik --namespace traefik -o json)"
 traefik_ingress="$(printf '%s\n' "$traefik_service" |
   jq -r '.spec.externalIPs[0] // .status.loadBalancer.ingress[0].ip // .status.loadBalancer.ingress[0].hostname // empty')"
-[ -n "$traefik_ingress" ] || fail "Traefik has neither an externalIP nor a LoadBalancer address"
 printf '%s\n' "$traefik_service" | jq -e '.spec.externalTrafficPolicy == "Local"' >/dev/null ||
   fail "Traefik must preserve the client address (externalTrafficPolicy: Local)"
 kubectl get deployment traefik --namespace traefik -o json |
   jq -e '(.status.availableReplicas // 0) >= 2' >/dev/null ||
   fail "Traefik needs at least two available replicas"
-if ! redirect_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://$K3S_DOMAIN/")"; then
-  fail "plain HTTP probe of $K3S_DOMAIN failed"
-fi
-case "$redirect_status" in
-  301|308) ;;
-  *) fail "plain HTTP must redirect to HTTPS (got $redirect_status)" ;;
-esac
 
-headers="$(curl --fail --silent --show-error --head "https://$K3S_DOMAIN/")" ||
-  fail "public HTTPS frontend probe failed"
-printf '%s\n' "$headers" | grep -Eiq '^strict-transport-security:' ||
-  fail "public response is missing HSTS"
-printf '%s\n' "$headers" | grep -Eiq '^x-content-type-options:[[:space:]]*nosniff' ||
-  fail "public response is missing X-Content-Type-Options"
+public_checks="pass"
+if [ "$PUBLIC_INGRESS" = "true" ]; then
+  [ -n "$traefik_ingress" ] || fail "Traefik has neither an externalIP nor a LoadBalancer address"
+  if ! redirect_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://$K3S_DOMAIN/")"; then
+    fail "plain HTTP probe of $K3S_DOMAIN failed"
+  fi
+  case "$redirect_status" in
+    301|308) ;;
+    *) fail "plain HTTP must redirect to HTTPS (got $redirect_status)" ;;
+  esac
+  headers="$(curl --fail --silent --show-error --head "https://$K3S_DOMAIN/")" ||
+    fail "public HTTPS frontend probe failed"
+  printf '%s\n' "$headers" | grep -Eiq '^strict-transport-security:' ||
+    fail "public response is missing HSTS"
+  printf '%s\n' "$headers" | grep -Eiq '^x-content-type-options:[[:space:]]*nosniff' ||
+    fail "public response is missing X-Content-Type-Options"
+else
+  [ -z "$traefik_ingress" ] ||
+    fail "K3S_PUBLIC_INGRESS=false but Traefik already has a public address ($traefik_ingress); dispatch with k8s_public_ingress=true"
+  traefik_ingress="none (pre-cutover)"
+  public_checks="skipped (pre-cutover: the public domain is still served by compose)"
+  echo "K3s acceptance: public ingress probes skipped (pre-cutover)" >&2
+fi
 
 jq -n \
   --arg acceptedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -281,6 +296,7 @@ jq -n \
   --arg loadBalancer "$traefik_ingress" \
   --argjson readyNodes "$ready_nodes" \
   --argjson zones "$zone_count" \
+  --arg public "$public_checks" \
   '{
     schemaVersion: 1,
     acceptedAt: $acceptedAt,
@@ -292,13 +308,13 @@ jq -n \
     checks: {
       dataQuorum: "pass",
       rollouts: "pass",
-      httpsRedirect: "pass",
+      httpsRedirect: $public,
       immutableImages: "pass",
       migrations: "pass",
       runtimeSecrets: "pass",
       keda: "pass",
       telemetry: "pass",
-      tlsAndHeaders: "pass"
+      tlsAndHeaders: $public
     }
   }' >"$REPORT"
 
