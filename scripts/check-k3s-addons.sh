@@ -16,6 +16,9 @@ required_variables=(
   HELM_IMAGE KUBECONFORM_IMAGE
   OTEL_COLLECTOR_VERSION OTEL_COLLECTOR_IMAGE_DIGEST SQL_EXPORTER_IMAGE_DIGEST
   GOTENBERG_VERSION GOTENBERG_IMAGE_DIGEST
+  SEQ_VERSION SEQ_IMAGE_DIGEST CURL_IMAGE_DIGEST
+  CALICO_VERSION CALICO_OPERATOR_MANIFEST_SHA256
+  METALLB_VERSION METALLB_MANIFEST_SHA256
   CNPG_CHART_VERSION CNPG_CHART_SHA256
   BARMAN_PLUGIN_VERSION BARMAN_PLUGIN_MANIFEST_SHA256
   RABBITMQ_OPERATOR_VERSION RABBITMQ_OPERATOR_MANIFEST_SHA256
@@ -62,6 +65,20 @@ grep -Fq "$GOTENBERG_IMAGE_DIGEST" \
   exit 1
 }
 
+# Seq: one digest for compose and k8s, so both runtimes keep logs in the same store version.
+grep -Fq "$SEQ_IMAGE_DIGEST" "$ROOT_DIR/deploy/k3s/chart/values.yaml" || {
+  echo "K3s chart is missing the locked Seq image digest" >&2
+  exit 1
+}
+grep -Fq "$SEQ_IMAGE_DIGEST" "$ROOT_DIR/deploy/production/infra.compose.yml" || {
+  echo "production compose and the K3s lock disagree on the Seq digest" >&2
+  exit 1
+}
+grep -Fq "$CURL_IMAGE_DIGEST" "$ROOT_DIR/deploy/k3s/data-chart/values.yaml" || {
+  echo "the Qdrant snapshot CronJob image is not the locked digest" >&2
+  exit 1
+}
+
 verify_remote_manifest() {
   local url="$1"
   local expected="$2"
@@ -83,6 +100,14 @@ verify_remote_manifest \
   "https://github.com/rabbitmq/cluster-operator/releases/download/v${RABBITMQ_OPERATOR_VERSION}/cluster-operator.yml" \
   "$RABBITMQ_OPERATOR_MANIFEST_SHA256" \
   "RabbitMQ operator"
+verify_remote_manifest \
+  "https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests/tigera-operator.yaml" \
+  "$CALICO_OPERATOR_MANIFEST_SHA256" \
+  "Calico Tigera operator"
+verify_remote_manifest \
+  "https://raw.githubusercontent.com/metallb/metallb/v${METALLB_VERSION}/config/manifests/metallb-native.yaml" \
+  "$METALLB_MANIFEST_SHA256" \
+  "MetalLB"
 
 render_dir="$(mktemp -d "${TMPDIR:-/tmp}/warptalk-k3s-addons.XXXXXX")"
 trap 'rm -rf "$render_dir"' EXIT
@@ -134,10 +159,10 @@ docker run --rm \
     helm template cert-manager jetstack/cert-manager --version "$CERT_MANAGER_CHART_VERSION" --namespace cert-manager --set crds.enabled=true > /rendered/cert-manager.yaml
     helm template keda kedacore/keda --version "$KEDA_CHART_VERSION" --namespace keda > /rendered/keda.yaml
     helm template metrics-server metrics-server/metrics-server --version "$METRICS_SERVER_CHART_VERSION" --namespace kube-system > /rendered/metrics-server.yaml
-    helm template monitoring prometheus-community/kube-prometheus-stack --version "$PROMETHEUS_STACK_CHART_VERSION" --namespace monitoring > /rendered/monitoring.yaml
+    helm template monitoring prometheus-community/kube-prometheus-stack --version "$PROMETHEUS_STACK_CHART_VERSION" --namespace monitoring -f /work/monitoring-values.yaml > /rendered/monitoring.yaml
     helm template warptalk-redis bitnami/redis --version "$REDIS_CHART_VERSION" --namespace warptalk-data -f /work/data/redis-values.yaml > /rendered/redis.yaml
     helm template warptalk-qdrant qdrant/qdrant --version "$QDRANT_CHART_VERSION" --namespace warptalk-data -f /work/data/qdrant-values.yaml --post-renderer /pin-qdrant-images.sh > /rendered/qdrant.yaml
-    helm template traefik traefik/traefik --version "$TRAEFIK_CHART_VERSION" --namespace traefik -f /work/traefik-values.yaml > /rendered/traefik.yaml
+    helm template traefik traefik/traefik --version "$TRAEFIK_CHART_VERSION" --namespace traefik -f /work/traefik-values.yaml --set service.spec.externalIPs[0]=10.20.0.10 > /rendered/traefik.yaml
   '
 
 if grep -Eirq '^[[:space:]]+image:[[:space:]]+.*:latest([@"[:space:]]|$)' "$render_dir"; then

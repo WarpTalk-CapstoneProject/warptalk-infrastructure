@@ -1,3 +1,6 @@
+# One Qdrant node on the Data VM. Cluster mode needs three peers for Raft quorum, and three peers
+# on one VM would cost three copies of the index for no protection against losing the VM; the
+# nightly snapshot to object storage (below) is the recovery path instead.
 replicaCount: 1
 image:
   tag: v1.18.2
@@ -11,22 +14,51 @@ config:
     enabled: false
   storage:
     performance:
-      max_search_threads: 4
+      max_search_threads: 2
+    # Snapshots go straight to the S3-compatible backup store the Postgres backups use; the
+    # data-chart CronJob (warptalk-qdrant-snapshot) triggers one nightly.
+    snapshots_config:
+      snapshots_storage: s3
+      s3_config:
+        bucket: warptalk-backups
+        region: auto
+env:
+  - name: QDRANT__STORAGE__SNAPSHOTS_CONFIG__S3_CONFIG__ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: warptalk-backup-credentials
+        key: ACCESS_KEY_ID
+  - name: QDRANT__STORAGE__SNAPSHOTS_CONFIG__S3_CONFIG__SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: warptalk-backup-credentials
+        key: SECRET_ACCESS_KEY
+  - name: QDRANT__STORAGE__SNAPSHOTS_CONFIG__S3_CONFIG__ENDPOINT_URL
+    valueFrom:
+      secretKeyRef:
+        name: warptalk-backup-credentials
+        key: ENDPOINT_URL
+resources:
+  requests: {cpu: 100m, memory: 768Mi}
+  limits: {cpu: 500m, memory: 1536Mi}
 persistence:
   accessModes: [ReadWriteOnce]
-  size: 50Gi
+  size: 5Gi
   storageClassName: replicated-nvme
 podDisruptionBudget:
-  enabled: true
-  maxUnavailable: 1
+  enabled: false
+nodeSelector:
+  node.warptalk.io/role: data
 tolerations:
-  - key: "node.warptalk.io/role"
-    operator: "Equal"
-    value: "data"
-    effect: "NoSchedule"
+  - key: node.warptalk.io/role
+    operator: Equal
+    value: data
+    effect: NoSchedule
 metrics:
   serviceMonitor:
     enabled: true
+    additionalLabels:
+      release: monitoring
 chartTests:
   dbInteraction:
     image: registry.suse.com/bci/bci-base@sha256:4a0d40a2c4b0b9c1e58fd270e4030d4defb385ffbfcf70f25493283193042d4d

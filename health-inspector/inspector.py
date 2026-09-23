@@ -513,6 +513,263 @@ def run(args: argparse.Namespace) -> tuple[list[CheckResult], dict[str, list[dic
     return results, log_findings, project
 
 
+
+# ---------------------------------------------------------------------------------------------
+# Kubernetes mode (--platform k8s). The same checks, answered from the API server instead of the
+# Docker socket: workload availability, pod state (crash loops, OOM kills, restarts since the last
+# inspection), node conditions, the data platform's own readiness, and the error fingerprints in
+# each pod's recent logs. Read-only: it needs get/list on pods, pods/log, nodes and workloads
+# (ClusterRole warptalk-inspector in deploy/k3s/cluster/deployer-rbac.yaml) and nothing else.
+# ---------------------------------------------------------------------------------------------
+
+K8S_NAMESPACES = {"app": "warptalk", "data": "warptalk-data", "monitoring": "monitoring", "traefik": "traefik"}
+K8S_PLATFORM_DEPLOYMENTS = {"gotenberg", "warptalk-otel-collector", "seq"}
+K8S_DATA_STATEFULSETS = {"warptalk-redis-node", "warptalk-qdrant"}
+K8S_WAITING_CRITICAL = {
+    "CrashLoopBackOff",
+    "ImagePullBackOff",
+    "ErrImagePull",
+    "CreateContainerConfigError",
+    "CreateContainerError",
+    "InvalidImageName",
+}
+
+
+def kubectl(*args: str, allow_failure: bool = False) -> str:
+    completed = subprocess.run(
+        [os.getenv("KUBECTL", "kubectl"), *args],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if completed.returncode and not allow_failure:
+        raise RuntimeError(redact(completed.stderr.strip() or "kubectl command failed"))
+    return completed.stdout
+
+
+def kubectl_items(*args: str) -> list[dict[str, Any]]:
+    output = kubectl("get", *args, "-o", "json", allow_failure=True)
+    if not output.strip():
+        return []
+    return json.loads(output).get("items", [])
+
+
+def evaluate_deployment(deployment: dict[str, Any]) -> CheckResult:
+    name = deployment["metadata"]["name"]
+    desired = deployment.get("spec", {}).get("replicas", 1)
+    status = deployment.get("status", {})
+    available = status.get("availableReplicas", 0) or 0
+    updated = status.get("updatedReplicas", 0) or 0
+    if desired and available == 0:
+        return CheckResult(name, "critical", f"0 of {desired} replica(s) available")
+    if available < desired:
+        return CheckResult(name, "warning", f"{available} of {desired} replica(s) available")
+    if updated < desired:
+        return CheckResult(name, "warning", f"rollout in progress: {updated} of {desired} updated")
+    return CheckResult(name, "pass", f"{available}/{desired} replica(s) available")
+
+
+def evaluate_statefulset(statefulset: dict[str, Any]) -> CheckResult:
+    name = statefulset["metadata"]["name"]
+    desired = statefulset.get("spec", {}).get("replicas", 1)
+    ready = statefulset.get("status", {}).get("readyReplicas", 0) or 0
+    if desired and ready == 0:
+        return CheckResult(name, "critical", f"0 of {desired} replica(s) ready")
+    if ready < desired:
+        return CheckResult(name, "warning", f"{ready} of {desired} replica(s) ready")
+    return CheckResult(name, "pass", f"{ready}/{desired} replica(s) ready")
+
+
+def pod_service(pod: dict[str, Any]) -> str:
+    labels_ = pod.get("metadata", {}).get("labels") or {}
+    return (
+        labels_.get("app.kubernetes.io/name")
+        or labels_.get("cnpg.io/cluster")
+        or labels_.get("app")
+        or pod["metadata"]["name"]
+    )
+
+
+def evaluate_pod(
+    pod: dict[str, Any], previous_restarts: dict[str, int] | None = None
+) -> list[CheckResult]:
+    """One result per container that is not healthy; nothing for a healthy pod."""
+    name = f"{pod_service(pod)}/{pod['metadata']['name']}"
+    status = pod.get("status", {})
+    phase = status.get("phase", "Unknown")
+    if phase == "Succeeded":
+        return []
+    if phase == "Failed":
+        return [CheckResult(name, "critical", f"pod failed: {status.get('reason') or 'unknown reason'}")]
+    if phase == "Pending":
+        reason = next(
+            (c.get("reason") for c in status.get("conditions", []) if c.get("status") == "False"),
+            None,
+        )
+        return [CheckResult(name, "warning", f"pod is Pending ({reason or 'scheduling'})")]
+
+    results: list[CheckResult] = []
+    previous_restarts = previous_restarts or {}
+    for container in status.get("containerStatuses", []) or []:
+        container_name = f"{name}:{container.get('name')}"
+        waiting = (container.get("state") or {}).get("waiting") or {}
+        last = (container.get("lastState") or {}).get("terminated") or {}
+        restarts = container.get("restartCount", 0) or 0
+        previous = previous_restarts.get(container_name)
+        if waiting.get("reason") in K8S_WAITING_CRITICAL:
+            results.append(CheckResult(container_name, "critical", f"container is {waiting['reason']}"))
+        elif previous is not None and restarts > previous:
+            detail = f"{restarts - previous} new restart(s) since previous inspection"
+            if last.get("reason") == "OOMKilled":
+                results.append(CheckResult(container_name, "critical", f"{detail}; last exit OOMKilled"))
+            else:
+                reason = last.get("reason") or f"exit {last.get('exitCode')}"
+                results.append(CheckResult(container_name, "warning", f"{detail}; last exit {reason}"))
+        elif not container.get("ready"):
+            results.append(CheckResult(container_name, "warning", "container is running but not ready"))
+    return results
+
+
+def evaluate_node(node: dict[str, Any]) -> CheckResult:
+    name = f"node/{node['metadata']['name']}"
+    conditions = {c.get("type"): c.get("status") for c in node.get("status", {}).get("conditions", [])}
+    if conditions.get("Ready") != "True":
+        return CheckResult(name, "critical", "node is not Ready")
+    pressure = [kind for kind in ("MemoryPressure", "DiskPressure", "PIDPressure") if conditions.get(kind) == "True"]
+    if pressure:
+        return CheckResult(name, "warning", "node reports " + ", ".join(pressure))
+    if node.get("spec", {}).get("unschedulable"):
+        return CheckResult(name, "warning", "node is cordoned")
+    return CheckResult(name, "pass", "Ready")
+
+
+def within_until(line: str, until: str | None) -> bool:
+    if not until:
+        return True
+    match = TIMESTAMP_PREFIX.match(line)
+    if not match:
+        return True
+    return match.group("timestamp")[:19] <= until[:19]
+
+
+def k8s_pod_logs(namespace: str, pod: str, args: argparse.Namespace) -> str:
+    command = ["logs", pod, "--namespace", namespace, "--all-containers", "--timestamps", "--prefix"]
+    if args.from_time:
+        command.extend(["--since-time", args.from_time])
+    else:
+        command.extend(["--since", args.since])
+    command.extend(["--tail", str(args.log_tail)])
+    output = kubectl(*command, allow_failure=True)
+    # --prefix writes "[pod/<name>/<container>] <timestamp> <message>"; drop it so fingerprints and
+    # the timestamp parser see the same line shape as Docker logs.
+    lines = [re.sub(r"^\[[^\]]+\]\s+", "", line) for line in output.splitlines()]
+    return "\n".join(line for line in lines if within_until(line, args.until))
+
+
+def run_k8s(args: argparse.Namespace) -> tuple[list[CheckResult], dict[str, list[dict[str, Any]]], str]:
+    context = kubectl("config", "current-context", allow_failure=True).strip() or "unknown"
+    roles = ("app", "data", "infra") if args.role in ("auto", "all") else (args.role,)
+    results: list[CheckResult] = []
+    log_findings: dict[str, list[dict[str, Any]]] = {}
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else None
+    checkpoint = load_checkpoint(checkpoint_path) if checkpoint_path else {}
+    previous = checkpoint.get("k8sRestarts", {})
+    current_restarts: dict[str, int] = {}
+    scanned_namespaces: list[str] = []
+
+    if "app" in roles:
+        namespace = K8S_NAMESPACES["app"]
+        scanned_namespaces.append(namespace)
+        deployments = {d["metadata"]["name"]: d for d in kubectl_items("deployments", "--namespace", namespace)}
+        expected = set(EXPECTED_SERVICES) | PRODUCTION_AI_SERVICES | K8S_PLATFORM_DEPLOYMENTS
+        for name in sorted(expected):
+            deployment = deployments.get(name)
+            if deployment is None:
+                results.append(CheckResult(name, "critical", f"Deployment missing from namespace {namespace}"))
+            else:
+                results.append(evaluate_deployment(deployment))
+        for name in sorted(set(deployments) - expected):
+            results.append(evaluate_deployment(deployments[name]))
+
+    if "data" in roles:
+        namespace = K8S_NAMESPACES["data"]
+        scanned_namespaces.append(namespace)
+        statefulsets = {s["metadata"]["name"]: s for s in kubectl_items("statefulsets", "--namespace", namespace)}
+        for name in sorted(K8S_DATA_STATEFULSETS):
+            if name not in statefulsets:
+                results.append(CheckResult(name, "critical", f"StatefulSet missing from namespace {namespace}"))
+            else:
+                results.append(evaluate_statefulset(statefulsets[name]))
+        for cluster in kubectl_items("clusters.postgresql.cnpg.io", "--namespace", namespace):
+            name = f"postgres/{cluster['metadata']['name']}"
+            desired = cluster.get("spec", {}).get("instances", 1)
+            ready = cluster.get("status", {}).get("readyInstances", 0) or 0
+            phase = cluster.get("status", {}).get("phase", "unknown")
+            status = "pass" if ready == desired else ("critical" if ready == 0 else "warning")
+            results.append(CheckResult(name, status, f"{ready}/{desired} instance(s) ready; {phase}"))
+        rabbit = kubectl_items("rabbitmqclusters.rabbitmq.com", "--namespace", K8S_NAMESPACES["app"])
+        for cluster in rabbit:
+            ready = any(
+                c.get("type") == "AllReplicasReady" and c.get("status") == "True"
+                for c in cluster.get("status", {}).get("conditions", [])
+            )
+            results.append(
+                CheckResult(
+                    f"rabbitmq/{cluster['metadata']['name']}",
+                    "pass" if ready else "critical",
+                    "all replicas ready" if ready else "not all replicas ready",
+                )
+            )
+
+    if "infra" in roles:
+        for node in kubectl_items("nodes"):
+            results.append(evaluate_node(node))
+        for key in ("monitoring", "traefik"):
+            namespace = K8S_NAMESPACES[key]
+            scanned_namespaces.append(namespace)
+            for deployment in kubectl_items("deployments", "--namespace", namespace):
+                results.append(evaluate_deployment(deployment))
+
+    for namespace in scanned_namespaces:
+        for pod in kubectl_items("pods", "--namespace", namespace):
+            restarts_before = {
+                key.split("|", 1)[1]: value
+                for key, value in previous.items()
+                if key.startswith(pod["metadata"].get("uid", "") + "|")
+            }
+            results.extend(evaluate_pod(pod, restarts_before))
+            for container in pod.get("status", {}).get("containerStatuses", []) or []:
+                key = f"{pod['metadata'].get('uid', '')}|{pod_service(pod)}/{pod['metadata']['name']}:{container.get('name')}"
+                current_restarts[key] = container.get("restartCount", 0) or 0
+            if args.no_logs or pod.get("status", {}).get("phase") not in ("Running", "Failed"):
+                continue
+            service = pod_service(pod)
+            raw_logs = k8s_pod_logs(namespace, pod["metadata"]["name"], args)
+            findings = extract_log_findings(raw_logs, max(args.log_tail * 2, args.max_log_findings))
+            groups = group_log_findings(findings, args.max_log_findings)
+            if groups:
+                existing = log_findings.setdefault(service, [])
+                existing.extend(groups)
+                severity = "critical" if args.log_errors_critical else "warning"
+                window = f"{args.from_time or args.since}..{args.until or 'now'}"
+                results.append(
+                    CheckResult(
+                        f"{service}/{pod['metadata']['name']}",
+                        severity,
+                        f"{len(findings)} suspicious log line(s), {len(groups)} fingerprint(s) in {window}",
+                        "logs",
+                    )
+                )
+
+    if checkpoint_path and not args.until:
+        checkpoint["k8sRestarts"] = current_restarts
+        checkpoint["checkedAt"] = datetime.now(timezone.utc).isoformat()
+        save_checkpoint(checkpoint_path, checkpoint)
+
+    return results, log_findings, f"k8s:{context}"
+
+
 def render_human(
     results: list[CheckResult], log_findings: dict[str, list[dict[str, Any]]], project: str
 ) -> None:
@@ -554,10 +811,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-logs", action="store_true", help="skip recent Docker log inspection")
     parser.add_argument("--require-ai", action="store_true", help="require all production AI worker services")
     parser.add_argument(
+        "--platform",
+        choices=("docker", "k8s"),
+        default=os.getenv("INSPECTOR_PLATFORM", "docker"),
+        help="docker: the Compose host this runs on; k8s: the cluster KUBECONFIG points at",
+    )
+    parser.add_argument(
         "--role",
-        choices=("auto", "app", "data", "infra"),
+        choices=("auto", "all", "app", "data", "infra"),
         default="auto",
-        help="host inventory to enforce; auto detects it from Compose services",
+        help="host inventory to enforce; auto detects it from Compose services (k8s: all roles)",
     )
     parser.add_argument("--log-errors-critical", action="store_true", help="make suspicious log findings exit 2")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
@@ -568,8 +831,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        results, log_findings, project = run(args)
-    except (RuntimeError, json.JSONDecodeError) as error:
+        if args.platform == "k8s":
+            results, log_findings, project = run_k8s(args)
+        else:
+            results, log_findings, project = run(args)
+    except (RuntimeError, json.JSONDecodeError, FileNotFoundError) as error:
         results = [CheckResult("inspector", "critical", redact(str(error)))]
         log_findings = {}
         project = ""

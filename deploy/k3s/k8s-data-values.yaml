@@ -1,36 +1,67 @@
-# Production Kubernetes Data Helm Values
-# Storage mapped to Data VM 35GB NVMe Volume at /srv/warptalk
+# Production data-platform values: CloudNativePG + PgBouncer and RabbitMQ.
+# Redis and Qdrant are separate Helm releases configured by deploy/k3s/data/redis-values.yaml
+# and deploy/k3s/data/qdrant-values.yaml (a `redis:` block here was never read by anything).
+#
+# Everything below runs on the ONE Data VM (2 vCPU / 8 GiB) and its 35 GB volume mounted at
+# /srv/warptalk. The request and storage arithmetic is in deploy/k3s/README.md ("Capacity plan").
 
+placement:
+  nodeSelector:
+    node.warptalk.io/role: data
+  tolerations:
+    - key: node.warptalk.io/role
+      operator: Equal
+      value: data
+      effect: NoSchedule
+
+# The four data-namespace secrets (postgres superuser, backup credentials, redis auth, qdrant
+# auth) are written by the release job from the GitHub `production` environment.
 externalSecrets:
-  secretStoreName: warptalk-production-secret-store
-  postgresRemoteKey: warptalk/production/postgres-superuser
-  backupRemoteKey: warptalk/production/postgres-backup
-  redisRemoteKey: warptalk/production/redis
-  qdrantRemoteKey: warptalk/production/qdrant
+  enabled: false
 
 postgres:
+  # Two instances with `preferred` durability. Both live on the same Data VM, so a third would buy
+  # no protection against losing the machine - it would only spend ~1 GiB of the node's 8 on a
+  # second copy of the same failure domain. Two still covers what one VM CAN survive: a crashed
+  # or corrupted instance, and a rolling Postgres update without downtime. `preferred` is what
+  # makes two safe: with `required` (the old minSyncReplicas: 1) every commit waits for the
+  # standby, so the standby restarting would stop all writes. Losing the VM itself is covered by
+  # the WAL archive and nightly base backup in object storage (RPO ~5 min, archive_timeout).
   instances: 2
-  storageSize: 25Gi
+  synchronous:
+    method: any
+    number: 1
+    dataDurability: preferred
+  storageSize: 10Gi
+  resources:
+    requests: {cpu: 300m, memory: 1Gi}
+    limits: {cpu: 600m, memory: 2Gi}
+  parameters:
+    shared_buffers: 512MB
+    effective_cache_size: 1GB
+    maintenance_work_mem: 64MB
   pooler:
     instances: 1
     maxClientConnections: "1000"
-    defaultPoolSize: "20"
+    # Per database/user pair: nine service databases x 10 stays well inside max_connections 200
+    # (and the WarpTalkPostgresConnectionsNearBudget alert at 160).
+    defaultPoolSize: "10"
     resources:
-      requests: {cpu: 100m, memory: 128Mi}
-      limits: {cpu: 500m, memory: 512Mi}
+      requests: {cpu: 50m, memory: 64Mi}
+      limits: {cpu: 200m, memory: 128Mi}
   backup:
     destinationPath: s3://warptalk-backups/postgres
-    endpointURL: https://330fda6ca031ea97293b02db8e62996d.r2.cloudflarestorage.com
+    # endpointURL is deliberately absent: it carries the object-store account id, so the release
+    # job passes it from BACKUP_S3_ENDPOINT_URL in the GitHub `production` runtime env
+    # (scripts/deploy-k3s-data.sh K3S_BACKUP_ENDPOINT_URL).
     retentionPolicy: 30d
-
-redis:
-  sentinel:
-    enabled: true
-    replicas: 2
-  storage:
-    size: 5Gi
-    storageClass: local-path
 
 rabbitmq:
   replicas: 1
-  storageSize: 5Gi
+  storageSize: 2Gi
+  resources:
+    requests: {cpu: 200m, memory: 512Mi}
+    limits: {cpu: 500m, memory: 1Gi}
+
+qdrantSnapshots:
+  enabled: true

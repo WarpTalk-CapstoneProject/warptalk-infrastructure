@@ -34,24 +34,22 @@ spec:
   switchoverDelay: 60
   smartShutdownTimeout: 30
   stopDelay: 300
-  minSyncReplicas: 1
-  maxSyncReplicas: 1
   storage:
     size: {{ .Values.postgres.storageSize }}
     storageClass: {{ .Values.storageClass }}
+  {{- with .Values.placement }}
   affinity:
+    {{- with .nodeSelector }}
+    nodeSelector:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .tolerations }}
     tolerations:
-      - key: "node.warptalk.io/role"
-        operator: "Equal"
-        value: "data"
-        effect: "NoSchedule"
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
   resources:
-    requests:
-      cpu: "1"
-      memory: 4Gi
-    limits:
-      cpu: "4"
-      memory: 12Gi
+    {{- toYaml .Values.postgres.resources | nindent 4 }}
   bootstrap:
     initdb:
       database: postgres
@@ -62,7 +60,22 @@ spec:
     name: warptalk-postgres-superuser
   enableSuperuserAccess: true
   postgresql:
+    {{- with .Values.postgres.synchronous }}
+    synchronous:
+      method: {{ .method }}
+      number: {{ .number }}
+      dataDurability: {{ .dataDurability }}
+    {{- end }}
     parameters:
+      {{- range $key, $value := .Values.postgres.parameters }}
+      {{ $key }}: {{ $value | quote }}
+      {{- end }}
+      # pg_stat_statements, which enable-postgres-performance-observability.sh and
+      # report-postgres-performance.sh read. CloudNativePG manages shared_preload_libraries
+      # itself and rejects it as a parameter (why it was dropped); setting any
+      # pg_stat_statements.* option is how it is told to preload the library.
+      pg_stat_statements.max: "10000"
+      pg_stat_statements.track: all
       max_connections: "200"
       wal_level: replica
       archive_timeout: 5min
@@ -97,6 +110,14 @@ spec:
       labels:
         app.kubernetes.io/name: warptalk-postgres-pooler
     spec:
+      {{- with .Values.placement.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.placement.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: pgbouncer
           resources:
@@ -115,7 +136,10 @@ spec:
                   matchLabels:
                     app.kubernetes.io/name: warptalk-postgres-pooler
                 topologyKey: kubernetes.io/hostname
+{{- if ge (int .Values.postgres.pooler.instances) 2 }}
 ---
+# Only with two or more poolers; over a single pod a PDB either allows everything or blocks
+# every drain.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -126,6 +150,7 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: warptalk-postgres-pooler
+{{- end }}
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup

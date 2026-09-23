@@ -14,6 +14,8 @@ spec:
           ingress:
             ingressClassName: {{ .Values.ingress.className }}
 ---
+# The app and API hosts. cert-manager renews 30 days before expiry, so nobody owns a manual
+# renewal; the release acceptance gate waits for this Certificate to be Ready.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -22,7 +24,24 @@ spec:
   secretName: {{ .Values.ingress.tlsSecretName }}
   dnsNames:
     - {{ .Values.global.domain }}
+    {{- with .Values.global.apiDomain }}
+    - {{ . }}
+    {{- end }}
   issuerRef:
     kind: ClusterIssuer
     name: {{ .Values.ingress.certManager.clusterIssuerName }}
+{{- with .Values.ingress.apexDomain }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $.Values.ingress.apexTlsSecretName }}
+spec:
+  secretName: {{ $.Values.ingress.apexTlsSecretName }}
+  dnsNames:
+    - {{ . }}
+  issuerRef:
+    kind: ClusterIssuer
+    name: {{ $.Values.ingress.certManager.clusterIssuerName }}
+{{- end }}
 {{- end }}

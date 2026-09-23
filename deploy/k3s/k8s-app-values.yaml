@@ -1,31 +1,58 @@
-# Production Kubernetes Application Helm Values
-# Tuned for WarpTalk 3-VM Cluster (App Node: 8 vCPU / 16 GB RAM)
+# Production Kubernetes application values for the three Vietnix VMs
+# (terraform/vietnix: App 8 vCPU / 16 GiB, Data 2 vCPU / 8 GiB, Infra 2 vCPU / 4 GiB).
+#
+# NO image references, digests or release ids live here. The k8s release job
+# (.github/workflows/release.yml, job production-k8s) passes every imageRef and global.releaseId
+# from the signed release manifest the build job produced - see scripts/deploy-k3s-release.sh.
+# A hard-coded digest in this file is exactly what the release gate exists to prevent: a deploy
+# that looks current and runs last month's images.
+#
+# The capacity arithmetic behind every request below is in deploy/k3s/README.md
+# ("Capacity plan"); change a number here and the table there together.
 
 global:
   production: true
+  # APP_DOMAIN and API_DOMAIN, as production compose has always split them. Every callback URL
+  # compose builds from ${API_DOMAIN} is built from apiDomain here, so a cutover changes no URL
+  # registered at Google, Stripe or an MCP provider (scripts/check-k3s-compose-url-parity.sh).
   domain: app.warptalk.io.vn
-  imageRegistry: ghcr.io/warptalk
-  releaseId: prod-k8s-v1
+  apiDomain: api.warptalk.io.vn
+  imageRegistry: ghcr.io/warptalk-capstoneproject
+  # Written by the release job (scripts/materialize-k8s-runtime-secrets.sh) from GHCR_PULL_TOKEN.
+  imagePullSecrets:
+    - name: warptalk-ghcr
+
+placement:
+  # Every application pod on the App VM. The Data VM carries the NoSchedule taint
+  # node.warptalk.io/role=data, and the Infra VM is the control plane; the release job labels
+  # and taints the nodes from K8S_*_NODES before it deploys (scripts/label-k8s-nodes.sh).
+  nodeSelector:
+    node.warptalk.io/role: app
+
+network:
+  # Must equal the kubeadm --pod-network-cidr (scripts/k8s-cluster-bootstrap.sh POD_CIDR).
+  podCidrs:
+    - 10.244.0.0/16
 
 secret:
+  # One source of truth for runtime secrets: the GitHub `production` environment. The release
+  # job writes warptalk-runtime from it (scripts/materialize-k8s-runtime-secrets.sh), so no
+  # ExternalSecret and no ClusterSecretStore are involved in production.
   externalSecret:
-    enabled: true
-    secretStoreName: warptalk-production-secret-store
-    remoteKey: warptalk/production/runtime
-    postgresRemoteKey: warptalk/production/postgres-superuser
-    redisRemoteKey: warptalk/production/redis
-    qdrantRemoteKey: warptalk/production/qdrant
+    enabled: false
 
 ingress:
   className: traefik
   tlsSecretName: warptalk-tls
+  # Served like the app host. Production compose never had a Caddy block for it, so it is left
+  # off until its DNS points at the App VM; setting it adds a separate Certificate that cannot
+  # hold the app/api certificate hostage.
+  apexDomain: ""
   certManager:
-    enabled: false
+    enabled: true
     clusterIssuerName: warptalk-letsencrypt
     email: admin@warptalk.io.vn
-
-migrator:
-  imageRef: ghcr.io/warptalk-capstoneproject/migrator:prod-k8s-v1@sha256:529497b3afe7216b9e9402c0b0ba8ac90406df5aaabe690b6c187a6996b02a91
+    server: https://acme-v02.api.letsencrypt.org/directory
 
 costObservability:
   enabled: true
@@ -43,163 +70,188 @@ costObservability:
     livekitUsd: "300"
     objectStorageGb: "500"
 
-# Workloads tuned for 16GB App Node RAM budget
 gotenberg:
   replicas: 1
   resources:
-    requests: {cpu: 50m, memory: 64Mi}
+    # The CPU limit stays at 1: see the load-bearing note in chart/values.yaml.
+    requests: {cpu: 100m, memory: 128Mi}
     limits: {cpu: "1", memory: 512Mi}
 
 telemetry:
   replicas: 1
   resources:
-    requests: {cpu: 50m, memory: 64Mi}
-    limits: {cpu: 500m, memory: 256Mi}
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 200m, memory: 384Mi}
 
+seq:
+  storageClass: local-path
+  storageSize: 10Gi
+  resources:
+    requests: {cpu: 100m, memory: 384Mi}
+    limits: {cpu: 200m, memory: 640Mi}
+
+# KEDA owns stt/translation/tts. One replica each at rest, as compose runs them; queue lag
+# scales them out to three.
+keda:
+  workers:
+    stt-worker: {min: 1, max: 3}
+    translation-worker: {min: 1, max: 3}
+    tts-worker: {min: 1, max: 3}
+
+# Requests are what the scheduler reserves, limits are the ceiling compose already runs each
+# service under (deploy/production/app.compose.yml). Memory limit is ~2x the request, CPU limit
+# 2x. HPA targets are a share of the REQUEST, so they were raised with it: at the old 30m
+# request a 75% target meant "scale out above 22 millicores", i.e. always.
 workloads:
   frontend:
     replicas: 2
-    cpu: 50m
-    memory: 96Mi
-    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/frontend:prod-k8s-v1@sha256:02c18fb336118fae151ca7bf09158b563a093f06a87adbf30213bf41d91d8325
+    cpu: 100m
+    memory: 256Mi
+    cpuLimit: 200m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
   gateway:
     replicas: 2
-    cpu: 50m
-    memory: 96Mi
-    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/gateway:prod-k8s-v1@sha256:1ce663d26f79dcc2b07042d1637611ea823b23145842d6a728cc331525fa31b0
+    cpu: 250m
+    memory: 256Mi
+    cpuLimit: 500m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: true, min: 2, max: 4, cpu: 70}
 
   auth-service:
     replicas: 2
-    cpu: 30m
-    memory: 64Mi
-    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/auth-service:prod-k8s-v1@sha256:4e09eae0c13b3625e216fb0b5718b6dab412f2963a8960052590c7d529609c3f
+    cpu: 100m
+    memory: 256Mi
+    cpuLimit: 200m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
   translation-room-service:
     replicas: 2
-    cpu: 30m
-    memory: 64Mi
-    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/translation-room-service:prod-k8s-v1@sha256:809fcd9d1235a8dec2b2a2a61a42824150835dac4b295c1342198ed16a53f3ad
+    cpu: 150m
+    memory: 320Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
   transcript-service:
     replicas: 2
-    cpu: 30m
-    memory: 64Mi
-    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/transcript-service:prod-k8s-v1@sha256:d367d381a17a7c10b8032005d6510630ec275cdff478abb4f3a3fb414a4a5c86
+    cpu: 150m
+    memory: 320Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
   notification-service:
     replicas: 2
-    cpu: 30m
-    memory: 64Mi
-    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/notification-service:prod-k8s-v1@sha256:53bb949078874c17949a521790f28c795668da920ee434406726187090ce9ab8
+    cpu: 100m
+    memory: 192Mi
+    cpuLimit: 200m
+    memoryLimit: 384Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
   meeting-service:
     replicas: 2
-    cpu: 30m
-    memory: 64Mi
-    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/meeting-service:prod-k8s-v1@sha256:a64e3ddfab1feb3b38334ac014e1d50e89b2c5b2513610fe6e062356e04d7f6c
+    cpu: 200m
+    memory: 384Mi
+    cpuLimit: 400m
+    memoryLimit: 768Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
   workspace-service:
     replicas: 2
-    cpu: 30m
-    memory: 64Mi
-    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/workspace-service:prod-k8s-v1@sha256:6de607dd440aa81fc7f3d39023ce883c22c2ddcc4ae26950983a2afd52171960
+    cpu: 150m
+    memory: 320Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
   billing-service:
     replicas: 2
-    cpu: 30m
-    memory: 64Mi
-    autoscaling: {enabled: true, min: 2, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/billing-service:prod-k8s-v1@sha256:efc1501438d1b30b16a5b06e35bb464f546f3394ed3009db5538f31a515ed12f
+    cpu: 150m
+    memory: 320Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
+  # One replica: the data-protection key ring sits on a node-local ReadWriteOnce volume, and
+  # pvcs.yaml refuses RWO for anything that can run two pods.
   assistant-service:
     replicas: 1
-    cpu: 30m
-    memory: 64Mi
+    cpu: 150m
+    memory: 320Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
     autoscaling: {enabled: false}
-    imageRef: ghcr.io/warptalk-capstoneproject/assistant-service:prod-k8s-v1@sha256:9ebc101d81cb22d8f4d5a4d9375968abe28197b367a9bd43d67691446d494906
     persistence:
       storageClass: local-path
       accessMode: ReadWriteOnce
 
   stt-worker:
-    replicas: 1
-    cpu: 50m
-    memory: 128Mi
-    autoscaling: {enabled: false}
-    imageRef: ghcr.io/warptalk-capstoneproject/ai-stt:prod-k8s-v1@sha256:332a442f0548370801f34ffa3e8b2212d2cb1fd0fb20243ad096f6fee57a9aac
+    cpu: 300m
+    memory: 1Gi
+    cpuLimit: 600m
+    memoryLimit: 2Gi
 
   translation-worker:
-    replicas: 1
-    cpu: 50m
-    memory: 128Mi
-    autoscaling: {enabled: false}
-    imageRef: ghcr.io/warptalk-capstoneproject/ai-translation:prod-k8s-v1@sha256:4281ff35e7d3bc9531fa85efd0bb6a804da865c9fa89cfe166111c52fb0d65ac
+    cpu: 150m
+    memory: 384Mi
+    cpuLimit: 300m
+    memoryLimit: 768Mi
 
   tts-worker:
-    replicas: 1
-    cpu: 50m
-    memory: 128Mi
-    autoscaling: {enabled: false}
-    imageRef: ghcr.io/warptalk-capstoneproject/ai-tts:prod-k8s-v1@sha256:cbee0de2ab1f508a8dad3bd07197c17b298cd86c21c23a4072858b013329c2a9
+    cpu: 250m
+    memory: 768Mi
+    cpuLimit: 500m
+    memoryLimit: 1536Mi
 
   suggestion-worker:
-    replicas: 1
-    cpu: 30m
-    memory: 96Mi
-    autoscaling: {enabled: false}
-    imageRef: ghcr.io/warptalk-capstoneproject/ai-suggestion:prod-k8s-v1@sha256:8ade9bfe67295bceb33b6cd87f7d8c7bcd7d076fda34476e44faaa2332b69003
+    cpu: 100m
+    memory: 256Mi
+    cpuLimit: 200m
+    memoryLimit: 512Mi
 
   embedding-worker:
     replicas: 1
-    cpu: 50m
-    memory: 128Mi
+    cpu: 150m
+    memory: 512Mi
+    cpuLimit: 300m
+    memoryLimit: 1Gi
     autoscaling: {enabled: false}
-    imageRef: ghcr.io/warptalk-capstoneproject/ai-embedding:prod-k8s-v1@sha256:b2f770feccd42e918d2cde55c750c8ec29b3b4e3c43e506a83cc4d5c6683842b
 
   security-worker:
     replicas: 1
-    cpu: 30m
-    memory: 64Mi
-    autoscaling: {enabled: false}
-    imageRef: ghcr.io/warptalk-capstoneproject/ai-security:prod-k8s-v1@sha256:a948a08bfe3451aecca437bb9e0ad680b0e118b7988998cd3aa03d5ebe9f45d6
+    cpu: 100m
+    memory: 192Mi
+    cpuLimit: 200m
+    memoryLimit: 384Mi
 
   billing-worker:
     replicas: 1
-    cpu: 30m
-    memory: 64Mi
-    autoscaling: {enabled: false}
-    imageRef: ghcr.io/warptalk-capstoneproject/ai-billing:prod-k8s-v1@sha256:8da91eab70c218b8af9bafede9df420df20ac7ef92d4aa1b7238b879ac126b67
+    cpu: 100m
+    memory: 192Mi
+    cpuLimit: 200m
+    memoryLimit: 384Mi
 
   metrics-exporter:
-    replicas: 1
-    cpu: 20m
-    memory: 48Mi
-    autoscaling: {enabled: false}
-    imageRef: ghcr.io/warptalk-capstoneproject/ai-metrics:prod-k8s-v1@sha256:3dfdb0874496a79f06d3da9d5c0f39c3959f1af93a2b09fe8482202c37ba647b
+    cpu: 50m
+    memory: 96Mi
+    cpuLimit: 100m
+    memoryLimit: 192Mi
 
   livekit-ingress-worker:
     replicas: 1
-    cpu: 50m
-    memory: 128Mi
-    autoscaling: {enabled: true, min: 1, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/ai-livekit-ingress:prod-k8s-v1@sha256:1147eac8fa3c28b280baa11cc016541f370357dc6f64a8db5c1d80787fcb8787
+    cpu: 250m
+    memory: 768Mi
+    cpuLimit: 500m
+    memoryLimit: 1536Mi
+    autoscaling: {enabled: true, min: 1, max: 3, cpu: 75}
 
   assistant-worker:
     replicas: 1
-    cpu: 50m
-    memory: 128Mi
-    autoscaling: {enabled: true, min: 1, max: 4, cpu: 75}
-    imageRef: ghcr.io/warptalk-capstoneproject/ai-assistant:prod-k8s-v1@sha256:0fe054afb6c1aacd9eda0c102b4954fc5059538f478ea728205689000845046f
-    secretEnv:
-      REDIS_PASSWORD: REDIS_PASSWORD
-      OPENAI_API_KEY: OPENAI_API_KEY
-      VECTOR_DB_API_KEY: VECTOR_DB_API_KEY
+    cpu: 150m
+    memory: 384Mi
+    cpuLimit: 300m
+    memoryLimit: 768Mi
+    autoscaling: {enabled: true, min: 1, max: 3, cpu: 80}

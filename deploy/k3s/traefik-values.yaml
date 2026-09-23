@@ -1,36 +1,25 @@
+# Traefik for the WarpTalk cluster (chart traefik/traefik, version locked in addons.lock.env).
+#
+# Ingress path on Vietnix: the public address is NATed by the cloud to the App VM's private VPC
+# address. Neither MetalLB L2 (a VIP the cloud's SDN never learns about) nor a Tailscale address
+# can receive that traffic, and host ports would pin Traefik to one pod per node. So the Service
+# carries the App VM's VPC address as an externalIP (set at install time from
+# TRAEFIK_EXTERNAL_IPS by scripts/install-k3s-addons.sh): kube-proxy steers packets for that
+# address on :80/:443 straight to the Traefik pods, with externalTrafficPolicy: Local so there is
+# no SNAT and the gateway sees the real client address. See deploy/k3s/README.md "Ingress path".
 deployment:
-  replicas: 1
-logs:
-  general:
-    level: DEBUG
-  access:
-    enabled: true
-ports:
-  web:
-    port: 8000
-    hostPort: 80
-    expose:
-      default: true
-    exposedPort: 80
-  websecure:
-    port: 8443
-    hostPort: 443
-    expose:
-      default: true
-    exposedPort: 443
-tlsStore:
-  default:
-    defaultCertificate:
-      secretName: warptalk-tls
+  kind: Deployment
+  # Two pods, no host ports, so both can run on the single App node; a node drain or a Traefik
+  # rollout keeps one serving.
+  replicas: 2
 podDisruptionBudget:
   enabled: true
-  minAvailable: 1
-service:
-  type: LoadBalancer
-  spec:
-    externalTrafficPolicy: Cluster
+  maxUnavailable: 1
 autoscaling:
   enabled: false
+
+nodeSelector:
+  node.warptalk.io/role: app
 affinity:
   podAntiAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
@@ -40,3 +29,47 @@ affinity:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
+
+resources:
+  requests: {cpu: 100m, memory: 128Mi}
+  limits: {cpu: 300m, memory: 256Mi}
+
+log:
+  level: INFO
+
+# Access logs without secrets. The SignalR client sends its bearer token as ?access_token= on
+# the WebSocket upgrade (a browser cannot set headers there), so a RequestPath with its query
+# string is a log line full of live JWTs. Every query parameter is dropped from RequestPath, and
+# every header is dropped (the default, restated so nobody flips it to keep Authorization).
+accessLog:
+  enabled: true
+  format: json
+  fields:
+    defaultMode: keep
+    headers:
+      defaultMode: drop
+    queryParameters:
+      defaultMode: drop
+
+ports:
+  web:
+    # Every plain-HTTP request is redirected to HTTPS, except ACME HTTP-01 challenges, which
+    # cert-manager's solver must be able to answer on :80.
+    allowACMEByPass: true
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    http:
+      tls:
+        enabled: true
+
+service:
+  spec:
+    type: NodePort
+    # Preserve the client source address (no SNAT to a node IP). Required for the gateway's
+    # per-IP rate limits to mean anything.
+    externalTrafficPolicy: Local

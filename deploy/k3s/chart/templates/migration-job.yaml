@@ -19,7 +19,13 @@ spec:
         {{- include "warptalk.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
-      serviceAccountName: warptalk
+      serviceAccountName: warptalk-migrator
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      {{- include "warptalk.placement" . | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 70

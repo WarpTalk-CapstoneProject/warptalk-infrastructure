@@ -3,11 +3,27 @@ set -eu
 
 : "${RELEASE_MANIFEST:?RELEASE_MANIFEST is required}"
 : "${K3S_VALUES_FILE:?K3S_VALUES_FILE is required}"
-: "${K3S_SECRET_STORE_NAME:?K3S_SECRET_STORE_NAME is required}"
 : "${K3S_STORAGE_CLASS:?K3S_STORAGE_CLASS is required}"
 : "${K3S_TLS_SECRET_NAME:?K3S_TLS_SECRET_NAME is required}"
 
+# Where warptalk-runtime comes from:
+#   github            - written by the release job from the GitHub `production` environment
+#                       (scripts/materialize-k8s-runtime-secrets.sh) before this script runs.
+#                       Production uses this; values set secret.externalSecret.enabled: false.
+#   external-secrets  - an ExternalSecret against K3S_SECRET_STORE_NAME (a ClusterSecretStore).
+K3S_SECRET_SOURCE="${K3S_SECRET_SOURCE:-external-secrets}"
+case "$K3S_SECRET_SOURCE" in
+  github) ;;
+  external-secrets)
+    : "${K3S_SECRET_STORE_NAME:?K3S_SECRET_STORE_NAME is required for K3S_SECRET_SOURCE=external-secrets}"
+    ;;
+  *) echo "K3s release: K3S_SECRET_SOURCE must be github or external-secrets" >&2; exit 1 ;;
+esac
+
 OFFLINE_RENDER_ONLY="${OFFLINE_RENDER_ONLY:-false}"
+# Server-side dry run: everything up to and including `helm upgrade --dry-run=server`, which the
+# API server validates and admits without persisting. Nothing in the cluster changes.
+K3S_DRY_RUN="${K3S_DRY_RUN:-false}"
 K3S_MANAGED_TLS="${K3S_MANAGED_TLS:-true}"
 NAMESPACE="${K3S_NAMESPACE:-warptalk}"
 DATA_NAMESPACE="${K3S_DATA_NAMESPACE:-warptalk-data}"
@@ -20,6 +36,7 @@ matrix_file="$infra_root/deploy/production/image-matrix.json"
 lock_file="$infra_root/deploy/k3s/addons.lock.env"
 runtime_secret_check="$infra_root/scripts/check-k3s-runtime-secret.sh"
 acceptance_check="$infra_root/scripts/accept-k3s-release.sh"
+helm_locked="$infra_root/scripts/helm-locked.sh"
 
 fail() {
   echo "K3s release: $*" >&2
@@ -88,15 +105,10 @@ jq --slurpfile matrix "$matrix_file" '
 # shellcheck disable=SC1090
 . "$lock_file"
 
-docker run --rm \
-  -v "$chart_dir:/chart:ro" \
-  -v "$K3S_VALUES_FILE:/provider-values.yaml:ro" \
-  -v "$override_file:/image-values.json:ro" \
-  "$HELM_IMAGE" \
-  template "$RELEASE_NAME" /chart \
-    --namespace "$NAMESPACE" \
-    -f /provider-values.yaml \
-    -f /image-values.json >"$rendered_file"
+"$helm_locked" template "$RELEASE_NAME" "$chart_dir" \
+  --namespace "$NAMESPACE" \
+  -f "$K3S_VALUES_FILE" \
+  -f "$override_file" >"$rendered_file"
 
 docker run --rm -i "$KUBECONFORM_IMAGE" \
   -strict -summary -ignore-missing-schemas <"$rendered_file"
@@ -113,13 +125,17 @@ sql_exporter_image_count="$(grep -Fc "$SQL_EXPORTER_IMAGE_DIGEST" "$rendered_fil
 # release, so it is pinned in addons.lock.env rather than in the image matrix, and the count below
 # has to know about it or every release fails on an image it deliberately added.
 gotenberg_image_count="$(grep -Fc "$GOTENBERG_IMAGE_DIGEST" "$rendered_file")"
+# Seq, the log and trace store. Optional in the chart, so zero is allowed; more than one is not.
+seq_image_count="$(grep -Fc "$SEQ_IMAGE_DIGEST" "$rendered_file" || true)"
 [ "$otel_image_count" -eq 1 ] ||
   fail "rendered release must contain one locked telemetry collector image"
 [ "$sql_exporter_image_count" -eq 3 ] ||
   fail "rendered release must contain three locked SQL cost exporters"
 [ "$gotenberg_image_count" -eq 1 ] ||
   fail "rendered release must contain one locked document converter image"
-platform_image_count=$((otel_image_count + sql_exporter_image_count + gotenberg_image_count))
+[ "$seq_image_count" -le 1 ] ||
+  fail "rendered release must contain at most one locked Seq image"
+platform_image_count=$((otel_image_count + sql_exporter_image_count + gotenberg_image_count + seq_image_count))
 expected_total_image_count=$((expected_image_count + platform_image_count))
 [ "$image_count" -eq "$expected_total_image_count" ] ||
   fail "rendered $image_count immutable images; expected $expected_image_count release plus $platform_image_count locked platform images"
@@ -134,8 +150,17 @@ jq -r --slurpfile matrix "$matrix_file" '
       fail "release image must appear exactly once: $image_ref"
   done
 
-grep -Fq "name: $K3S_SECRET_STORE_NAME" "$rendered_file" ||
-  fail "provider values do not reference K3S_SECRET_STORE_NAME"
+if [ "$K3S_SECRET_SOURCE" = "external-secrets" ]; then
+  grep -Fq "name: $K3S_SECRET_STORE_NAME" "$rendered_file" ||
+    fail "provider values do not reference K3S_SECRET_STORE_NAME"
+else
+  if grep -Fq "kind: ExternalSecret" "$rendered_file"; then
+    fail "K3S_SECRET_SOURCE=github but the values still render an ExternalSecret; set secret.externalSecret.enabled: false"
+  fi
+fi
+# The release identity comes from the manifest, never from a values file.
+grep -Fq "value: \"$(jq -r '.tag' "$RELEASE_MANIFEST")\"" "$rendered_file" ||
+  fail "rendered release does not carry the manifest tag as RELEASE_ID"
 grep -Fq "secretName: $K3S_TLS_SECRET_NAME" "$rendered_file" ||
   fail "provider values do not reference K3S_TLS_SECRET_NAME"
 if [ "$K3S_MANAGED_TLS" = "true" ]; then
@@ -148,21 +173,28 @@ if [ "$OFFLINE_RENDER_ONLY" = "true" ]; then
   exit 0
 fi
 
-: "${K3S_DOMAIN:?K3S_DOMAIN is required for online acceptance}"
+[ -n "${K3S_DOMAIN:-}" ] || fail "K3S_DOMAIN is required for online acceptance"
+# Never the operator's default context: a deploy aimed by accident at whatever cluster
+# ~/.kube/config points to is how a laptop deploys production.
+# An explicit test, not ${KUBECONFIG:?}: after the EXIT trap above, a failed ${:?} expansion can
+# leave some /bin/sh implementations exiting 0.
+[ -n "${KUBECONFIG:-}" ] || fail "KUBECONFIG must name the target cluster explicitly"
+export KUBECONFIG
 
-for dependency in helm kubectl; do
-  command -v "$dependency" >/dev/null 2>&1 || fail "missing dependency: $dependency"
-done
+command -v kubectl >/dev/null 2>&1 || fail "missing dependency: kubectl"
 
 server_minor="$(kubectl version -o json | jq -r '.serverVersion.minor | sub("[^0-9].*$"; "") | tonumber')"
 [ "$server_minor" -ge 29 ] || fail "Kubernetes 1.29 or newer is required"
 
 kubectl get storageclass "$K3S_STORAGE_CLASS" >/dev/null
-kubectl get clustersecretstore "$K3S_SECRET_STORE_NAME" -o json |
-  jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
-    >/dev/null || fail "ClusterSecretStore is not Ready"
+if [ "$K3S_SECRET_SOURCE" = "external-secrets" ]; then
+  kubectl get clustersecretstore "$K3S_SECRET_STORE_NAME" -o json |
+    jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
+      >/dev/null || fail "ClusterSecretStore is not Ready"
+  kubectl get crd externalsecrets.external-secrets.io >/dev/null ||
+    fail "missing required CRD: externalsecrets.external-secrets.io"
+fi
 for crd in \
-  externalsecrets.external-secrets.io \
   scaledobjects.keda.sh \
   triggerauthentications.keda.sh \
   servicemonitors.monitoring.coreos.com \
@@ -198,22 +230,41 @@ kubectl get service warptalk-rabbitmq --namespace "$NAMESPACE" >/dev/null ||
   fail "required messaging service is unavailable: $NAMESPACE/warptalk-rabbitmq"
 kubectl get secret warptalk-rabbitmq-default-user --namespace "$NAMESPACE" >/dev/null ||
   fail "RabbitMQ generated credentials are unavailable"
-if kubectl get secret "${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" \
+if [ "$K3S_SECRET_SOURCE" = "github" ]; then
+  # Materialized by the release job before this script; its absence is a job defect, not
+  # something to paper over. The pre-install migration hook reads it before any pod starts.
+  K3S_NAMESPACE="$NAMESPACE" \
+    K3S_RUNTIME_SECRET_NAME="${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" \
+    "$runtime_secret_check" ||
+    fail "runtime secret from the GitHub production environment is missing or invalid"
+elif kubectl get secret "${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" \
   --namespace "$NAMESPACE" >/dev/null 2>&1; then
   K3S_NAMESPACE="$NAMESPACE" \
     K3S_RUNTIME_SECRET_NAME="${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" \
     "$runtime_secret_check"
 fi
 
+if [ "$K3S_DRY_RUN" = "true" ]; then
+  # The API server admits every rendered object (schemas, CRDs, webhooks, quotas, RBAC for this
+  # identity) without persisting anything. Hooks are rendered, not run.
+  "$helm_locked" upgrade --install "$RELEASE_NAME" "$chart_dir" \
+    --namespace "$NAMESPACE" \
+    --dry-run=server \
+    -f "$K3S_VALUES_FILE" \
+    -f "$override_file" >/dev/null
+  echo "K3s immutable release server-side dry run: PASS ($(jq -r '.tag' "$RELEASE_MANIFEST")); nothing was changed"
+  exit 0
+fi
+
 previous_revision=""
-if helm status "$RELEASE_NAME" --namespace "$NAMESPACE" >/dev/null 2>&1; then
+if "$helm_locked" status "$RELEASE_NAME" --namespace "$NAMESPACE" >/dev/null 2>&1; then
   previous_revision="$(
-    helm history "$RELEASE_NAME" --namespace "$NAMESPACE" --output json |
+    "$helm_locked" history "$RELEASE_NAME" --namespace "$NAMESPACE" --output json |
       jq -r '[.[] | select(.status == "deployed")] | last | .revision // empty'
   )"
 fi
 
-helm upgrade --install "$RELEASE_NAME" "$chart_dir" \
+"$helm_locked" upgrade --install "$RELEASE_NAME" "$chart_dir" \
   --namespace "$NAMESPACE" \
   --create-namespace \
   --atomic \
@@ -224,24 +275,26 @@ helm upgrade --install "$RELEASE_NAME" "$chart_dir" \
 
 rollback_release() {
   if [ -n "$previous_revision" ]; then
-    helm rollback "$RELEASE_NAME" "$previous_revision" \
+    "$helm_locked" rollback "$RELEASE_NAME" "$previous_revision" \
       --namespace "$NAMESPACE" \
       --wait \
       --timeout 15m
     return
   fi
 
-  helm uninstall "$RELEASE_NAME" \
+  "$helm_locked" uninstall "$RELEASE_NAME" \
     --namespace "$NAMESPACE" \
     --wait \
     --timeout 15m
 }
 
 post_deploy_checks() {
-  kubectl wait --for=condition=Ready \
-    "externalsecret/${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" \
-    --namespace "$NAMESPACE" \
-    --timeout=5m || return 1
+  if [ "$K3S_SECRET_SOURCE" = "external-secrets" ]; then
+    kubectl wait --for=condition=Ready \
+      "externalsecret/${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" \
+      --namespace "$NAMESPACE" \
+      --timeout=5m || return 1
+  fi
   K3S_NAMESPACE="$NAMESPACE" \
     K3S_RUNTIME_SECRET_NAME="${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" \
     "$runtime_secret_check" || return 1
@@ -267,6 +320,7 @@ post_deploy_checks() {
     K3S_RUNTIME_SECRET_NAME="${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" \
     K3S_TLS_SECRET_NAME="$K3S_TLS_SECRET_NAME" \
     K3S_MANAGED_TLS="$K3S_MANAGED_TLS" \
+    K3S_SECRET_SOURCE="$K3S_SECRET_SOURCE" \
     "$acceptance_check"
 }
 

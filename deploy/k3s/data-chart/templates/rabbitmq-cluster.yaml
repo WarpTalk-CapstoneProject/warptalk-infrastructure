@@ -9,12 +9,7 @@ spec:
     storageClassName: {{ .Values.storageClass }}
     storage: {{ .Values.rabbitmq.storageSize }}
   resources:
-    requests:
-      cpu: 300m
-      memory: 1Gi
-    limits:
-      cpu: "2"
-      memory: 3Gi
+    {{- toYaml .Values.rabbitmq.resources | nindent 4 }}
   rabbitmq:
     additionalConfig: |
       cluster_partition_handling = pause_minority
@@ -29,12 +24,14 @@ spec:
             labels:
               warptalk.io/component: rabbitmq
           spec:
-            containers: []
+            {{- with .Values.placement.nodeSelector }}
+            nodeSelector:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+            {{- with .Values.placement.tolerations }}
             tolerations:
-              - key: "node.warptalk.io/role"
-                operator: "Equal"
-                value: "data"
-                effect: "NoSchedule"
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
             topologySpreadConstraints:
               - maxSkew: 1
                 topologyKey: kubernetes.io/hostname
