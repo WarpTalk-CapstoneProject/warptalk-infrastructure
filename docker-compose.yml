@@ -455,6 +455,8 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
+      GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
+      GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
       RabbitMQ__Host: "rabbitmq"
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
