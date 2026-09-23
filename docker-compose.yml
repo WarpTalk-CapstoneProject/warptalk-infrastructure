@@ -640,6 +640,9 @@ services:
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
+      # Optional: a Cartesia ADMIN key turns on billing's usage sync (admin Insights, measured dubbing cost).
+      Cartesia__AdminApiKey: ${CARTESIA_ADMIN_API_KEY:-}
+      Cartesia__UsageApiKeyId: ${CARTESIA_USAGE_API_KEY_ID:-}
       Stripe__SuccessUrl: ${STRIPE_SUCCESS_URL:-http://localhost:3000/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}}
       Stripe__CancelUrl: ${STRIPE_CANCEL_URL:-http://localhost:3000/workspace/payment/plans}
       Billing__Workers__SessionMonitorIntervalSeconds: ${BILLING_SESSION_MONITOR_INTERVAL_SECONDS:-5}

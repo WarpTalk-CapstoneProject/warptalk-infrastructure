@@ -144,6 +144,19 @@ echo "${google_workspace_client_id%%-*}" | grep -Eq '^[0-9]{8,}$' ||
 
 require_length GOOGLE_WORKSPACE_CLIENT_SECRET 24
 
+# Cartesia usage sync — OPTIONAL, so only a value that is present is checked. The usage API only
+# accepts an ADMIN key; a standard TTS key (sk_car_...) pasted here passes every presence check,
+# answers 401 on every sync, and leaves Insights estimating with nothing but a log line to say so.
+cartesia_admin_key="$(value_of CARTESIA_ADMIN_API_KEY)"
+case "$cartesia_admin_key" in
+  ""|sk_car_admin_*) ;;
+  *) fail "CARTESIA_ADMIN_API_KEY must be a Cartesia admin API key (sk_car_admin_...)" ;;
+esac
+cartesia_usage_key_id="$(value_of CARTESIA_USAGE_API_KEY_ID)"
+[ -z "$cartesia_usage_key_id" ] ||
+  echo "$cartesia_usage_key_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' ||
+  fail "CARTESIA_USAGE_API_KEY_ID must be a Cartesia API key id (a UUID from GET /api-keys)"
+
 case "$(value_of LIVEKIT_URL)" in
   wss://*.livekit.cloud) ;;
   *) fail "LIVEKIT_URL must be a LiveKit Cloud WebSocket URL" ;;

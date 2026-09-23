@@ -87,6 +87,17 @@ spec:
                   name: {{ $.Values.secret.name }}
                   key: {{ $secretKey }}
           {{- end }}
+          {{- /* A key the runtime secret may not carry yet. `optional` keeps the pod starting without it
+                 (a plain secretKeyRef to a missing key is CreateContainerConfigError); the service
+                 itself must treat the empty value as "feature off". */}}
+          {{- range $envName, $secretKey := $app.optionalSecretEnv }}
+            - name: {{ $envName }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secret.name }}
+                  key: {{ $secretKey }}
+                  optional: true
+          {{- end }}
           {{- if $app.rabbitmq }}
             - name: RabbitMq__Username
               valueFrom:
