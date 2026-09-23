@@ -1,0 +1,32 @@
+# Production Kubernetes Data Helm Values
+# Storage mapped to Data VM 35GB NVMe Volume at /srv/warptalk
+
+externalSecrets:
+  secretStoreName: warptalk-production-secret-store
+  postgresRemoteKey: warptalk/production/postgres-superuser
+  backupRemoteKey: warptalk/production/postgres-backup
+  redisRemoteKey: warptalk/production/redis
+  qdrantRemoteKey: warptalk/production/qdrant
+
+postgres:
+  instances: 2
+  storage:
+    size: 25Gi
+    storageClass: local-nvme-data
+  backup:
+    destinationPath: s3://warptalk-backups/postgres
+    retentionPolicy: 30d
+
+redis:
+  sentinel:
+    enabled: true
+    replicas: 2
+  storage:
+    size: 5Gi
+    storageClass: local-nvme-data
+
+rabbitmq:
+  replicas: 1
+  storage:
+    size: 5Gi
+    storageClass: local-nvme-data
