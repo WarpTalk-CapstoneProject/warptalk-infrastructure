@@ -335,6 +335,12 @@ workloads:
       Redis__ConnectionString: Redis__ConnectionString
       Stripe__SecretKey: STRIPE_SECRET_KEY
       Stripe__WebhookSecret: STRIPE_WEBHOOK_SECRET
+    # CartesiaUsageSyncWorker (admin Insights, measured dubbing cost). Optional: without the admin
+    # key the worker logs once that it is disabled and Insights estimate. Several replicas are safe:
+    # they share one sync schedule through a Redis lease, so Cartesia sees one sync per interval.
+    optionalSecretEnv:
+      Cartesia__AdminApiKey: CARTESIA_ADMIN_API_KEY
+      Cartesia__UsageApiKeyId: CARTESIA_USAGE_API_KEY_ID
   assistant-service:
     image: assistant-service
     replicas: 2
