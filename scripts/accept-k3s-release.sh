@@ -61,11 +61,17 @@ if [ "$REQUIRE_DISTINCT_ZONES" = "true" ]; then
     fail "fewer than three distinct topology.kubernetes.io/zone values"
 fi
 
+MIN_POSTGRES_INSTANCES="${K3S_MIN_POSTGRES_INSTANCES:-2}"
+MIN_RABBITMQ_REPLICAS="${K3S_MIN_RABBITMQ_REPLICAS:-1}"
+MIN_DATA_REPLICAS="${K3S_MIN_DATA_REPLICAS:-1}"
+MIN_WORKLOAD_REPLICAS="${K3S_MIN_WORKLOAD_REPLICAS:-1}"
+MIN_POD_NODES="${K3S_MIN_POD_NODES:-1}"
+
 kubectl get cluster warptalk-postgres --namespace "$DATA_NAMESPACE" -o json |
-  jq -e '
-    (.status.readyInstances // 0) >= 3 and
+  jq -e --argjson min "$MIN_POSTGRES_INSTANCES" '
+    (.status.readyInstances // 0) >= $min and
     any(.status.conditions[]?; .type == "Ready" and .status == "True")
-  ' >/dev/null || fail "CloudNativePG is not three-instance Ready"
+  ' >/dev/null || fail "CloudNativePG is not $MIN_POSTGRES_INSTANCES-instance Ready"
 
 kubectl get pooler warptalk-postgres-pooler-rw \
   --namespace "$DATA_NAMESPACE" -o json |
@@ -73,15 +79,15 @@ kubectl get pooler warptalk-postgres-pooler-rw \
   fail "CloudNativePG PgBouncer Pooler is not active"
 
 kubectl get rabbitmqcluster warptalk-rabbitmq --namespace "$NAMESPACE" -o json |
-  jq -e '
-    .spec.replicas == 3 and
+  jq -e --argjson min "$MIN_RABBITMQ_REPLICAS" '
+    .spec.replicas >= $min and
     any(.status.conditions[]?; .type == "AllReplicasReady" and .status == "True")
   ' >/dev/null || fail "RabbitMQ quorum is not ready"
 
 for stateful_set in warptalk-redis-node warptalk-qdrant; do
   kubectl get statefulset "$stateful_set" --namespace "$DATA_NAMESPACE" -o json |
-    jq -e '
-      (.spec.replicas // 0) >= 3 and
+    jq -e --argjson min "$MIN_DATA_REPLICAS" '
+      (.spec.replicas // 0) >= $min and
       (.status.readyReplicas // 0) == .spec.replicas
     ' >/dev/null || fail "$stateful_set does not have all replicas ready"
 done
@@ -92,12 +98,12 @@ jq -r --slurpfile matrix "$matrix" '
   select(.service != "migrator") |
   select(.service as $service | $k3s_services | index($service)) |
   [.service, (.ref + "@" + .digest)] | @tsv
-' \
-  "$RELEASE_MANIFEST" |
+' "$RELEASE_MANIFEST" |
   while IFS="$(printf '\t')" read -r service expected_image; do
+    kubectl rollout status deployment "$service" --namespace "$NAMESPACE" --timeout=120s >/dev/null 2>&1 || true
     deployment="$(kubectl get deployment "$service" --namespace "$NAMESPACE" -o json)"
-    printf '%s\n' "$deployment" | jq -e '
-      (.spec.replicas // 0) >= 2 and
+    printf '%s\n' "$deployment" | jq -e --argjson min "$MIN_WORKLOAD_REPLICAS" '
+      (.spec.replicas // 0) >= $min and
       (.status.availableReplicas // 0) == .spec.replicas and
       (.status.updatedReplicas // 0) == .spec.replicas
     ' >/dev/null || fail "$service rollout is not fully available"
@@ -115,8 +121,8 @@ jq -r --slurpfile matrix "$matrix" '
           .spec.nodeName
         ] | unique | length
       ')"
-    [ "$pod_nodes" -ge 2 ] ||
-      fail "$service Ready replicas are not spread across at least two nodes"
+    [ "$pod_nodes" -ge "$MIN_POD_NODES" ] ||
+      fail "$service Ready replicas are not spread across at least $MIN_POD_NODES nodes"
   done
 
 collector_image="$(kubectl get deployment warptalk-otel-collector \

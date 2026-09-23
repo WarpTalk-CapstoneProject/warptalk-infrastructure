@@ -27,7 +27,7 @@ test -r "$lock_file" || fail "cannot read add-on lock"
 "$script_dir/check-k3s-addons.sh"
 
 server_minor="$(kubectl version -o json | jq -r '.serverVersion.minor | sub("[^0-9].*$"; "") | tonumber')"
-minimum_minor="${KUBERNETES_MIN_VERSION#*.}"
+minimum_minor="$(echo "$KUBERNETES_MIN_VERSION" | cut -d. -f2)"
 [ "$server_minor" -ge "$minimum_minor" ] ||
   fail "Kubernetes $KUBERNETES_MIN_VERSION or newer is required"
 kubectl get storageclass "$K3S_STORAGE_CLASS" >/dev/null
@@ -92,7 +92,8 @@ helm upgrade --install external-secrets external-secrets/external-secrets \
 helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
   --version "$PROMETHEUS_STACK_CHART_VERSION" \
   --namespace monitoring \
-  --atomic --wait --timeout 15m
+  --atomic --wait --timeout 15m \
+  --set "prometheus-node-exporter.tolerations[0].operator=Exists"
 
 helm upgrade --install keda kedacore/keda \
   --version "$KEDA_CHART_VERSION" \
@@ -103,7 +104,8 @@ if [ "$INSTALL_METRICS_SERVER" = "true" ]; then
   helm upgrade --install metrics-server metrics-server/metrics-server \
     --version "$METRICS_SERVER_CHART_VERSION" \
     --namespace kube-system \
-    --atomic --wait --timeout 10m
+    --atomic --wait --timeout 10m \
+    --set "args={--kubelet-insecure-tls}"
 else
   kubectl get deployment metrics-server --namespace kube-system >/dev/null ||
     fail "metrics-server is absent; rerun with INSTALL_METRICS_SERVER=true"

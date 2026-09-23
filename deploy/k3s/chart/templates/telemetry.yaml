@@ -38,6 +38,8 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile: {type: RuntimeDefault}
       topologySpreadConstraints:
         - maxSkew: 1
@@ -74,6 +76,9 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
             capabilities: {drop: ["ALL"]}
           resources:
             {{- toYaml .Values.telemetry.resources | nindent 12 }}

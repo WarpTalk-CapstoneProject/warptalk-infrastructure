@@ -8,12 +8,15 @@ metadata:
     app.kubernetes.io/name: {{ $name }}
     {{- include "warptalk.labels" $ | nindent 4 }}
 spec:
+  {{- if not (or (and $app.autoscaling $app.autoscaling.enabled) (hasSuffix "-worker" $name)) }}
   replicas: {{ $app.replicas }}
+  {{- end }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
+  minReadySeconds: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}
@@ -29,6 +32,19 @@ spec:
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
+        {{- if $app.runAsUser }}
+        runAsUser: {{ $app.runAsUser }}
+        runAsGroup: {{ $app.runAsGroup | default $app.runAsUser }}
+        {{- else if or (hasSuffix "-worker" $name) (eq $name "metrics-exporter") }}
+        runAsUser: 999
+        runAsGroup: 999
+        {{- else if eq $name "frontend" }}
+        runAsUser: 1000
+        runAsGroup: 1000
+        {{- else }}
+        runAsUser: 1654
+        runAsGroup: 1654
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
         {{- with $app.persistence }}
@@ -70,12 +86,34 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            {{- if or (hasSuffix "-exporter" $name) (eq $name "billing-cost-exporter") (eq $name "livekit-cost-exporter") (eq $name "workspace-storage-exporter") }}
+            runAsUser: 65534
+            runAsGroup: 65534
+            {{- else if or (hasSuffix "-worker" $name) (eq $name "metrics-exporter") }}
+            runAsUser: 999
+            runAsGroup: 999
+            {{- else if eq $name "frontend" }}
+            runAsUser: 1000
+            runAsGroup: 1000
+            {{- else }}
+            runAsUser: 1654
+            runAsGroup: 1654
+            {{- end }}
             capabilities:
               drop: ["ALL"]
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sleep", "5"]
           envFrom:
             - configMapRef:
                 name: warptalk-runtime
           env:
+          {{- with $app.port }}
+            - name: ASPNETCORE_HTTP_PORTS
+              value: {{ . | quote }}
+          {{- end }}
           {{- range $envName, $value := $app.env }}
             - name: {{ $envName }}
               value: {{ tpl (toString $value) $ | quote }}
@@ -108,11 +146,13 @@ spec:
             exec:
               command: ["python", "-m", "shared.health_probe"]
             periodSeconds: 5
+            timeoutSeconds: 5
             failureThreshold: 24
           livenessProbe:
             exec:
               command: ["python", "-m", "shared.health_probe"]
             periodSeconds: 20
+            timeoutSeconds: 5
             failureThreshold: 3
           {{- end }}
           {{- with $app.port }}

@@ -10,23 +10,38 @@ master:
     enabled: true
     storageClass: replicated-nvme
     size: 20Gi
-  podAntiAffinityPreset: hard
+  podAntiAffinityPreset: soft
+  tolerations:
+    - key: "node.warptalk.io/role"
+      operator: "Equal"
+      value: "data"
+      effect: "NoSchedule"
 replica:
-  replicaCount: 3
+  replicaCount: 2
   persistence:
     enabled: true
     storageClass: replicated-nvme
     size: 20Gi
-  podAntiAffinityPreset: hard
+  podAntiAffinityPreset: soft
+  tolerations:
+    - key: "node.warptalk.io/role"
+      operator: "Equal"
+      value: "data"
+      effect: "NoSchedule"
 sentinel:
   enabled: true
   image:
     digest: sha256:ae75dd69c192a632bdeb21baa6721080be5b12347e52add922036398b47631da
   quorum: 2
   automateClusterRecovery: true
+  tolerations:
+    - key: "node.warptalk.io/role"
+      operator: "Equal"
+      value: "data"
+      effect: "NoSchedule"
 pdb:
   create: true
-  minAvailable: 2
+  minAvailable: 1
 metrics:
   enabled: true
   image:

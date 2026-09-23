@@ -168,15 +168,29 @@ helm upgrade --install warptalk-redis bitnami/redis \
   --set-string master.persistence.storageClass="$K3S_STORAGE_CLASS" \
   --set-string replica.persistence.storageClass="$K3S_STORAGE_CLASS"
 
-helm upgrade --install warptalk-qdrant qdrant/qdrant \
-  --version "$QDRANT_CHART_VERSION" \
-  --namespace "$DATA_NAMESPACE" \
-  --atomic \
-  --wait \
-  --timeout 15m \
-  -f "$qdrant_values" \
-  --set-string persistence.storageClassName="$K3S_STORAGE_CLASS" \
-  --post-renderer "$qdrant_post_renderer"
+docker run --rm \
+  --env-file "$lock_file" \
+  -e K3S_STORAGE_CLASS \
+  -e KUBECONFIG=/root/.kube/config \
+  -v "${KUBECONFIG:-$HOME/.kube/config}:/root/.kube/config:ro" \
+  -v "$qdrant_values:/qdrant-values.yaml:ro" \
+  -v "$qdrant_post_renderer:/pin-qdrant-images.sh:ro" \
+  --network host \
+  --entrypoint sh \
+  "$HELM_IMAGE" \
+  -ec '
+    helm repo add qdrant https://qdrant.github.io/qdrant-helm >/dev/null
+    helm repo update >/dev/null
+    helm upgrade --install warptalk-qdrant qdrant/qdrant \
+      --version "$QDRANT_CHART_VERSION" \
+      --namespace "'"$DATA_NAMESPACE"'" \
+      --atomic \
+      --wait \
+      --timeout 15m \
+      -f /qdrant-values.yaml \
+      --set-string persistence.storageClassName="$K3S_STORAGE_CLASS" \
+      --post-renderer /pin-qdrant-images.sh
+  '
 
 kubectl wait --for=condition=Ready cluster/warptalk-postgres \
   --namespace "$DATA_NAMESPACE" --timeout=15m

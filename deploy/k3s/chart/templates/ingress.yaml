@@ -6,12 +6,23 @@ metadata:
   labels:
     {{- include "warptalk.labels" . | nindent 4 }}
   annotations:
-    traefik.ingress.kubernetes.io/router.middlewares: warptalk-security-headers@kubernetescrd
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: traefik-warptalk-security-headers@kubernetescrd
+    traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.name: "warptalk_gw_stick"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.secure: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.samesite: "none"
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   tls:
-    - hosts: [{{ .Values.global.domain | quote }}]
+    - hosts:
+        - {{ .Values.global.domain | quote }}
+        - "warptalk.io.vn"
       secretName: {{ .Values.ingress.tlsSecretName }}
+    - hosts:
+        - "api.warptalk.io.vn"
+      secretName: warptalk-api-tls
   rules:
     - host: {{ .Values.global.domain | quote }}
       http:
@@ -28,10 +39,6 @@ spec:
               service:
                 name: gateway
                 port: {number: 5200}
-          # The Client ID Metadata Document and its JWKS. An MCP authorization server fetches
-          # these by URL to learn who WarpTalk is, and the gateway forwards /oauth/client-metadata
-          # to the assistant service; without this rule they resolve to the frontend and CIMD
-          # registration falls back to DCR, or fails outright where DCR is not offered.
           - path: /oauth/client-metadata
             pathType: Prefix
             backend:
@@ -44,4 +51,40 @@ spec:
               service:
                 name: frontend
                 port: {number: 3000}
+    - host: "warptalk.io.vn"
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port: {number: 5200}
+          - path: /hubs
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port: {number: 5200}
+          - path: /oauth/client-metadata
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port: {number: 5200}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port: {number: 3000}
+    - host: "api.warptalk.io.vn"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port: {number: 5200}
 {{- end }}

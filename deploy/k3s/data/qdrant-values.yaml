@@ -1,4 +1,4 @@
-replicaCount: 3
+replicaCount: 1
 image:
   tag: v1.18.2
 apiKey:
@@ -8,7 +8,7 @@ apiKey:
       key: api-key
 config:
   cluster:
-    enabled: true
+    enabled: false
   storage:
     performance:
       max_search_threads: 4
@@ -19,13 +19,11 @@ persistence:
 podDisruptionBudget:
   enabled: true
   maxUnavailable: 1
-affinity:
-  podAntiAffinity:
-    requiredDuringSchedulingIgnoredDuringExecution:
-      - topologyKey: kubernetes.io/hostname
-        labelSelector:
-          matchLabels:
-            app.kubernetes.io/name: qdrant
+tolerations:
+  - key: "node.warptalk.io/role"
+    operator: "Equal"
+    value: "data"
+    effect: "NoSchedule"
 metrics:
   serviceMonitor:
     enabled: true

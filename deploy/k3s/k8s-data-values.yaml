@@ -10,11 +10,17 @@ externalSecrets:
 
 postgres:
   instances: 2
-  storage:
-    size: 25Gi
-    storageClass: local-nvme-data
+  storageSize: 25Gi
+  pooler:
+    instances: 1
+    maxClientConnections: "1000"
+    defaultPoolSize: "20"
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {cpu: 500m, memory: 512Mi}
   backup:
     destinationPath: s3://warptalk-backups/postgres
+    endpointURL: https://330fda6ca031ea97293b02db8e62996d.r2.cloudflarestorage.com
     retentionPolicy: 30d
 
 redis:
@@ -23,10 +29,8 @@ redis:
     replicas: 2
   storage:
     size: 5Gi
-    storageClass: local-nvme-data
+    storageClass: local-path
 
 rabbitmq:
   replicas: 1
-  storage:
-    size: 5Gi
-    storageClass: local-nvme-data
+  storageSize: 5Gi

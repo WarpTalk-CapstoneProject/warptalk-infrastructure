@@ -39,6 +39,12 @@ spec:
   storage:
     size: {{ .Values.postgres.storageSize }}
     storageClass: {{ .Values.storageClass }}
+  affinity:
+    tolerations:
+      - key: "node.warptalk.io/role"
+        operator: "Equal"
+        value: "data"
+        effect: "NoSchedule"
   resources:
     requests:
       cpu: "1"
@@ -58,7 +64,6 @@ spec:
   postgresql:
     parameters:
       max_connections: "200"
-      shared_preload_libraries: pg_stat_statements
       wal_level: replica
       archive_timeout: 5min
       max_wal_senders: "10"
@@ -103,11 +108,13 @@ spec:
               memory: {{ .Values.postgres.pooler.resources.limits.memory | quote }}
       affinity:
         podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  app.kubernetes.io/name: warptalk-postgres-pooler
-              topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: warptalk-postgres-pooler
+                topologyKey: kubernetes.io/hostname
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -115,7 +122,7 @@ metadata:
   name: warptalk-postgres-pooler
   namespace: {{ .Values.postgres.namespace }}
 spec:
-  minAvailable: 2
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: warptalk-postgres-pooler
