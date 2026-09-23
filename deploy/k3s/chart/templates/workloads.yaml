@@ -1,4 +1,8 @@
 {{- range $name, $app := .Values.workloads }}
+{{- $kedaManaged := include "warptalk.kedaManaged" (dict "name" $name "root" $) }}
+{{- $hpaManaged := and (not $app.singleton) $app.autoscaling $app.autoscaling.enabled }}
+{{- $uid := include "warptalk.runAsUser" (dict "name" $name "app" $app) }}
+{{- $gid := include "warptalk.runAsGroup" (dict "name" $name "app" $app) }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -7,13 +11,37 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ $name }}
     {{- include "warptalk.labels" $ | nindent 4 }}
+  {{- with $app.singletonWorkers }}
+  annotations:
+    # Background loops in this service that must run on ONE replica at a time. They are safe at
+    # replicas > 1 only once the backend's distributed lock (warptalk-backend
+    # fix/multi-replica-safety) guards them; see deploy/k3s/README.md "Singleton workers".
+    warptalk.io/singleton-workers: {{ join "," . | quote }}
+  {{- end }}
 spec:
+  {{- /*
+  Rendered unless an autoscaler owns the count. It used to be skipped for every "*-worker" name,
+  so a worker with neither an HPA nor a KEDA ScaledObject (security-worker, billing-worker,
+  suggestion-worker, embedding-worker) fell back to the API default of one replica whatever
+  the values said.
+  */}}
+  {{- if $app.singleton }}
+  replicas: 1
+  {{- else if not (or $kedaManaged $hpaManaged) }}
   replicas: {{ $app.replicas }}
+  {{- end }}
+  {{- if $app.singleton }}
+  # A singleton must never overlap itself, and a surge rollout runs old and new side by side.
+  strategy:
+    type: Recreate
+  {{- else }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
+  {{- end }}
+  minReadySeconds: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}
@@ -26,9 +54,15 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
     spec:
       serviceAccountName: warptalk
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
+        runAsUser: {{ $uid }}
+        runAsGroup: {{ $gid }}
         seccompProfile:
           type: RuntimeDefault
         {{- with $app.persistence }}
@@ -46,6 +80,7 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: {{ $name }}
+      {{- include "warptalk.placement" $ | nindent 6 }}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -70,12 +105,23 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: {{ $uid }}
+            runAsGroup: {{ $gid }}
             capabilities:
               drop: ["ALL"]
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sleep", "5"]
           envFrom:
             - configMapRef:
                 name: warptalk-runtime
           env:
+          {{- with $app.port }}
+            - name: ASPNETCORE_HTTP_PORTS
+              value: {{ . | quote }}
+          {{- end }}
           {{- range $envName, $value := $app.env }}
             - name: {{ $envName }}
               value: {{ tpl (toString $value) $ | quote }}
@@ -119,11 +165,13 @@ spec:
             exec:
               command: ["python", "-m", "shared.health_probe"]
             periodSeconds: 5
+            timeoutSeconds: 5
             failureThreshold: 24
           livenessProbe:
             exec:
               command: ["python", "-m", "shared.health_probe"]
             periodSeconds: 20
+            timeoutSeconds: 5
             failureThreshold: 3
           {{- end }}
           {{- with $app.port }}

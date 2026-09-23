@@ -23,6 +23,25 @@ on:
         required: true
         type: boolean
         default: false
+      # Production runs on Kubernetes (verified 2026-09-23: kubeadm cluster on the three VMs, every
+      # workload in namespace warptalk, Traefik holding :80/:443 on the App VM). compose is kept as
+      # a fallback for a rebuilt Docker host; it is not what production runs.
+      deploy_target:
+        description: "k8s: the kubeadm cluster production runs on. compose: fallback, the three VMs over SSH"
+        required: true
+        type: choice
+        options: [k8s, compose]
+        default: k8s
+      k8s_dry_run:
+        description: "k8s only: validate everything server-side (secrets, nodes, helm --dry-run=server) and change nothing"
+        required: false
+        type: boolean
+        default: false
+      k8s_bootstrap:
+        description: "k8s only: first run the idempotent cluster bootstrap (deployer RBAC, node roles, locked add-ons) with K8S_BOOTSTRAP_KUBECONFIG"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -210,6 +229,9 @@ jobs:
 
   production:
     needs: build-scan-sign
+    # The compose fallback. Only when explicitly chosen: production is on Kubernetes, and this job
+    # would SSH to hosts whose Docker stack is stopped.
+    if: ${{ inputs.deploy_target == 'compose' }}
     permissions:
       contents: read
       packages: read
@@ -556,3 +578,283 @@ jobs:
           ssh production-app \
             "APP_BASE_URL='$APP_BASE_URL' API_BASE_URL='$API_BASE_URL' \
              /opt/warptalk/current/scripts/smoke-production.sh"
+
+  # One-time (and safely repeatable) cluster bootstrap for the Kubernetes path. It is the only job
+  # that holds cluster-admin: K8S_BOOTSTRAP_KUBECONFIG can be deleted from the environment once the
+  # cluster is bootstrapped. Everything it does is idempotent (helm upgrade --install, server-side
+  # apply), so it runs for real even when k8s_dry_run is set - a release dry run needs the add-on
+  # CRDs to exist. It is also how Traefik and kube-prometheus-stack pick up their locked values.
+  # See deploy/k3s/README.md.
+  k8s-bootstrap:
+    needs: build-scan-sign
+    if: ${{ inputs.deploy_target == 'k8s' && inputs.k8s_bootstrap }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: warptalk-production
+      cancel-in-progress: false
+    environment: production
+    env:
+      K3S_STORAGE_CLASS: ${{ vars.K8S_STORAGE_CLASS || 'local-path' }}
+    steps:
+      # Job-level env cannot see runner.temp; set the per-run paths here.
+      - name: Runner paths
+        run: |
+          echo "KUBECONFIG=$RUNNER_TEMP/k8s-bootstrap.kubeconfig" >>"$GITHUB_ENV"
+          echo "WARPTALK_HELM_HOME=$RUNNER_TEMP/helm-home" >>"$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.infrastructure_ref }}
+          path: warptalk-infrastructure
+      - name: Join the production tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:github-actions
+          timeout: 45s
+          retry: "3"
+          ping: ${{ vars.PRODUCTION_APP_HOST }}
+      - name: Install the bootstrap kubeconfig
+        env:
+          K8S_BOOTSTRAP_KUBECONFIG: ${{ secrets.K8S_BOOTSTRAP_KUBECONFIG }}
+        run: |
+          set -eu
+          [ -n "$K8S_BOOTSTRAP_KUBECONFIG" ] || {
+            echo "K8S_BOOTSTRAP_KUBECONFIG is not set in the production environment" >&2
+            exit 1
+          }
+          umask 077
+          printf '%s\n' "$K8S_BOOTSTRAP_KUBECONFIG" >"$KUBECONFIG"
+          kubectl version --request-timeout=20s >/dev/null
+      - name: Deployer identity and namespaces
+        working-directory: warptalk-infrastructure
+        run: kubectl apply --server-side -f deploy/k3s/cluster/deployer-rbac.yaml
+      - name: Runtime secrets from the production environment
+        working-directory: warptalk-infrastructure
+        env:
+          K8S_RUNTIME_ENV: ${{ secrets.K8S_RUNTIME_ENV }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ needs.build-scan-sign.outputs.google_client_id }}
+          GOOGLE_WORKSPACE_CLIENT_ID: ${{ vars.GOOGLE_WORKSPACE_CLIENT_ID }}
+          GOOGLE_WORKSPACE_CLIENT_SECRET: ${{ secrets.GOOGLE_WORKSPACE_CLIENT_SECRET }}
+          CARTESIA_ADMIN_API_KEY: ${{ secrets.CARTESIA_ADMIN_API_KEY }}
+          CARTESIA_USAGE_API_KEY_ID: ${{ vars.CARTESIA_USAGE_API_KEY_ID }}
+          GHCR_PULL_USER: ${{ vars.GHCR_PULL_USER }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          set -eu
+          [ -n "$K8S_RUNTIME_ENV" ] || {
+            echo "The bootstrap installs Alertmanager and Grafana from K8S_RUNTIME_ENV; add that secret first" >&2
+            exit 1
+          }
+          umask 077
+          runtime_env="$RUNNER_TEMP/k8s-runtime.env"
+          printf '%s\n' "$K8S_RUNTIME_ENV" >"$runtime_env"
+          K8S_RUNTIME_ENV_FILE="$runtime_env" ./scripts/materialize-k8s-runtime-secrets.sh
+          rm -f "$runtime_env"
+      - name: Node roles and taints
+        working-directory: warptalk-infrastructure
+        env:
+          K8S_DATA_NODE_IP: ${{ vars.PRODUCTION_DATA_HOST }}
+          K8S_INFRA_NODE_IP: ${{ vars.PRODUCTION_INFRA_HOST }}
+          K8S_APP_NODES: ${{ vars.K8S_APP_NODES }}
+          K8S_DATA_NODES: ${{ vars.K8S_DATA_NODES }}
+          K8S_INFRA_NODES: ${{ vars.K8S_INFRA_NODES }}
+        run: ./scripts/label-k8s-nodes.sh
+      - name: Locked cluster add-ons
+        working-directory: warptalk-infrastructure
+        env:
+          INSTALL_METRICS_SERVER: "true"
+          # The live kubelets were joined without serverTLSBootstrap; see install-k3s-addons.sh.
+          METRICS_SERVER_KUBELET_INSECURE_TLS: "true"
+          # Production's secrets still come from the ClusterSecretStore until K8S_RUNTIME_ENV exists.
+          INSTALL_EXTERNAL_SECRETS: "true"
+        run: ./scripts/install-k3s-addons.sh
+
+  # The Kubernetes release: the same signed digests the build job produced, deployed by the
+  # scoped warptalk-deployer identity. Migrations run as the chart's pre-upgrade hook inside the
+  # release step; acceptance and the automatic rollback are part of deploy-k3s-release.sh.
+  production-k8s:
+    needs: [build-scan-sign, k8s-bootstrap]
+    if: >-
+      ${{ always() && inputs.deploy_target == 'k8s'
+          && needs.build-scan-sign.result == 'success'
+          && (needs.k8s-bootstrap.result == 'success' || needs.k8s-bootstrap.result == 'skipped') }}
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    concurrency:
+      group: warptalk-production
+      cancel-in-progress: false
+    environment: production
+    env:
+      K8S_DRY_RUN: ${{ inputs.k8s_dry_run }}
+      K3S_DRY_RUN: ${{ inputs.k8s_dry_run }}
+      K3S_STORAGE_CLASS: ${{ vars.K8S_STORAGE_CLASS || 'local-path' }}
+      K3S_TLS_SECRET_NAME: warptalk-tls
+      # The nodes carry no topology.kubernetes.io/zone labels: all three VMs are one Vietnix zone.
+      K3S_REQUIRE_DISTINCT_ZONES: "false"
+      APP_BASE_URL: ${{ vars.PRODUCTION_APP_BASE_URL }}
+      API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      # Job-level env cannot see runner.temp; set the per-run paths here.
+      - name: Runner paths
+        run: |
+          echo "KUBECONFIG=$RUNNER_TEMP/k8s-deployer.kubeconfig" >>"$GITHUB_ENV"
+          echo "WARPTALK_HELM_HOME=$RUNNER_TEMP/helm-home" >>"$GITHUB_ENV"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-${{ inputs.release_tag }}
+          path: release
+      # The chart, values and scripts at the exact infrastructure SHA the build job packaged.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.infrastructure_ref }}
+          path: warptalk-infrastructure
+      - name: Locate the signed release manifest
+        run: |
+          set -eu
+          case "$RELEASE_TAG" in
+            ""|*[!A-Za-z0-9._-]*)
+              echo "Unsafe release tag" >&2
+              exit 1
+              ;;
+          esac
+          manifest="$(find release -type f -name release-manifest.json -print -quit)"
+          test -n "$manifest"
+          jq -e --arg tag "$RELEASE_TAG" '.tag == $tag' "$manifest" >/dev/null || {
+            echo "release manifest tag does not match release_tag" >&2
+            exit 1
+          }
+          echo "RELEASE_MANIFEST=$GITHUB_WORKSPACE/$manifest" >>"$GITHUB_ENV"
+          domain="${APP_BASE_URL#https://}"
+          domain="${domain%%/*}"
+          case "$domain" in
+            ""|*[!A-Za-z0-9.-]*) echo "Unsafe PRODUCTION_APP_BASE_URL" >&2; exit 1 ;;
+          esac
+          echo "K3S_DOMAIN=$domain" >>"$GITHUB_ENV"
+      - name: Join the production tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:github-actions
+          timeout: 45s
+          retry: "3"
+          ping: ${{ vars.PRODUCTION_APP_HOST }}
+      - name: Install the deployer kubeconfig
+        env:
+          K8S_KUBECONFIG: ${{ secrets.K8S_KUBECONFIG }}
+        run: |
+          set -eu
+          [ -n "$K8S_KUBECONFIG" ] || {
+            echo "K8S_KUBECONFIG is not set in the production environment" >&2
+            exit 1
+          }
+          umask 077
+          printf '%s\n' "$K8S_KUBECONFIG" >"$KUBECONFIG"
+          kubectl version --request-timeout=20s >/dev/null
+          # Refuse a cluster-admin credential here: this job must run as the scoped deployer.
+          if kubectl auth can-i '*' '*' --all-namespaces >/dev/null 2>&1; then
+            echo "K8S_KUBECONFIG is cluster-admin; it must be the warptalk-deployer ServiceAccount" >&2
+            exit 1
+          fi
+      - name: Runtime secrets from the production environment
+        working-directory: warptalk-infrastructure
+        env:
+          K8S_RUNTIME_ENV: ${{ secrets.K8S_RUNTIME_ENV }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ needs.build-scan-sign.outputs.google_client_id }}
+          GOOGLE_WORKSPACE_CLIENT_ID: ${{ vars.GOOGLE_WORKSPACE_CLIENT_ID }}
+          GOOGLE_WORKSPACE_CLIENT_SECRET: ${{ secrets.GOOGLE_WORKSPACE_CLIENT_SECRET }}
+          CARTESIA_ADMIN_API_KEY: ${{ secrets.CARTESIA_ADMIN_API_KEY }}
+          CARTESIA_USAGE_API_KEY_ID: ${{ vars.CARTESIA_USAGE_API_KEY_ID }}
+          GHCR_PULL_USER: ${{ vars.GHCR_PULL_USER }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          set -eu
+          # One source of truth once K8S_RUNTIME_ENV exists: GitHub `production`. Until then the
+          # release keeps reading the ClusterSecretStore the cluster was bootstrapped with, so the
+          # next release does not wait on that secret - but it says so on every run.
+          if [ -z "$K8S_RUNTIME_ENV" ]; then
+            echo "::warning::K8S_RUNTIME_ENV is not set: runtime secrets still come from the warptalk-production-secret-store ClusterSecretStore (fake provider, values in its spec)"
+            {
+              echo "K3S_SECRET_SOURCE=external-secrets"
+              echo "K3S_SECRET_STORE_NAME=warptalk-production-secret-store"
+            } >>"$GITHUB_ENV"
+            exit 0
+          fi
+          umask 077
+          runtime_env="$RUNNER_TEMP/k8s-runtime.env"
+          printf '%s\n' "$K8S_RUNTIME_ENV" >"$runtime_env"
+          K8S_RUNTIME_ENV_FILE="$runtime_env" ./scripts/materialize-k8s-runtime-secrets.sh
+          {
+            echo "K3S_SECRET_SOURCE=github"
+            # The backup credentials now carry ENDPOINT_URL, so Qdrant can snapshot to S3.
+            echo "K3S_QDRANT_S3_SNAPSHOTS=true"
+          } >>"$GITHUB_ENV"
+          # The data chart needs the backup endpoint as a value (it carries the account id, so it
+          # is not committed); read it here rather than exposing the whole env to later steps.
+          endpoint="$(sed -n 's/^BACKUP_S3_ENDPOINT_URL=//p' "$runtime_env" | tail -n 1)"
+          rm -f "$runtime_env"
+          case "$endpoint" in
+            https://*) ;;
+            *) echo "BACKUP_S3_ENDPOINT_URL must be an https:// URL" >&2; exit 1 ;;
+          esac
+          echo "K3S_BACKUP_ENDPOINT_URL=$endpoint" >>"$GITHUB_ENV"
+      - name: Node roles and taints
+        working-directory: warptalk-infrastructure
+        env:
+          K8S_DATA_NODE_IP: ${{ vars.PRODUCTION_DATA_HOST }}
+          K8S_INFRA_NODE_IP: ${{ vars.PRODUCTION_INFRA_HOST }}
+          K8S_APP_NODES: ${{ vars.K8S_APP_NODES }}
+          K8S_DATA_NODES: ${{ vars.K8S_DATA_NODES }}
+          K8S_INFRA_NODES: ${{ vars.K8S_INFRA_NODES }}
+        run: ./scripts/label-k8s-nodes.sh
+      - name: Data platform
+        working-directory: warptalk-infrastructure
+        env:
+          K3S_DATA_VALUES_FILE: deploy/k3s/k8s-data-values.yaml
+        run: ./scripts/deploy-k3s-data.sh
+      - name: Release, migrations and acceptance (automatic rollback on failure)
+        working-directory: warptalk-infrastructure
+        env:
+          K3S_VALUES_FILE: deploy/k3s/k8s-app-values.yaml
+        run: ./scripts/deploy-k3s-release.sh
+      - name: Public health endpoints
+        if: ${{ !inputs.k8s_dry_run }}
+        working-directory: warptalk-infrastructure
+        run: ./scripts/smoke-production.sh
+      # Evidence, not a gate: acceptance above already decided. The JSON lands in the run summary
+      # so "what did prod look like right after vNNN" has an answer without a shell on any host.
+      - name: Health inspection (Kubernetes mode)
+        if: ${{ !inputs.k8s_dry_run }}
+        continue-on-error: true
+        working-directory: warptalk-infrastructure
+        run: |
+          set -eu
+          report="$RUNNER_TEMP/health-inspection.json"
+          status=0
+          python3 health-inspector/inspector.py --platform k8s --role all --since 15m --json \
+            >"$report" || status=$?
+          {
+            echo "### Health inspection after $RELEASE_TAG (exit $status)"
+            echo '```json'
+            jq '{exitCode, results: [.results[] | select(.status != "pass")], logFindings}' "$report"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$status"

@@ -82,4 +82,63 @@ if grep -Fq "printf '%s\\n' \"\$GHCR_TOKEN\"" "$workflow"; then
   fail "GHCR token must not be prepended to the remote shell program"
 fi
 
+# --- Kubernetes path (deploy_target=k8s) -------------------------------------------------------
+# Production runs on Kubernetes, so a dispatch that says nothing must deploy there; compose is a
+# fallback that runs only when chosen explicitly.
+grep -Eq '^      deploy_target:$' "$workflow" || fail "deploy_target input is missing"
+awk '/^      deploy_target:$/,/default:/' "$workflow" | grep -Eq 'default: k8s$' ||
+  fail "deploy_target must default to k8s, which is what production runs"
+awk '/^  production:$/,/^    permissions:$/' "$workflow" | grep -Fq "if: \${{ inputs.deploy_target == 'compose' }}" ||
+  fail "the compose job must run only when compose is chosen explicitly"
+grep -Eq '^  production-k8s:$' "$workflow" || fail "Kubernetes release job is missing"
+k8s_job="$(awk '/^  production-k8s:$/,0' "$workflow")"
+printf '%s\n' "$k8s_job" | grep -Eq '^    needs: \[build-scan-sign, k8s-bootstrap\]$' ||
+  fail "the k8s release must follow the signed build (and the optional bootstrap)"
+printf '%s\n' "$k8s_job" | grep -Eq "needs.build-scan-sign.result == 'success'" ||
+  fail "the k8s release must never run after a failed build"
+printf '%s\n' "$k8s_job" | grep -Eq '^    environment: production$' ||
+  fail "the k8s release must use the production Environment"
+printf '%s\n' "$k8s_job" | grep -Eq '^      group: warptalk-production$' ||
+  fail "the k8s release must share the production concurrency group"
+printf '%s\n' "$k8s_job" | grep -Eq 'tailscale/github-action@[0-9a-f]{40}' ||
+  fail "the k8s release must reach the cluster over the tailnet"
+printf '%s\n' "$k8s_job" | grep -Fq 'secrets.K8S_KUBECONFIG' ||
+  fail "the k8s release must use the scoped K8S_KUBECONFIG"
+printf '%s\n' "$k8s_job" | grep -Fq "kubectl auth can-i '*' '*' --all-namespaces" ||
+  fail "the k8s release must refuse a cluster-admin kubeconfig"
+if printf '%s\n' "$k8s_job" | grep -Fq 'K8S_BOOTSTRAP_KUBECONFIG'; then
+  fail "the k8s release must not see the bootstrap (cluster-admin) kubeconfig"
+fi
+printf '%s\n' "$k8s_job" | grep -Fq 'secrets.K8S_RUNTIME_ENV' ||
+  fail "runtime secrets must come from the GitHub production environment"
+for secret in STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET LIVEKIT_API_SECRET GOOGLE_WORKSPACE_CLIENT_SECRET CARTESIA_ADMIN_API_KEY; do
+  printf '%s\n' "$k8s_job" | grep -Fq "secrets.$secret" ||
+    fail "the k8s release must overlay $secret from GitHub like the compose release"
+done
+printf '%s\n' "$k8s_job" | grep -Fq 'needs.build-scan-sign.outputs.google_client_id' ||
+  fail "the k8s release must use the Google client id the web bundle was built with"
+printf '%s\n' "$k8s_job" | grep -Fq 'name: release-${{ inputs.release_tag }}' ||
+  fail "the k8s release must deploy the signed manifest from the build job"
+printf '%s\n' "$k8s_job" | grep -Fq 'ref: ${{ inputs.infrastructure_ref }}' ||
+  fail "the k8s release must use the dispatched infrastructure SHA"
+for step in materialize-k8s-runtime-secrets.sh label-k8s-nodes.sh deploy-k3s-data.sh deploy-k3s-release.sh smoke-production.sh; do
+  printf '%s\n' "$k8s_job" | grep -Fq "$step" || fail "the k8s release does not run $step"
+done
+data_line="$(printf '%s\n' "$k8s_job" | grep -n 'deploy-k3s-data.sh' | head -n1 | cut -d: -f1)"
+release_line="$(printf '%s\n' "$k8s_job" | grep -n 'deploy-k3s-release.sh' | head -n1 | cut -d: -f1)"
+(( data_line < release_line )) || fail "the data platform must deploy before the release"
+printf '%s\n' "$k8s_job" | grep -Fq 'echo "K3S_SECRET_SOURCE=github"' ||
+  fail "the k8s release must use GitHub production secrets when K8S_RUNTIME_ENV is set"
+printf '%s\n' "$k8s_job" | grep -Fq 'K3S_DRY_RUN: ${{ inputs.k8s_dry_run }}' ||
+  fail "k8s_dry_run must reach the deploy scripts"
+# The bootstrap is the only holder of cluster-admin, and it is opt-in.
+bootstrap_job="$(awk '/^  k8s-bootstrap:$/,/^  production-k8s:$/' "$workflow")"
+printf '%s\n' "$bootstrap_job" | grep -Fq "if: \${{ inputs.deploy_target == 'k8s' && inputs.k8s_bootstrap }}" ||
+  fail "the cluster bootstrap must be opt-in"
+printf '%s\n' "$bootstrap_job" | grep -Fq 'deploy/k3s/cluster/deployer-rbac.yaml' ||
+  fail "the bootstrap must apply the deployer RBAC"
+if grep -Eq 'required_reviewers' "$workflow"; then
+  fail "the production Environment gate is a wait timer; do not add required_reviewers"
+fi
+
 echo "GitHub production release contract: PASS"

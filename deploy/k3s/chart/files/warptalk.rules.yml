@@ -9,23 +9,59 @@ groups:
         annotations:
           summary: "Prometheus target {{ $labels.job }} is down"
 
-      - alert: WarpTalkApiHighErrorRatio
+      # PER SERVICE, not platform-wide, and grouped by a label that exists.
+      #
+      # This was `sum(...) / sum(...)` over everything, with no `by`. On 15–16 Aug the Documents
+      # endpoint answered 500 to EVERY request for a day — WorkspaceDbContext was missing a
+      # column mapping, so every SELECT over workspace_documents failed — and this alert never
+      # fired: measured across the whole platform the 5xx ratio was 0.0091, against a 0.05
+      # threshold. A totally broken feature is a rounding error in a global ratio, which is why
+      # the only alert mail anybody ever received was about Redis.
+      #
+      # `exported_job` is the service label the OTel collector actually applies. `service_name`
+      # — used by the old P95 rule below — does not exist on this metric at all, so `by
+      # (service_name)` collapsed every service into one unlabelled series and printed an empty
+      # name into the alert.
+      - alert: WarpTalkServiceHighErrorRatio
         expr: |
-          sum(rate(warptalk_http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
+          sum by (exported_job) (
+            rate(warptalk_http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])
+          )
           /
-          clamp_min(sum(rate(warptalk_http_server_request_duration_seconds_count[5m])), 0.001)
+          clamp_min(
+            sum by (exported_job) (rate(warptalk_http_server_request_duration_seconds_count[5m])),
+            0.001
+          )
           > 0.05
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "API 5xx ratio is above 5%"
+          summary: "{{ $labels.exported_job }} is answering 5xx to more than 5% of its requests"
+
+      # The ratio above still cannot see a broken endpoint on a busy service: one route at 100%
+      # failure is invisible if the service's other routes are healthy and numerous. A sustained
+      # 5xx RATE needs no denominator to hide behind.
+      #
+      # Deliberately low and deliberately slow: any service producing server errors continuously
+      # for fifteen minutes is worth an email, and warning rather than critical keeps it from
+      # competing with the ratio rule above during a real outage.
+      - alert: WarpTalkServiceErrorsSustained
+        expr: |
+          sum by (exported_job) (
+            rate(warptalk_http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])
+          ) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.exported_job }} has been returning 5xx continuously for 15 minutes"
 
       - alert: WarpTalkApiHighP95Latency
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le, service_name) (
+            sum by (le, exported_job) (
               rate(warptalk_http_server_request_duration_seconds_bucket[5m])
             )
           ) > 1.5
@@ -33,7 +69,7 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "{{ $labels.service_name }} P95 latency is above 1.5 seconds"
+          summary: "{{ $labels.exported_job }} P95 latency is above 1.5 seconds"
 
       - alert: WarpTalkPostgresConnectionsNearBudget
         expr: sum(pg_stat_activity_count) > 160
@@ -43,13 +79,27 @@ groups:
         annotations:
           summary: "PostgreSQL is above 80% of its 200-connection budget"
 
+      # Only where a maxmemory is configured. Without one redis_memory_max_bytes is 0, the
+      # clamp turned the denominator into 1 byte, and the ratio was "used bytes / 1" - permanently
+      # far above 0.85, so the alert fired forever and taught everyone to ignore it. An unset
+      # limit is its own alert below.
       - alert: WarpTalkRedisMemoryNearLimit
-        expr: redis_memory_used_bytes / clamp_min(redis_memory_max_bytes, 1) > 0.85
+        expr: |
+          (redis_memory_used_bytes / redis_memory_max_bytes > 0.85)
+          and on (instance) redis_memory_max_bytes > 0
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Redis memory is above 85% of maxmemory"
+
+      - alert: WarpTalkRedisMaxmemoryUnset
+        expr: redis_memory_max_bytes == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis {{ $labels.instance }} has no maxmemory; it will grow until the kernel OOM-kills it"
 
       - alert: WarpTalkRedisEvicting
         expr: increase(redis_evicted_keys_total[5m]) > 0
@@ -91,10 +141,118 @@ groups:
         annotations:
           summary: "{{ $labels.group }} has stuck pending messages on {{ $labels.stream }}"
 
+      # Both spellings. The Python workers publish to `<stream>:dead-letter`, the .NET side to
+      # `<stream>:dlq`, and this pattern only ever matched the first — so every backend DLQ was
+      # outside the alert. The exporter now scans both.
       - alert: WarpTalkDeadLetterPresent
-        expr: redis_stream_length{stream=~".*:dead-letter"} > 0
+        expr: redis_stream_length{stream=~".*:(dead-letter|dlq)"} > 0
         for: 1m
         labels:
           severity: warning
         annotations:
           summary: "Dead-letter stream {{ $labels.stream }} is not empty"
+
+      # A stream with a producer and nothing reading it.
+      #
+      # Redis keeps a consumer registered after its process dies, so this is NOT a liveness
+      # check — but ZERO is meaningful: it means the group has never had a reader attached at
+      # all. That is the shape of a consumer group created by a producer and never wired to
+      # anything, which is how the WarpBot consumer sat at pending 0 while lag climbed and
+      # looked merely idle on every other metric.
+      #
+      # Paired with lag > 0 deliberately. A group with no readers and nothing waiting is an
+      # unused stream, not an incident.
+      - alert: WarpTalkStreamGroupUnread
+        expr: |
+          max by (stream, group) (redis_stream_group_consumers) == 0
+          and
+          max by (stream, group) (redis_stream_group_lag) > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Nothing is reading {{ $labels.group }} on {{ $labels.stream }}, and it has a backlog"
+
+      # Postgres refusing statements. The Documents outage produced 79 of these in an hour
+      # (42703, a column that does not exist) and nothing was watching the counter — the failure
+      # was only ever visible by reading container logs by hand.
+      - alert: WarpTalkPostgresErrorsSustained
+        expr: sum(rate(pg_stat_database_xact_rollback[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL is rolling back more than 0.5 transactions/second"
+
+      # A worker process that is alive but no longer reading its stream. `up == 0` cannot see
+      # this — the container is running and the scrape succeeds; it is the CONSUMER that stopped.
+      - alert: WarpTalkStreamGroupStalled
+        expr: |
+          max by (stream, group) (redis_stream_group_lag) > 0
+          and
+          max by (stream, group) (delta(redis_stream_group_lag[15m])) >= 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.group }} has not reduced its backlog on {{ $labels.stream }} in 15 minutes"
+
+  # Kubernetes-only rules. Everything above is kept identical to observability/alerts/warptalk.rules.yml
+  # (scripts/check-k3s-deployment.sh compares the two), so a fix to an application alert lands in
+  # both runtimes or in neither.
+  - name: warptalk-kubernetes
+    rules:
+      # The per-group stream alerts above are only as good as the set of (stream, group) series
+      # the exporter publishes. The exporter once listed three pairs by hand while production had
+      # ~18 groups, so the group that was actually broken could not fire. The ai-metrics exporter
+      # now discovers streams with SCAN; this catches a regression back to a short list.
+      - alert: WarpTalkStreamGroupCoverageLow
+        expr: count(count by (stream, group) (redis_stream_group_lag)) < 10
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Only {{ $value }} Redis stream consumer groups are exported; lag alerts cannot see the rest"
+
+      - alert: WarpTalkPodCrashLooping
+        expr: |
+          max by (namespace, pod, container) (
+            kube_pod_container_status_waiting_reason{namespace=~"warptalk|warptalk-data", reason="CrashLoopBackOff"}
+          ) == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) is in CrashLoopBackOff"
+
+      - alert: WarpTalkContainerOomKilled
+        expr: |
+          increase(kube_pod_container_status_restarts_total{namespace=~"warptalk|warptalk-data"}[15m]) > 0
+          and on (namespace, pod, container)
+          max by (namespace, pod, container) (
+            kube_pod_container_status_last_terminated_reason{namespace=~"warptalk|warptalk-data", reason="OOMKilled"}
+          ) == 1
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) was OOM-killed in the last 15 minutes"
+
+      - alert: WarpTalkDeploymentReplicasUnavailable
+        expr: |
+          kube_deployment_status_replicas_available{namespace="warptalk"}
+          < kube_deployment_spec_replicas{namespace="warptalk"}
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.deployment }} has fewer available replicas than desired for 10 minutes"
+
+      - alert: WarpTalkPersistentVolumeFilling
+        expr: |
+          kubelet_volume_stats_available_bytes{namespace=~"warptalk|warptalk-data"}
+          / kubelet_volume_stats_capacity_bytes{namespace=~"warptalk|warptalk-data"} < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} has less than 15% free"
