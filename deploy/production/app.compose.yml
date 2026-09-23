@@ -368,6 +368,11 @@ services:
     environment:
       <<: *dotnet-environment
       HEALTH_PORT: "5104"
+      # WT-699 / TC4104: BROADCAST and SEGMENT admin announcements resolve their audience
+      # through AuthService (every active account) and WorkspaceService (one workspace's members).
+      # Without these the two modes are refused with a sentence saying so.
+      GrpcUrls__AuthServiceUrl: http://auth-service:50051
+      GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
       ConnectionStrings__DefaultConnection: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_notification;Username=warptalk_notification;Password=${NOTIFICATION_DB_PASSWORD:?};Search Path=notification,public;GSS Encryption Mode=Disable
       RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
