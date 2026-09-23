@@ -30,20 +30,31 @@ placement:
     node.warptalk.io/role: app
 
 network:
-  # Must equal the kubeadm --pod-network-cidr (scripts/k8s-cluster-bootstrap.sh POD_CIDR).
+  # The live Calico pool (default-ipv4-ippool, 192.168.0.0/16; nodes hold 192.168.0-2.0/24).
+  # Must equal POD_CIDR in scripts/k8s-cluster-bootstrap.sh for a rebuilt cluster.
   podCidrs:
-    - 10.244.0.0/16
+    - 192.168.0.0/16
 
 secret:
-  # One source of truth for runtime secrets: the GitHub `production` environment. The release
-  # job writes warptalk-runtime from it (scripts/materialize-k8s-runtime-secrets.sh), so no
-  # ExternalSecret and no ClusterSecretStore are involved in production.
+  # Target: one source of truth, the GitHub `production` environment. The release job writes
+  # warptalk-runtime from K8S_RUNTIME_ENV (scripts/materialize-k8s-runtime-secrets.sh) and keeps
+  # this disabled. Until K8S_RUNTIME_ENV exists the job falls back to the ClusterSecretStore
+  # production was bootstrapped with (a `fake` provider: the values sit in the store's own spec)
+  # and turns this on with the names below.
   externalSecret:
     enabled: false
+    secretStoreName: warptalk-production-secret-store
+    remoteKey: warptalk/production/runtime
+    postgresRemoteKey: warptalk/production/postgres-superuser
+    redisRemoteKey: warptalk/production/redis
+    qdrantRemoteKey: warptalk/production/qdrant
 
 ingress:
   className: traefik
+  # The two secrets production already serves (app host, API host). cert-manager takes them
+  # over in place, so a certificate is never swapped for one that does not cover its host.
   tlsSecretName: warptalk-tls
+  apiTlsSecretName: warptalk-api-tls
   # Served like the app host. Production compose never had a Caddy block for it, so it is left
   # off until its DNS points at the App VM; setting it adds a separate Certificate that cannot
   # hold the app/api certificate hostage.
@@ -188,11 +199,13 @@ workloads:
       storageClass: local-path
       accessMode: ReadWriteOnce
 
+  # Worker requests follow measured production usage (24h peak working set 110-280Mi, p95 CPU
+  # ~60m, 2026-09-23); limits keep compose's headroom for bursts.
   stt-worker:
-    cpu: 300m
-    memory: 1Gi
+    cpu: 150m
+    memory: 384Mi
     cpuLimit: 600m
-    memoryLimit: 2Gi
+    memoryLimit: 1Gi
 
   translation-worker:
     cpu: 150m
@@ -201,10 +214,10 @@ workloads:
     memoryLimit: 768Mi
 
   tts-worker:
-    cpu: 250m
-    memory: 768Mi
+    cpu: 150m
+    memory: 384Mi
     cpuLimit: 500m
-    memoryLimit: 1536Mi
+    memoryLimit: 1Gi
 
   suggestion-worker:
     cpu: 100m
@@ -242,10 +255,10 @@ workloads:
 
   livekit-ingress-worker:
     replicas: 1
-    cpu: 250m
-    memory: 768Mi
+    cpu: 200m
+    memory: 512Mi
     cpuLimit: 500m
-    memoryLimit: 1536Mi
+    memoryLimit: 1Gi
     autoscaling: {enabled: true, min: 1, max: 3, cpu: 75}
 
   assistant-worker:

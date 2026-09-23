@@ -7,22 +7,24 @@
 #   MODE=render (default)  write the kubeadm config to $KUBEADM_CONFIG and print the commands
 #   MODE=init              additionally run `kubeadm init` with it
 #
-# Every node address is a PARAMETER and must be a VPC address inside VPC_CIDR. The previous
-# version mixed the App VM's Tailscale address (100.72.255.18) with VPC addresses (10.20.0.x):
-# kubelet would have advertised an address the other nodes route over a different network, and
-# pod traffic between nodes would have depended on tailscaled staying up. Tailscale is only how
-# the GitHub runner reaches the API server, so its address is an optional certificate SAN.
+# Every node address is a PARAMETER, and all three must be on ONE network (NODE_CIDR). The previous
+# version mixed the App VM's Tailscale address (100.72.255.18) with VPC addresses (10.20.0.x), so
+# kubelets would have advertised addresses on two different networks. The live cluster
+# (2026-09-23) uses the tailnet for all three (100.70.83.108 / 100.72.255.18 / 100.122.196.85,
+# NODE_CIDR=100.64.0.0/10), which is also how the release runner reaches the API server; a VPC
+# build uses NODE_CIDR=10.20.0.0/24.
 set -euo pipefail
 
 MODE="${MODE:-render}"
-VPC_CIDR="${VPC_CIDR:-10.20.0.0/24}"
+NODE_CIDR="${NODE_CIDR:-100.64.0.0/10}"
 : "${INFRA_IP:?INFRA_IP (control-plane VPC address) is required}"
 : "${APP_IP:?APP_IP (App VM VPC address) is required}"
 : "${DATA_IP:?DATA_IP (Data VM VPC address) is required}"
 K8S_VERSION="${K8S_VERSION:-v1.31.0}"
 # Must equal network.podCidrs in deploy/k3s/k8s-app-values.yaml (the gateway trusts
-# X-Forwarded-For from it) and the Calico IP pool (scripts/k8s-install-cni-metallb.sh).
-POD_CIDR="${POD_CIDR:-10.244.0.0/16}"
+# X-Forwarded-For from it) and the Calico IP pool (scripts/k8s-install-cni-metallb.sh). The live
+# cluster runs Calico's 192.168.0.0/16.
+POD_CIDR="${POD_CIDR:-192.168.0.0/16}"
 SERVICE_CIDR="${SERVICE_CIDR:-10.96.0.0/12}"
 # Optional: the tailnet address or MagicDNS name the release runner uses to reach the API server
 # (K8S_KUBECONFIG's `server`). Added to the API server certificate SANs.
@@ -53,15 +55,15 @@ in_cidr() {
 for pair in "INFRA_IP=$INFRA_IP" "APP_IP=$APP_IP" "DATA_IP=$DATA_IP"; do
   name="${pair%%=*}"
   address="${pair#*=}"
-  case "$address" in
-    100.*) fail "$name=$address is a Tailscale (CGNAT) address; node addresses must be VPC addresses in $VPC_CIDR" ;;
-  esac
   ip_to_int "$address" >/dev/null || fail "$name=$address is not an IPv4 address"
-  in_cidr "$address" "$VPC_CIDR" || fail "$name=$address is outside VPC_CIDR $VPC_CIDR"
+  in_cidr "$address" "$NODE_CIDR" ||
+    fail "$name=$address is outside NODE_CIDR $NODE_CIDR; all three nodes must use one network"
 done
 [ "$INFRA_IP" != "$APP_IP" ] && [ "$APP_IP" != "$DATA_IP" ] && [ "$INFRA_IP" != "$DATA_IP" ] ||
   fail "INFRA_IP, APP_IP and DATA_IP must be three different nodes"
-in_cidr "${POD_CIDR%/*}" "$VPC_CIDR" && fail "POD_CIDR $POD_CIDR overlaps the VPC"
+if in_cidr "${POD_CIDR%/*}" "$NODE_CIDR"; then
+  fail "POD_CIDR $POD_CIDR overlaps NODE_CIDR $NODE_CIDR"
+fi
 
 cert_sans="    - $INFRA_IP"
 if [ -n "$API_TAILNET_SAN" ]; then

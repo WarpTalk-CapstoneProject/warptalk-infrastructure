@@ -29,12 +29,21 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   tls:
+    {{- if and $apiHost .Values.ingress.apiTlsSecretName }}
+    - hosts:
+        - {{ .Values.global.domain | quote }}
+      secretName: {{ .Values.ingress.tlsSecretName }}
+    - hosts:
+        - {{ $apiHost | quote }}
+      secretName: {{ .Values.ingress.apiTlsSecretName }}
+    {{- else }}
     - hosts:
         - {{ .Values.global.domain | quote }}
         {{- with $apiHost }}
         - {{ . | quote }}
         {{- end }}
       secretName: {{ .Values.ingress.tlsSecretName }}
+    {{- end }}
     {{- with .Values.ingress.apexDomain }}
     - hosts:
         - {{ . | quote }}

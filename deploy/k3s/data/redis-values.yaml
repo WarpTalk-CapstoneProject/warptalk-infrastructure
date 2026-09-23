@@ -31,10 +31,15 @@ replica:
   persistence:
     enabled: true
     storageClass: replicated-nvme
-    size: 1Gi
+    # The size the live StatefulSet was created with: volumeClaimTemplates are immutable, so a
+    # different value fails the upgrade. Actual use is a few MiB.
+    size: 20Gi
   podAntiAffinityPreset: soft
-  nodeSelector:
-    node.warptalk.io/role: data
+  # Soft, like the rest of the data layer: redis-node-0's volume lives on the App node.
+  nodeAffinityPreset:
+    type: soft
+    key: node.warptalk.io/role
+    values: [data]
   tolerations:
     - key: node.warptalk.io/role
       operator: Equal

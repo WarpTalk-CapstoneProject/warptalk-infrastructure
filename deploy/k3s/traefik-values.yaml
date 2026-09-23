@@ -1,20 +1,27 @@
-# Traefik for the WarpTalk cluster (chart traefik/traefik, version locked in addons.lock.env).
+# Traefik for the WarpTalk cluster (chart traefik/traefik, version locked in addons.lock.env; the
+# lock follows the 41.6.0 release that production actually runs).
 #
-# Ingress path on Vietnix: the public address is NATed by the cloud to the App VM's private VPC
-# address. Neither MetalLB L2 (a VIP the cloud's SDN never learns about) nor a Tailscale address
-# can receive that traffic, and host ports would pin Traefik to one pod per node. So the Service
-# carries the App VM's VPC address as an externalIP (set at install time from
-# TRAEFIK_EXTERNAL_IPS by scripts/install-k3s-addons.sh): kube-proxy steers packets for that
-# address on :80/:443 straight to the Traefik pods, with externalTrafficPolicy: Local so there is
-# no SNAT and the gateway sees the real client address. See deploy/k3s/README.md "Ingress path".
+# Ingress path, as verified on production (2026-09-23): the public address is NATed to the App VM,
+# and Traefik takes :80/:443 there with HOST PORTS; the MetalLB LoadBalancer address (10.20.0.100)
+# is not what the Internet reaches. Host-port traffic is DNATed by the CNI portmap plugin without
+# SNAT, so Traefik sees the real client address; the gateway then trusts X-Forwarded-For only from
+# the pod CIDR (network.podCidrs), which is what makes per-IP rate limits mean one client.
+#
+# Replicas: a host port admits one Traefik pod per node, and only the App VM receives public
+# traffic. A second replica therefore needs a second ingress-capable node (a public address and a
+# node.warptalk.io/role=app label); until then it is ONE pod, rolled with maxSurge 0 (a surge pod
+# could never bind :80 next to the old one). See deploy/k3s/README.md "Ingress path".
 deployment:
   kind: Deployment
-  # Two pods, no host ports, so both can run on the single App node; a node drain or a Traefik
-  # rollout keeps one serving.
-  replicas: 2
+  replicas: 1
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+# A PDB over one pod either allows everything or blocks every drain; none.
 podDisruptionBudget:
-  enabled: true
-  maxUnavailable: 1
+  enabled: false
 autoscaling:
   enabled: false
 
@@ -22,13 +29,11 @@ nodeSelector:
   node.warptalk.io/role: app
 affinity:
   podAntiAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        podAffinityTerm:
-          topologyKey: kubernetes.io/hostname
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/name: traefik
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - topologyKey: kubernetes.io/hostname
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: traefik
 
 resources:
   requests: {cpu: 100m, memory: 128Mi}
@@ -53,6 +58,9 @@ accessLog:
 
 ports:
   web:
+    port: 8000
+    hostPort: 80
+    exposedPort: 80
     # Every plain-HTTP request is redirected to HTTPS, except ACME HTTP-01 challenges, which
     # cert-manager's solver must be able to answer on :80.
     allowACMEByPass: true
@@ -63,13 +71,15 @@ ports:
           scheme: https
           permanent: true
   websecure:
+    port: 8443
+    hostPort: 443
+    exposedPort: 443
     http:
       tls:
         enabled: true
 
 service:
   spec:
-    type: NodePort
-    # Preserve the client source address (no SNAT to a node IP). Required for the gateway's
-    # per-IP rate limits to mean anything.
+    type: LoadBalancer
+    # The in-VPC LoadBalancer path keeps the client address too.
     externalTrafficPolicy: Local

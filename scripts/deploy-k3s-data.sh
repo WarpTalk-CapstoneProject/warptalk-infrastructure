@@ -26,12 +26,16 @@ DATA_NAMESPACE="${K3S_DATA_NAMESPACE:-warptalk-data}"
 # The object-store endpoint carries the account id, so it is not committed; the release job
 # passes it from BACKUP_S3_ENDPOINT_URL in the GitHub `production` runtime env.
 K3S_BACKUP_ENDPOINT_URL="${K3S_BACKUP_ENDPOINT_URL:-}"
+# Qdrant snapshot storage on S3 + the nightly CronJob. Needs ENDPOINT_URL in
+# warptalk-backup-credentials, which materialize-k8s-runtime-secrets.sh guarantees.
+K3S_QDRANT_S3_SNAPSHOTS="${K3S_QDRANT_S3_SNAPSHOTS:-false}"
 
 script_dir="$(CDPATH='' cd -- "$(dirname "$0")" && pwd)"
 infra_root="$(CDPATH='' cd -- "$script_dir/.." && pwd)"
 data_chart="$infra_root/deploy/k3s/data-chart"
 redis_values="$infra_root/deploy/k3s/data/redis-values.yaml"
 qdrant_values="$infra_root/deploy/k3s/data/qdrant-values.yaml"
+qdrant_s3_values="$infra_root/deploy/k3s/data/qdrant-snapshots-s3.yaml"
 qdrant_post_renderer="$infra_root/scripts/pin-qdrant-images.sh"
 lock_file="$infra_root/deploy/k3s/addons.lock.env"
 helm_locked="$infra_root/scripts/helm-locked.sh"
@@ -59,6 +63,33 @@ esac
 render_dir="$(mktemp -d "${TMPDIR:-/tmp}/warptalk-k3s-data.XXXXXX")"
 trap 'rm -rf "$render_dir"' EXIT INT TERM
 
+# Without an explicit endpoint, keep the one the running cluster already uses (read-only), so a
+# release never needs the account id committed.
+if [ -z "$K3S_BACKUP_ENDPOINT_URL" ] && [ "$OFFLINE_RENDER_ONLY" != "true" ] &&
+  [ -n "${KUBECONFIG:-}" ] && command -v kubectl >/dev/null 2>&1; then
+  if live_endpoint="$(kubectl get objectstores.barmancloud.cnpg.io warptalk-postgres-backup \
+    --namespace "$DATA_NAMESPACE" -o jsonpath='{.spec.configuration.endpointURL}' 2>/dev/null)"; then
+    K3S_BACKUP_ENDPOINT_URL="$live_endpoint"
+  fi
+fi
+
+# Qdrant arguments: the base values, plus the S3 snapshot overlay when enabled.
+qdrant_arguments="$render_dir/qdrant.args"
+{
+  printf '%s\n' -f "$qdrant_values"
+  if [ "$K3S_QDRANT_S3_SNAPSHOTS" = "true" ]; then
+    printf '%s\n' -f "$qdrant_s3_values"
+  fi
+  printf '%s\n' --set-string "persistence.storageClassName=$K3S_STORAGE_CLASS"
+  printf '%s\n' --post-renderer "$qdrant_post_renderer"
+} >"$qdrant_arguments"
+helm_qdrant() {
+  while IFS= read -r argument; do
+    set -- "$@" "$argument"
+  done <"$qdrant_arguments"
+  "$helm_locked" "$@"
+}
+
 # Arguments shared by render, dry run and install, so the three can never disagree.
 data_chart_arguments="$render_dir/data-chart.args"
 {
@@ -67,9 +98,13 @@ data_chart_arguments="$render_dir/data-chart.args"
   printf '%s\n' --set-string "postgres.namespace=$DATA_NAMESPACE"
   printf '%s\n' --set-string "rabbitmq.namespace=$APP_NAMESPACE"
   if [ "$K3S_SECRET_SOURCE" = "external-secrets" ]; then
+    printf '%s\n' --set "externalSecrets.enabled=true"
     printf '%s\n' --set-string "externalSecrets.secretStoreName=$K3S_SECRET_STORE_NAME"
   else
     printf '%s\n' --set "externalSecrets.enabled=false"
+  fi
+  if [ "$K3S_QDRANT_S3_SNAPSHOTS" = "true" ]; then
+    printf '%s\n' --set "qdrantSnapshots.enabled=true"
   fi
   if [ -n "$K3S_BACKUP_ENDPOINT_URL" ]; then
     printf '%s\n' --set-string "postgres.backup.endpointURL=$K3S_BACKUP_ENDPOINT_URL"
@@ -98,12 +133,9 @@ helm_data template warptalk-data "$data_chart" >"$render_dir/data.yaml"
   --set-string replica.persistence.storageClass="$K3S_STORAGE_CLASS" \
   >"$render_dir/redis.yaml"
 
-"$helm_locked" template warptalk-qdrant qdrant/qdrant \
+helm_qdrant template warptalk-qdrant qdrant/qdrant \
   --version "$QDRANT_CHART_VERSION" \
   --namespace "$DATA_NAMESPACE" \
-  -f "$qdrant_values" \
-  --set-string persistence.storageClassName="$K3S_STORAGE_CLASS" \
-  --post-renderer "$qdrant_post_renderer" \
   >"$render_dir/qdrant.yaml"
 
 if grep -Eirq 'CHANGE_ME|example\.com|:latest([@"[:space:]]|$)' "$render_dir"/*.yaml; then
@@ -183,11 +215,8 @@ if [ "$K3S_DRY_RUN" = "true" ]; then
     --version "$REDIS_CHART_VERSION" --namespace "$DATA_NAMESPACE" --dry-run=server \
     -f "$redis_values" \
     --set-string replica.persistence.storageClass="$K3S_STORAGE_CLASS" >/dev/null
-  "$helm_locked" upgrade --install warptalk-qdrant qdrant/qdrant \
-    --version "$QDRANT_CHART_VERSION" --namespace "$DATA_NAMESPACE" --dry-run=server \
-    -f "$qdrant_values" \
-    --set-string persistence.storageClassName="$K3S_STORAGE_CLASS" \
-    --post-renderer "$qdrant_post_renderer" >/dev/null
+  helm_qdrant upgrade --install warptalk-qdrant qdrant/qdrant \
+    --version "$QDRANT_CHART_VERSION" --namespace "$DATA_NAMESPACE" --dry-run=server >/dev/null
   echo "K3s data platform server-side dry run: PASS; nothing was changed"
   exit 0
 fi
@@ -216,7 +245,7 @@ if [ "$K3S_SECRET_SOURCE" = "external-secrets" ]; then
   done
 else
   require_secret_keys "$DATA_NAMESPACE" warptalk-postgres-superuser username password
-  require_secret_keys "$DATA_NAMESPACE" warptalk-backup-credentials ACCESS_KEY_ID SECRET_ACCESS_KEY ENDPOINT_URL
+  require_secret_keys "$DATA_NAMESPACE" warptalk-backup-credentials ACCESS_KEY_ID SECRET_ACCESS_KEY
   require_secret_keys "$DATA_NAMESPACE" warptalk-redis-auth password
   require_secret_keys "$DATA_NAMESPACE" warptalk-qdrant-auth api-key
 fi
@@ -230,15 +259,12 @@ fi
   -f "$redis_values" \
   --set-string replica.persistence.storageClass="$K3S_STORAGE_CLASS"
 
-"$helm_locked" upgrade --install warptalk-qdrant qdrant/qdrant \
+helm_qdrant upgrade --install warptalk-qdrant qdrant/qdrant \
   --version "$QDRANT_CHART_VERSION" \
   --namespace "$DATA_NAMESPACE" \
   --atomic \
   --wait \
-  --timeout 15m \
-  -f "$qdrant_values" \
-  --set-string persistence.storageClassName="$K3S_STORAGE_CLASS" \
-  --post-renderer "$qdrant_post_renderer"
+  --timeout 15m
 
 kubectl wait --for=condition=Ready cluster/warptalk-postgres \
   --namespace "$DATA_NAMESPACE" --timeout=15m

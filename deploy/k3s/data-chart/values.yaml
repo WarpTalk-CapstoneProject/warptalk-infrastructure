@@ -5,6 +5,10 @@ storageClass: replicated-nvme
 placement:
   nodeSelector: {}
   tolerations: []
+  # Soft placement: new pods prefer nodes with node.warptalk.io/role=<preferredRole>. Soft on
+  # purpose - a pod whose local-path volume already lives on another node must stay schedulable
+  # there, or a values change would strand the database.
+  preferredRole: ""
 
 # External Secrets is optional. Production materializes the four data-namespace secrets from the
 # GitHub `production` environment in the release job and sets enabled: false.

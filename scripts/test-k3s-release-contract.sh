@@ -65,20 +65,16 @@ K3S_TLS_SECRET_NAME=warptalk-tls \
 OFFLINE_RENDER_ONLY=true \
   "$script_dir/deploy-k3s-release.sh"
 
-# The same values with an ExternalSecret switched back on must be refused on the GitHub path.
-external_values="$(mktemp "${TMPDIR:-/tmp}/warptalk-external-secret.XXXXXX")"
-trap 'rm -f "$manifest" "$incomplete_manifest" "$invalid_cost_values" "$external_values"' EXIT INT TERM
-sed 's/^    enabled: false$/    enabled: true/' "$infra_root/deploy/k3s/k8s-app-values.yaml" >"$external_values"
-if RELEASE_MANIFEST="$manifest" \
-  K3S_VALUES_FILE="$external_values" \
-  K3S_SECRET_SOURCE=github \
-  K3S_STORAGE_CLASS=local-path \
-  K3S_TLS_SECRET_NAME=warptalk-tls \
-  OFFLINE_RENDER_ONLY=true \
-  "$script_dir/deploy-k3s-release.sh" >/dev/null 2>&1; then
-  echo "an ExternalSecret was accepted on the GitHub secret path" >&2
-  exit 1
-fi
+# The fallback the release job uses until K8S_RUNTIME_ENV exists: the same production values,
+# with the ExternalSecret switched on by the job against the live ClusterSecretStore.
+RELEASE_MANIFEST="$manifest" \
+K3S_VALUES_FILE="$infra_root/deploy/k3s/k8s-app-values.yaml" \
+K3S_SECRET_SOURCE=external-secrets \
+K3S_SECRET_STORE_NAME=warptalk-production-secret-store \
+K3S_STORAGE_CLASS=local-path \
+K3S_TLS_SECRET_NAME=warptalk-tls \
+OFFLINE_RENDER_ONLY=true \
+  "$script_dir/deploy-k3s-release.sh" >/dev/null
 
 # The online path must refuse to run against an implicit ~/.kube/config.
 if env -u KUBECONFIG RELEASE_MANIFEST="$manifest" \

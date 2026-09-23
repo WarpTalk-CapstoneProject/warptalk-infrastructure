@@ -1,6 +1,6 @@
 # One Qdrant node on the Data VM. Cluster mode needs three peers for Raft quorum, and three peers
 # on one VM would cost three copies of the index for no protection against losing the VM; the
-# nightly snapshot to object storage (below) is the recovery path instead.
+# nightly snapshot to object storage (qdrant-snapshots-s3.yaml) is the recovery path instead.
 replicaCount: 1
 image:
   tag: v1.18.2
@@ -15,40 +15,26 @@ config:
   storage:
     performance:
       max_search_threads: 2
-    # Snapshots go straight to the S3-compatible backup store the Postgres backups use; the
-    # data-chart CronJob (warptalk-qdrant-snapshot) triggers one nightly.
-    snapshots_config:
-      snapshots_storage: s3
-      s3_config:
-        bucket: warptalk-backups
-        region: auto
-env:
-  - name: QDRANT__STORAGE__SNAPSHOTS_CONFIG__S3_CONFIG__ACCESS_KEY
-    valueFrom:
-      secretKeyRef:
-        name: warptalk-backup-credentials
-        key: ACCESS_KEY_ID
-  - name: QDRANT__STORAGE__SNAPSHOTS_CONFIG__S3_CONFIG__SECRET_KEY
-    valueFrom:
-      secretKeyRef:
-        name: warptalk-backup-credentials
-        key: SECRET_ACCESS_KEY
-  - name: QDRANT__STORAGE__SNAPSHOTS_CONFIG__S3_CONFIG__ENDPOINT_URL
-    valueFrom:
-      secretKeyRef:
-        name: warptalk-backup-credentials
-        key: ENDPOINT_URL
 resources:
-  requests: {cpu: 100m, memory: 768Mi}
-  limits: {cpu: 500m, memory: 1536Mi}
+  # Measured 19 MiB working set on 2026-09-23 (a nearly empty index); compose allowed 2G.
+  requests: {cpu: 50m, memory: 256Mi}
+  limits: {cpu: 500m, memory: 1Gi}
 persistence:
   accessModes: [ReadWriteOnce]
-  size: 5Gi
+  # Live claim size (immutable volumeClaimTemplate).
+  size: 50Gi
   storageClassName: replicated-nvme
 podDisruptionBudget:
   enabled: false
-nodeSelector:
-  node.warptalk.io/role: data
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: node.warptalk.io/role
+              operator: In
+              values: [data]
 tolerations:
   - key: node.warptalk.io/role
     operator: Equal

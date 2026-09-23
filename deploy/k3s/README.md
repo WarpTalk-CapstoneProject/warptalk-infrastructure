@@ -8,8 +8,14 @@ credentials never belong in Git.
 
 Everything in this section is what `deploy_target=k8s` in
 `.github/workflows/release.yml` does. The generic HA target described further down is
-still valid for a larger cluster; production is the smaller shape below. Compose remains
-the production path until the cutover (see "Cutover").
+still valid for a larger cluster; production is the smaller shape below.
+
+**Production already runs here** (verified read-only on 2026-09-23): kubeadm v1.31.14 on
+`warptalk-infra-master` (control plane), `warptalk-app-worker` and `warptalk-data-node`, all
+three addressed on the tailnet (100.70.83.108 / 100.72.255.18 / 100.122.196.85; API server
+`https://100.70.83.108:6443`), Calico pool 192.168.0.0/16, every workload in `warptalk`,
+Traefik holding :80/:443 on the App VM with host ports. So `deploy_target` defaults to `k8s`;
+compose is a fallback for a rebuilt Docker host, not the running system.
 
 ### Release path
 
@@ -22,8 +28,9 @@ the production path until the cutover (see "Cutover").
 `k8s_dry_run=true` runs every `production-k8s` step server-side (`kubectl apply
 --dry-run=server`, `helm upgrade --dry-run=server`) plus all contract checks and changes
 nothing. The bootstrap is not affected by it: it only installs add-ons, RBAC, node labels and
-secrets, none of which touch compose or public traffic (unless `k8s_public_ingress`), and a
-server-side dry run of the release needs the add-on CRDs to exist.
+secrets idempotently, and a server-side dry run of the release needs the add-on CRDs to exist.
+It is also how Traefik and kube-prometheus-stack pick up the locked values in this directory:
+a release never touches the `traefik` or `monitoring` namespaces.
 
 Every Helm call goes through `scripts/helm-locked.sh`, i.e. `HELM_IMAGE` from
 `addons.lock.env` (3.18.6), never the runner's `helm`. Every script requires an explicit
@@ -110,13 +117,24 @@ Qdrant 100m/768Mi, RabbitMQ 200m/512Mi, node-exporter 25m/32Mi: ~1.3 CPU (81%) /
 
 Infra node: control plane ~0.65 CPU, monitoring 350m / ~1.1 GiB requests.
 
-Data volume (35 GB at /srv/warptalk; point the local-path provisioner's `nodePathMap` for
-the Data node at it): Postgres 2 x 10Gi, Redis 3 x 1Gi, Qdrant 5Gi, RabbitMQ 2Gi = 30 GiB,
-leaving ~14% for the filesystem and WAL bursts. local-path does not enforce these sizes;
-`WarpTalkPersistentVolumeFilling` alerts at 15% free. A production database that outgrows
-10Gi needs a larger volume, not a larger claim.
+Data claims: the live claims were created at Postgres 2 x 25Gi, Redis 20Gi each, Qdrant 50Gi
+and RabbitMQ 5Gi, and a claim cannot shrink (CloudNativePG rejects it; StatefulSet claim
+templates are immutable), so the values keep those sizes and CI refuses anything smaller. On
+paper that exceeds the Data VM's 35 GB volume, and **a bigger volume is required before the
+claims could ever fill**: local-path does not enforce sizes, actual use on 2026-09-23 was under
+1 GiB, and `WarpTalkPersistentVolumeFilling` alerts at 15% free. Measured peaks the requests were
+checked against (24h working set): Postgres 350Mi, Redis 32Mi, Qdrant 19Mi, services 140-280Mi,
+workers 90-280Mi; p95 CPU 0-60m.
 
 ### Data layer on one VM
+
+As found live: both Postgres instances, `warptalk-redis-node-0` and RabbitMQ run on the **App**
+node, because their local-path volumes were first bound there. Placement is therefore soft
+(prefer `node.warptalk.io/role=data`, tolerate its taint); a hard selector would leave those pods
+Pending next to volumes they cannot leave. Moving them is deliberate work: for Postgres add a
+third instance (it schedules on the Data node), switch over to it, then remove an App-node
+instance; for Redis delete the App-node pod's PVC while two healthy nodes remain; RabbitMQ
+needs a maintenance window.
 
 Postgres runs 2 instances with `synchronous.dataDurability: preferred`: a third instance on
 the same VM adds no protection against losing the VM, and with `required` a restarting
@@ -130,20 +148,23 @@ CloudNativePG's managed `pg_stat_statements.*` parameters.
 
 ### Ingress path
 
-Public traffic is NATed by Vietnix to the App VM's VPC address. MetalLB L2 cannot receive it
-(the cloud SDN only delivers to addresses it assigned), a Tailscale address is not on that
-network, and host ports would allow one Traefik pod per node. So Traefik is a 2-replica
-Deployment whose `NodePort` Service carries the App VM's VPC address as an `externalIP` with
-`externalTrafficPolicy: Local`: kube-proxy delivers :80/:443 straight to the local Traefik
-pods without SNAT, and the gateway sees the client address (it trusts `X-Forwarded-For` only
-from the pod CIDR, `network.podCidrs`). That is why the compose rate limits (login 5/min) are
-restored. HTTP redirects to HTTPS except ACME HTTP-01 challenges; access logs drop every
-header and every query parameter (SignalR sends `?access_token=` on the WebSocket upgrade);
-log level INFO. MetalLB stays available in `k8s-install-cni-metallb.sh` for BGP (or L2 on a
-flat network you control), off by default, addresses parameterized.
+As production runs it: the public address is NATed to the App VM, where Traefik takes :80/:443
+with host ports (the MetalLB address 10.20.0.100 on its LoadBalancer Service is only reachable
+inside the VPC). Host-port traffic is DNATed by the CNI portmap plugin without SNAT, so Traefik
+sees the client address, and the gateway trusts `X-Forwarded-For` only from the pod CIDR
+(`network.podCidrs` = 192.168.0.0/16). The previous values made the gateway see every client as
+the Traefik pod, which is why the per-IP limits had been raised; they are back at the compose
+values (login 5/min). The locked values add the HTTP->HTTPS redirect (ACME HTTP-01 exempt),
+drop every header and every query parameter from access logs (SignalR sends `?access_token=`
+on the WebSocket upgrade), keep log level INFO and set `externalTrafficPolicy: Local` on the
+in-VPC Service.
 
-The externalIP rule takes :80/:443 on the App VM away from compose's Caddy the moment it
-exists, which is why it is only set when the bootstrap runs with `k8s_public_ingress=true`.
+Replicas: a host port admits one Traefik pod per node and only the App VM receives public
+traffic, so there is one Traefik pod (rolled with `maxSurge: 0`). A second replica needs a second
+ingress-capable node (public address + `node.warptalk.io/role=app`); the required
+anti-affinity then spreads them. MetalLB L2 across the VPC or the tailnet cannot carry public
+traffic; `k8s-install-cni-metallb.sh` keeps MetalLB optional with BGP/L2 mode and addresses as
+parameters.
 
 ### Hosts and URLs
 
@@ -188,21 +209,22 @@ admission-time signature check (sigstore policy-controller or Kyverno `verifyIma
 NOT installed: it is another webhook + controller (~200Mi) on an App node that is already at
 82% memory, and a webhook outage would block every rollout. Add it when the App node grows.
 
-### Cutover
+### Before the next release
 
-1. `k8s-cluster-bootstrap.sh` / `k8s-install-cni-metallb.sh` on the VMs (once).
-2. Dispatch `deploy_target=k8s`, `k8s_bootstrap=true`, `k8s_dry_run=true`: the bootstrap
-   installs add-ons/RBAC/labels/secrets (no public traffic), and the whole release is then
-   validated server-side without changing anything. This is the staging dry run.
-3. Dispatch `deploy_target=k8s` (`k8s_public_ingress=false`): the cluster runs the release
-   next to compose. Acceptance runs every in-cluster check, skips the public probes (the
-   domain still points at Caddy) and insists Traefik has no public address yet. Inspect it
-   with the Kubernetes-mode health inspector and `kubectl port-forward`.
-4. Stop compose's Caddy, then dispatch `deploy_target=k8s`, `k8s_bootstrap=true`,
-   `k8s_public_ingress=true`. From then on releases use `deploy_target=k8s` and
-   `k8s_public_ingress=true` (acceptance fails if the flag and the cluster disagree).
-5. Roll back by starting Caddy again and deleting the Traefik Service's externalIP
-   (re-run the bootstrap with `k8s_public_ingress=false`).
+1. Deployer identity, once, with the admin kubeconfig you already have:
+   `kubectl --kubeconfig ~/.kube/config-warptalk-prod apply --server-side -f deploy/k3s/cluster/deployer-rbac.yaml`
+2. `K8S_KUBECONFIG` in the GitHub `production` environment, from that ServiceAccount:
+   `KUBECONFIG=~/.kube/config-warptalk-prod K8S_API_SERVER=https://100.70.83.108:6443 scripts/render-k8s-deployer-kubeconfig.sh | gh secret set K8S_KUBECONFIG --env production --repo WarpTalk-CapstoneProject/warptalk-infrastructure`
+3. Tailscale ACL: `tag:github-actions` must reach `100.70.83.108:6443` (today it reaches the App
+   host for SSH).
+4. Recommended before step 5: `K8S_RUNTIME_ENV` (template `runtime-env.template`), which moves
+   the runtime secrets off the `fake` ClusterSecretStore - whose values sit in plain text in the
+   store's own spec - onto GitHub `production`. Without it the release still runs, on the store,
+   and warns.
+5. Dispatch with `k8s_dry_run=true` (no changes), then for real. `k8s_bootstrap=true` (needs
+   `K8S_BOOTSTRAP_KUBECONFIG` and `K8S_RUNTIME_ENV`) applies the locked Traefik and monitoring
+   values; until it has run, acceptance reports Traefik as "not yet on locked values" instead of
+   checking the redirect.
 
 ## Topology and prerequisites
 

@@ -32,6 +32,17 @@ spec:
             tolerations:
               {{- toYaml . | nindent 14 }}
             {{- end }}
+            {{- with .Values.placement.preferredRole }}
+            affinity:
+              nodeAffinity:
+                preferredDuringSchedulingIgnoredDuringExecution:
+                  - weight: 100
+                    preference:
+                      matchExpressions:
+                        - key: node.warptalk.io/role
+                          operator: In
+                          values: [{{ . }}]
+            {{- end }}
             topologySpreadConstraints:
               - maxSkew: 1
                 topologyKey: kubernetes.io/hostname

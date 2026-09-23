@@ -179,6 +179,28 @@ if [ "$K8S_RENDER_ONLY" = "true" ]; then
   exit 0
 fi
 
+# Retire the ExternalSecrets that used to own these Secrets (the `fake` ClusterSecretStore the
+# cluster was bootstrapped with). They are deleted with --cascade=orphan so the Secret they own
+# survives until the apply below replaces its content; left in place they would overwrite it
+# again every refresh interval, and there would be two sources of truth.
+retire_external_secret() {
+  # $1 namespace, $2 name
+  if kubectl get externalsecrets.external-secrets.io "$2" --namespace "$1" >/dev/null 2>&1; then
+    if [ "$K8S_DRY_RUN" = "true" ]; then
+      echo "materialize-k8s-runtime-secrets: (dry run) would retire ExternalSecret $1/$2"
+    else
+      kubectl delete externalsecrets.external-secrets.io "$2" --namespace "$1" --cascade=orphan >/dev/null
+      echo "materialize-k8s-runtime-secrets: retired ExternalSecret $1/$2 (GitHub production is the source now)"
+    fi
+  fi
+}
+if kubectl get crd externalsecrets.external-secrets.io >/dev/null 2>&1; then
+  retire_external_secret "$NAMESPACE" "$SECRET_NAME"
+  for data_secret in warptalk-postgres-superuser warptalk-backup-credentials warptalk-redis-auth warptalk-qdrant-auth; do
+    retire_external_secret "$DATA_NAMESPACE" "$data_secret"
+  done
+fi
+
 apply_args=(--server-side --force-conflicts --field-manager=warptalk-release)
 if [ "$K8S_DRY_RUN" = "true" ]; then
   apply_args+=(--dry-run=server)

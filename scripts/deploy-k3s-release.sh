@@ -76,13 +76,15 @@ override_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-images.XXXXXX")"
 rendered_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-release.XXXXXX")"
 trap 'rm -f "$override_file" "$rendered_file"' EXIT INT TERM
 
-jq --slurpfile matrix "$matrix_file" '
+jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
   ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
   {
     global: {
       production: true,
       releaseId: .tag
     },
+    # The secret source is chosen by the release job, not by the values file.
+    secret: {externalSecret: {enabled: ($secretSource == "external-secrets")}},
     migrator: {
       imageRef: (
         .images[]
@@ -269,6 +271,19 @@ if [ "$K3S_DRY_RUN" = "true" ]; then
   exit 0
 fi
 
+# Adopt the `warptalk` ServiceAccount. The previous chart revision created it as a Helm HOOK, and
+# Helm refuses to take over an existing object that lacks its release ownership metadata, so the
+# first upgrade to this chart would otherwise fail with "invalid ownership metadata".
+if sa_json="$(kubectl get serviceaccount warptalk --namespace "$NAMESPACE" -o json 2>/dev/null)" &&
+  printf '%s\n' "$sa_json" | jq -e '.metadata.annotations["helm.sh/hook"] != null' >/dev/null; then
+  kubectl annotate serviceaccount warptalk --namespace "$NAMESPACE" --overwrite \
+    "meta.helm.sh/release-name=$RELEASE_NAME" "meta.helm.sh/release-namespace=$NAMESPACE" \
+    helm.sh/hook- helm.sh/hook-weight- helm.sh/hook-delete-policy- >/dev/null
+  kubectl label serviceaccount warptalk --namespace "$NAMESPACE" --overwrite \
+    app.kubernetes.io/managed-by=Helm >/dev/null
+  echo "K3s release: adopted the former hook ServiceAccount warptalk into release $RELEASE_NAME"
+fi
+
 previous_revision=""
 if "$helm_locked" status "$RELEASE_NAME" --namespace "$NAMESPACE" >/dev/null 2>&1; then
   previous_revision="$(
@@ -312,23 +327,19 @@ post_deploy_checks() {
     K3S_RUNTIME_SECRET_NAME="${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" \
     "$runtime_secret_check" || return 1
 
-  # Before the cutover the public names resolve to compose's Caddy, so an HTTP-01 challenge for
-  # them cannot reach this cluster and the certificate cannot issue yet.
-  if [ "${K3S_PUBLIC_INGRESS:-true}" = "true" ]; then
-    if [ "$K3S_MANAGED_TLS" = "true" ]; then
-      kubectl wait --for=condition=Ready \
-        "certificate/$K3S_TLS_SECRET_NAME" \
-        --namespace "$NAMESPACE" \
-        --timeout=5m || return 1
-    fi
-    kubectl get secret "$K3S_TLS_SECRET_NAME" --namespace "$NAMESPACE" \
-      -o json |
-      jq -e '
-        .type == "kubernetes.io/tls" and
-        (.data["tls.crt"] | length > 0) and
-        (.data["tls.key"] | length > 0)
-      ' >/dev/null || return 1
+  if [ "$K3S_MANAGED_TLS" = "true" ]; then
+    kubectl wait --for=condition=Ready \
+      "certificate/$K3S_TLS_SECRET_NAME" \
+      --namespace "$NAMESPACE" \
+      --timeout=5m || return 1
   fi
+  kubectl get secret "$K3S_TLS_SECRET_NAME" --namespace "$NAMESPACE" \
+    -o json |
+    jq -e '
+      .type == "kubernetes.io/tls" and
+      (.data["tls.crt"] | length > 0) and
+      (.data["tls.key"] | length > 0)
+    ' >/dev/null || return 1
 
   RELEASE_MANIFEST="$RELEASE_MANIFEST" \
     K3S_DOMAIN="$K3S_DOMAIN" \
@@ -338,7 +349,6 @@ post_deploy_checks() {
     K3S_TLS_SECRET_NAME="$K3S_TLS_SECRET_NAME" \
     K3S_MANAGED_TLS="$K3S_MANAGED_TLS" \
     K3S_SECRET_SOURCE="$K3S_SECRET_SOURCE" \
-    K3S_PUBLIC_INGRESS="${K3S_PUBLIC_INGRESS:-true}" \
     "$acceptance_check"
 }
 

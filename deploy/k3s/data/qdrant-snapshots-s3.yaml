@@ -1,0 +1,29 @@
+# Qdrant snapshot storage on the S3-compatible backup target the Postgres backups use. Layered on
+# qdrant-values.yaml by scripts/deploy-k3s-data.sh only when K3S_QDRANT_S3_SNAPSHOTS=true, because
+# it needs ENDPOINT_URL in warptalk-backup-credentials, which only the GitHub-sourced secrets
+# (materialize-k8s-runtime-secrets.sh) guarantee; a missing key would stop Qdrant starting.
+config:
+  storage:
+    # Snapshots go straight to the S3-compatible backup store the Postgres backups use; the
+    # data-chart CronJob (warptalk-qdrant-snapshot) triggers one nightly.
+    snapshots_config:
+      snapshots_storage: s3
+      s3_config:
+        bucket: warptalk-backups
+        region: auto
+env:
+  - name: QDRANT__STORAGE__SNAPSHOTS_CONFIG__S3_CONFIG__ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: warptalk-backup-credentials
+        key: ACCESS_KEY_ID
+  - name: QDRANT__STORAGE__SNAPSHOTS_CONFIG__S3_CONFIG__SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: warptalk-backup-credentials
+        key: SECRET_ACCESS_KEY
+  - name: QDRANT__STORAGE__SNAPSHOTS_CONFIG__S3_CONFIG__ENDPOINT_URL
+    valueFrom:
+      secretKeyRef:
+        name: warptalk-backup-credentials
+        key: ENDPOINT_URL

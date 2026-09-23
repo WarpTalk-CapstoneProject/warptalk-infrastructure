@@ -361,7 +361,7 @@ grep -Fq "sentinel:" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 # index for no protection against losing the VM. Recovery is the nightly S3 snapshot instead, so
 # the snapshot wiring is asserted in its place.
 grep -Fq "replicaCount: 1" "$ROOT_DIR/deploy/k3s/data/qdrant-values.yaml"
-grep -Fq "snapshots_storage: s3" "$ROOT_DIR/deploy/k3s/data/qdrant-values.yaml"
+grep -Fq "snapshots_storage: s3" "$ROOT_DIR/deploy/k3s/data/qdrant-snapshots-s3.yaml"
 # Three Redis nodes: one sentinel per node with quorum 2 cannot fail over with two.
 grep -Fq "replicaCount: 3" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "quorum: 2" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
@@ -409,8 +409,10 @@ jq '{
 }' "$ROOT_DIR/deploy/production/image-matrix.json" >"$PROD_IMAGES"
 "$HELM" template warptalk "$CHART_DIR" --namespace warptalk \
   -f "$ROOT_DIR/deploy/k3s/k8s-app-values.yaml" -f "$PROD_IMAGES" >"$PROD_RENDERED"
+# As the release job renders it with GitHub-sourced secrets (which enables the Qdrant snapshots).
 "$HELM" template warptalk-data "$DATA_CHART_DIR" --namespace warptalk-data \
   -f "$ROOT_DIR/deploy/k3s/k8s-data-values.yaml" \
+  --set qdrantSnapshots.enabled=true \
   --set-string postgres.backup.endpointURL=https://object-store.warptalk.invalid >"$PROD_DATA_RENDERED"
 docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0-alpine \
   -strict -summary -ignore-missing-schemas <"$PROD_RENDERED"
@@ -515,7 +517,7 @@ config = by_kind.get("ConfigMap", {}).get("warptalk-runtime", "")
 for needle, message in (
     ("monitoring-kube-prometheus-prometheus.monitoring.svc", "Monitoring__PrometheusUrl must point at the monitoring namespace"),
     ('RateLimits__LoginPermitLimit: "5"', "login rate limit must be back at the compose value of 5"),
-    ('ForwardedHeaders__KnownNetworks__0: "10.244.0.0/16"', "the gateway must trust X-Forwarded-For from the pod CIDR"),
+    ('ForwardedHeaders__KnownNetworks__0: "192.168.0.0/16"', "the gateway must trust X-Forwarded-For from the live Calico pod CIDR"),
     ('AllowedOrigins__0: "https://app.warptalk.io.vn"', "AllowedOrigins must hold the app origin"),
 ):
     if needle not in config:
@@ -590,7 +592,7 @@ for needle, message in (
     ("instances: 2", "Postgres runs two instances"),
     ("dataDurability: preferred", "two instances need preferred durability so a lost standby does not stop writes"),
     ("pg_stat_statements.max", "pg_stat_statements must be preloaded through CloudNativePG"),
-    ("node.warptalk.io/role: data", "data pods must select the Data node"),
+    ("values: [data]", "data pods must prefer the Data node"),
     ("effect: NoSchedule", "data pods must tolerate the Data node taint"),
     ("name: warptalk-qdrant-snapshot", "Qdrant needs its nightly snapshot"),
 ):
@@ -601,7 +603,11 @@ if "minSyncReplicas" in data:
 if "containers: []" in data:
     fail("dead `containers: []` override is back in the RabbitMQ template")
 
-# 6. Storage: everything on the Data VM fits its 35 GB volume with headroom.
+# 6. Storage. The live claims were created at these sizes and a PVC cannot shrink (CloudNativePG
+# rejects it, and StatefulSet volumeClaimTemplates are immutable), so the values must never go
+# below them. Together they exceed the 35 GB Data volume on paper; local-path does not enforce
+# sizes and actual use is under 1 GiB (README "Capacity plan"), watched by
+# WarpTalkPersistentVolumeFilling.
 def size(text, pattern):
     return mem(re.search(pattern, text).group(1)) / 1024
 
@@ -612,10 +618,18 @@ postgres = size(values, r"storageSize: (\S+)") * int(re.search(r"(?m)^  instance
 rabbit = size(values, r"(?s)rabbitmq:.*?storageSize: (\S+)")
 redis = size(redis_values, r"(?s)persistence:.*?size: (\S+)") * int(re.search(r"replicaCount: (\d+)", redis_values).group(1))
 qdrant = size(qdrant_values, r"(?s)persistence:.*?size: (\S+)")
+live = {"postgres": 25, "rabbitmq": 5, "redis": 20, "qdrant": 50}
+per_claim = {
+    "postgres": size(values, r"storageSize: (\S+)"),
+    "rabbitmq": rabbit,
+    "redis": size(redis_values, r"(?s)persistence:.*?size: (\S+)"),
+    "qdrant": qdrant,
+}
+for name, minimum in live.items():
+    if per_claim[name] < minimum:
+        fail(f"{name} claim {per_claim[name]:.0f} GiB is below the live {minimum} GiB; a PVC cannot shrink")
 total = postgres + rabbit + redis + qdrant
-if total > 32:
-    fail(f"data PVCs total {total:.0f} GiB; the Data VM volume is 35 GB and needs ~10% headroom")
-print(f"K3s production contract: data PVCs {total:.0f} GiB of the 35 GB Data volume")
+print(f"K3s production contract: data claims {total:.0f} GiB nominal (none below the live sizes)")
 PY
 
 "$ROOT_DIR/scripts/check-k3s-compose-url-parity.sh"

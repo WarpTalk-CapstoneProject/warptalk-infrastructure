@@ -650,6 +650,8 @@ ingress:
   apexDomain: ""
   apexTlsSecretName: warptalk-apex-tls
   tlsSecretName: warptalk-tls
+  # TLS secret for global.apiDomain; empty means it shares tlsSecretName.
+  apiTlsSecretName: ""
   certManager:
     enabled: false
     clusterIssuerName: warptalk-letsencrypt

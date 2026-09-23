@@ -17,10 +17,10 @@ set -euo pipefail
 export KUBECONFIG
 # Must equal the kubeadm podSubnet (scripts/k8s-cluster-bootstrap.sh) and network.podCidrs in
 # deploy/k3s/k8s-app-values.yaml.
-POD_CIDR="${POD_CIDR:-10.244.0.0/16}"
-# VXLAN, not IP-in-IP: cloud VPC security groups commonly drop IP protocol 4, which would leave
-# cross-node pod traffic silently black-holed while same-node traffic worked.
-CALICO_ENCAPSULATION="${CALICO_ENCAPSULATION:-VXLAN}"
+POD_CIDR="${POD_CIDR:-192.168.0.0/16}"
+# VXLAN (the live pool runs VXLANCrossSubnet), never IP-in-IP: cloud VPCs and tailnets commonly
+# drop IP protocol 4, which black-holes cross-node pod traffic while same-node traffic works.
+CALICO_ENCAPSULATION="${CALICO_ENCAPSULATION:-VXLANCrossSubnet}"
 INSTALL_METALLB="${INSTALL_METALLB:-false}"
 METALLB_MODE="${METALLB_MODE:-bgp}"
 METALLB_ADDRESSES="${METALLB_ADDRESSES:-}"

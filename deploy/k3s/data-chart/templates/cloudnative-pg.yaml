@@ -47,6 +47,16 @@ spec:
     tolerations:
       {{- toYaml . | nindent 6 }}
     {{- end }}
+    {{- with .preferredRole }}
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: node.warptalk.io/role
+                operator: In
+                values: [{{ . }}]
+    {{- end }}
   {{- end }}
   resources:
     {{- toYaml .Values.postgres.resources | nindent 4 }}
@@ -128,6 +138,16 @@ spec:
               cpu: {{ .Values.postgres.pooler.resources.limits.cpu | quote }}
               memory: {{ .Values.postgres.pooler.resources.limits.memory | quote }}
       affinity:
+        {{- with .Values.placement.preferredRole }}
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: node.warptalk.io/role
+                    operator: In
+                    values: [{{ . }}]
+        {{- end }}
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100

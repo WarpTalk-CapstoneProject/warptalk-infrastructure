@@ -62,12 +62,23 @@ apply_role() {
   done
 }
 
-if [ -z "$K8S_APP_NODES$K8S_DATA_NODES$K8S_INFRA_NODES" ]; then
+nodes_json="$(kubectl get nodes -o json)"
+if [ -z "$K8S_APP_NODES$K8S_DATA_NODES$K8S_INFRA_NODES" ] &&
+  printf '%s\n' "$nodes_json" | jq -e --arg key "$role_label" '
+    [.items[].metadata.labels[$key] // empty] | (index("app") and index("data") and index("infra"))' >/dev/null; then
+  # The cluster already carries one of each role: those labels are the record. Re-apply them
+  # (and the Data taint) rather than re-deriving roles from addresses.
+  resolved="$(printf '%s\n' "$nodes_json" | jq -r --arg key "$role_label" '
+    [.items[] | {name: .metadata.name, role: .metadata.labels[$key]}] as $nodes
+    | ["app", "data", "infra"]
+    | map(. as $r | [$nodes[] | select(.role == $r) | .name] | join(","))
+    | join("|")')"
+  IFS='|' read -r K8S_APP_NODES K8S_DATA_NODES K8S_INFRA_NODES <<<"$resolved"
+elif [ -z "$K8S_APP_NODES$K8S_DATA_NODES$K8S_INFRA_NODES" ]; then
   [ -n "$K8S_DATA_NODE_IP" ] || fail "set K8S_*_NODES, or K8S_DATA_NODE_IP to resolve them"
-  nodes_json="$(kubectl get nodes -o json)"
   resolved="$(printf '%s\n' "$nodes_json" | jq -r \
     --arg data "$K8S_DATA_NODE_IP" --arg infra "$K8S_INFRA_NODE_IP" '
-    def ip: [.status.addresses[]? | select(.type == "InternalIP") | .address];
+    def ip: [.status.addresses[]? | .address];
     def role:
       if (ip | index($data)) then "data"
       elif ($infra != "" and (ip | index($infra))) then "infra"

@@ -162,7 +162,7 @@ docker run --rm \
     helm template monitoring prometheus-community/kube-prometheus-stack --version "$PROMETHEUS_STACK_CHART_VERSION" --namespace monitoring -f /work/monitoring-values.yaml > /rendered/monitoring.yaml
     helm template warptalk-redis bitnami/redis --version "$REDIS_CHART_VERSION" --namespace warptalk-data -f /work/data/redis-values.yaml > /rendered/redis.yaml
     helm template warptalk-qdrant qdrant/qdrant --version "$QDRANT_CHART_VERSION" --namespace warptalk-data -f /work/data/qdrant-values.yaml --post-renderer /pin-qdrant-images.sh > /rendered/qdrant.yaml
-    helm template traefik traefik/traefik --version "$TRAEFIK_CHART_VERSION" --namespace traefik -f /work/traefik-values.yaml --set service.spec.externalIPs[0]=10.20.0.10 > /rendered/traefik.yaml
+    helm template traefik traefik/traefik --version "$TRAEFIK_CHART_VERSION" --namespace traefik -f /work/traefik-values.yaml > /rendered/traefik.yaml
   '
 
 if grep -Eirq '^[[:space:]]+image:[[:space:]]+.*:latest([@"[:space:]]|$)' "$render_dir"; then

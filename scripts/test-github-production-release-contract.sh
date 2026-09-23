@@ -83,12 +83,13 @@ if grep -Fq "printf '%s\\n' \"\$GHCR_TOKEN\"" "$workflow"; then
 fi
 
 # --- Kubernetes path (deploy_target=k8s) -------------------------------------------------------
-# Compose stays the default: a dispatch that does not choose k8s must deploy exactly as before.
+# Production runs on Kubernetes, so a dispatch that says nothing must deploy there; compose is a
+# fallback that runs only when chosen explicitly.
 grep -Eq '^      deploy_target:$' "$workflow" || fail "deploy_target input is missing"
-awk '/^      deploy_target:$/,/default:/' "$workflow" | grep -Eq 'default: compose$' ||
-  fail "deploy_target must default to compose"
-awk '/^  production:$/,/^    permissions:$/' "$workflow" | grep -Fq "if: \${{ inputs.deploy_target != 'k8s' }}" ||
-  fail "the compose job must be skipped only when k8s is chosen"
+awk '/^      deploy_target:$/,/default:/' "$workflow" | grep -Eq 'default: k8s$' ||
+  fail "deploy_target must default to k8s, which is what production runs"
+awk '/^  production:$/,/^    permissions:$/' "$workflow" | grep -Fq "if: \${{ inputs.deploy_target == 'compose' }}" ||
+  fail "the compose job must run only when compose is chosen explicitly"
 grep -Eq '^  production-k8s:$' "$workflow" || fail "Kubernetes release job is missing"
 k8s_job="$(awk '/^  production-k8s:$/,0' "$workflow")"
 printf '%s\n' "$k8s_job" | grep -Eq '^    needs: \[build-scan-sign, k8s-bootstrap\]$' ||
@@ -126,8 +127,8 @@ done
 data_line="$(printf '%s\n' "$k8s_job" | grep -n 'deploy-k3s-data.sh' | head -n1 | cut -d: -f1)"
 release_line="$(printf '%s\n' "$k8s_job" | grep -n 'deploy-k3s-release.sh' | head -n1 | cut -d: -f1)"
 (( data_line < release_line )) || fail "the data platform must deploy before the release"
-printf '%s\n' "$k8s_job" | grep -Fq 'K3S_SECRET_SOURCE: github' ||
-  fail "the k8s release must not depend on External Secrets"
+printf '%s\n' "$k8s_job" | grep -Fq 'echo "K3S_SECRET_SOURCE=github"' ||
+  fail "the k8s release must use GitHub production secrets when K8S_RUNTIME_ENV is set"
 printf '%s\n' "$k8s_job" | grep -Fq 'K3S_DRY_RUN: ${{ inputs.k8s_dry_run }}' ||
   fail "k8s_dry_run must reach the deploy scripts"
 # The bootstrap is the only holder of cluster-admin, and it is opt-in.
