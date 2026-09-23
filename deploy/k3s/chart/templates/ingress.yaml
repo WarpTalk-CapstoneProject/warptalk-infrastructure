@@ -1,4 +1,16 @@
 {{- if .Values.ingress.enabled }}
+{{- /*
+The same host layout as production compose (deploy/production/Caddyfile):
+  * global.domain      (APP_DOMAIN, app.warptalk.io.vn) -> frontend, every path
+  * global.apiDomain   (API_DOMAIN, api.warptalk.io.vn) -> gateway, every path
+  * ingress.apexDomain (optional bare domain)            -> frontend, like the app host
+With no apiDomain (a single-host install) the app host also sends /api, /hubs and
+/oauth/client-metadata to the gateway.
+
+The apex has its own TLS secret and Certificate: if its DNS does not point at this cluster its
+HTTP-01 challenge never completes, and that must not keep the app/api certificate from issuing.
+*/ -}}
+{{- $apiHost := .Values.global.apiDomain }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -6,16 +18,45 @@ metadata:
   labels:
     {{- include "warptalk.labels" . | nindent 4 }}
   annotations:
-    traefik.ingress.kubernetes.io/router.middlewares: warptalk-security-headers@kubernetescrd
+    # HTTPS only. Plain HTTP never reaches a router: the web entrypoint redirects every request
+    # to websecure (deploy/k3s/traefik-values.yaml), apart from ACME HTTP-01 challenges.
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    # <namespace>-<name>@kubernetescrd. The Middleware (security-headers.yaml) is created in the
+    # release namespace, so the reference names that namespace; "traefik-..." pointed at a
+    # Middleware that does not exist, and Traefik drops a router whose middleware is unresolvable.
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-warptalk-security-headers@kubernetescrd" .Release.Namespace }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   tls:
-    - hosts: [{{ .Values.global.domain | quote }}]
+    {{- if and $apiHost .Values.ingress.apiTlsSecretName }}
+    - hosts:
+        - {{ .Values.global.domain | quote }}
       secretName: {{ .Values.ingress.tlsSecretName }}
+    - hosts:
+        - {{ $apiHost | quote }}
+      secretName: {{ .Values.ingress.apiTlsSecretName }}
+    {{- else }}
+    - hosts:
+        - {{ .Values.global.domain | quote }}
+        {{- with $apiHost }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .Values.ingress.tlsSecretName }}
+    {{- end }}
+    {{- with .Values.ingress.apexDomain }}
+    - hosts:
+        - {{ . | quote }}
+      secretName: {{ $.Values.ingress.apexTlsSecretName }}
+    {{- end }}
   rules:
-    - host: {{ .Values.global.domain | quote }}
+    {{- $frontendHosts := list .Values.global.domain }}
+    {{- with .Values.ingress.apexDomain }}{{ $frontendHosts = append $frontendHosts . }}{{ end }}
+    {{- range $frontendHosts }}
+    - host: {{ . | quote }}
       http:
         paths:
+          {{- if not $apiHost }}
           - path: /api
             pathType: Prefix
             backend:
@@ -31,17 +72,32 @@ spec:
           # The Client ID Metadata Document and its JWKS. An MCP authorization server fetches
           # these by URL to learn who WarpTalk is, and the gateway forwards /oauth/client-metadata
           # to the assistant service; without this rule they resolve to the frontend and CIMD
-          # registration falls back to DCR, or fails outright where DCR is not offered.
+          # registration falls back to DCR, or fails outright where DCR is not offered. With an
+          # API host the metadata URL is on that host (see assistant-service env), which routes
+          # everything to the gateway.
           - path: /oauth/client-metadata
             pathType: Prefix
             backend:
               service:
                 name: gateway
                 port: {number: 5200}
+          {{- end }}
           - path: /
             pathType: Prefix
             backend:
               service:
                 name: frontend
                 port: {number: 3000}
+    {{- end }}
+    {{- with $apiHost }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port: {number: 5200}
+    {{- end }}
 {{- end }}

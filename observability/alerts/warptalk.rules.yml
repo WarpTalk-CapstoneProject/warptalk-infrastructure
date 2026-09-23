@@ -79,13 +79,27 @@ groups:
         annotations:
           summary: "PostgreSQL is above 80% of its 200-connection budget"
 
+      # Only where a maxmemory is configured. Without one redis_memory_max_bytes is 0, the
+      # clamp turned the denominator into 1 byte, and the ratio was "used bytes / 1" - permanently
+      # far above 0.85, so the alert fired forever and taught everyone to ignore it. An unset
+      # limit is its own alert below.
       - alert: WarpTalkRedisMemoryNearLimit
-        expr: redis_memory_used_bytes / clamp_min(redis_memory_max_bytes, 1) > 0.85
+        expr: |
+          (redis_memory_used_bytes / redis_memory_max_bytes > 0.85)
+          and on (instance) redis_memory_max_bytes > 0
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Redis memory is above 85% of maxmemory"
+
+      - alert: WarpTalkRedisMaxmemoryUnset
+        expr: redis_memory_max_bytes == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis {{ $labels.instance }} has no maxmemory; it will grow until the kernel OOM-kills it"
 
       - alert: WarpTalkRedisEvicting
         expr: increase(redis_evicted_keys_total[5m]) > 0

@@ -39,7 +39,10 @@ spec:
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
         seccompProfile: {type: RuntimeDefault}
+      {{- include "warptalk.placement" . | nindent 6 }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -97,6 +100,9 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
             capabilities: {drop: ["ALL"]}
           resources:
             {{- toYaml .Values.gotenberg.resources | nindent 12 }}
@@ -128,7 +134,10 @@ spec:
     - name: http
       port: 3000
       targetPort: http
+{{- if ge (int .Values.gotenberg.replicas) 2 }}
 ---
+# Only with two or more pods: minAvailable 1 over a single pod forbids every voluntary eviction,
+# which is how one converter replica would block `kubectl drain` on the App node.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -137,7 +146,8 @@ metadata:
     app.kubernetes.io/name: gotenberg
     {{- include "warptalk.labels" . | nindent 4 }}
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: gotenberg
+{{- end }}

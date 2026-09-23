@@ -203,6 +203,7 @@ spec:
         checksum/config: {{ toJson $.Values.costObservability | sha256sum }}
     spec:
       serviceAccountName: warptalk
+      {{- include "warptalk.placement" $ | nindent 6 }}
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
