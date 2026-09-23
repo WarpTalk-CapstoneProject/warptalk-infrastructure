@@ -318,6 +318,12 @@ jobs:
           # the id from `vars` because a client id is public, the secret from `secrets`.
           GOOGLE_WORKSPACE_CLIENT_ID: ${{ vars.GOOGLE_WORKSPACE_CLIENT_ID }}
           GOOGLE_WORKSPACE_CLIENT_SECRET: ${{ secrets.GOOGLE_WORKSPACE_CLIENT_SECRET }}
+          # Cartesia ADMIN key for billing's usage sync (admin Insights prices dubbing from the
+          # credits Cartesia measured). Optional: unset, billing logs once that the sync is disabled
+          # and Insights keep estimating. The key id (a UUID from Cartesia's GET /api-keys) is not a
+          # secret; set it to count only the production TTS key's credits.
+          CARTESIA_ADMIN_API_KEY: ${{ secrets.CARTESIA_ADMIN_API_KEY }}
+          CARTESIA_USAGE_API_KEY_ID: ${{ vars.CARTESIA_USAGE_API_KEY_ID }}
         run: |
           set -eu
           case "$RELEASE_TAG" in
@@ -425,6 +431,8 @@ jobs:
           add_runtime_secret GOOGLE_CLIENT_ID "${GOOGLE_CLIENT_ID:-}"
           add_runtime_secret GOOGLE_WORKSPACE_CLIENT_ID "${GOOGLE_WORKSPACE_CLIENT_ID:-}"
           add_runtime_secret GOOGLE_WORKSPACE_CLIENT_SECRET "${GOOGLE_WORKSPACE_CLIENT_SECRET:-}"
+          add_runtime_secret CARTESIA_ADMIN_API_KEY "${CARTESIA_ADMIN_API_KEY:-}"
+          add_runtime_secret CARTESIA_USAGE_API_KEY_ID "${CARTESIA_USAGE_API_KEY_ID:-}"
 
           deploy_host() {
             role="$1"
