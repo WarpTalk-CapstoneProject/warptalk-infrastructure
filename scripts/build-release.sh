@@ -104,11 +104,16 @@ sha256_text() {
   fi
 }
 
+# Prints the commit the reused image was BUILT from. For an image fingerprinted by its source
+# content (sourcePaths), that may be an older commit than the one being released - the content is
+# identical, which is the whole point - so the commit is not required to match, only reported, and
+# the release manifest records it so the SBOM/provenance gate verifies the attestation that exists.
 verify_reusable_image() {
   subject="$1"
   expected_repository="$2"
   expected_commit="$3"
   expected_fingerprint="$4"
+  any_commit="${5:-false}"
   cosign verify \
     --certificate-identity-regexp "$COSIGN_CERTIFICATE_IDENTITY_REGEXP" \
     --certificate-oidc-issuer "$COSIGN_CERTIFICATE_OIDC_ISSUER" \
@@ -123,20 +128,30 @@ verify_reusable_image() {
       --certificate-identity-regexp "$COSIGN_CERTIFICATE_IDENTITY_REGEXP" \
       --certificate-oidc-issuer "$COSIGN_CERTIFICATE_OIDC_ISSUER" \
       "$subject" 2>/dev/null)" &&
-    printf '%s\n' "$provenance_output" | jq -s -e \
+    printf '%s\n' "$provenance_output" | jq -s -e -r \
       --arg sourceRepository "$expected_repository" \
       --arg sourceCommit "$expected_commit" \
-      --arg buildFingerprint "$expected_fingerprint" '
-      any((.[] | if type == "array" then .[] else . end | .payload);
-        (@base64d | fromjson | .predicate) as $predicate |
-        $predicate.sourceRepository == $sourceRepository and
-        $predicate.sourceCommit == $sourceCommit and
-        $predicate.buildFingerprint == $buildFingerprint
-      )
-    ' >/dev/null 2>&1
+      --arg buildFingerprint "$expected_fingerprint" \
+      --arg anyCommit "$any_commit" '
+      [ .[] | if type == "array" then .[] else . end | .payload |
+        (@base64d | fromjson | .predicate) |
+        select(
+          .sourceRepository == $sourceRepository and
+          ($anyCommit == "true" or .sourceCommit == $sourceCommit) and
+          .buildFingerprint == $buildFingerprint
+        ) | .sourceCommit
+      ] | first // error("no matching provenance")
+    ' 2>/dev/null
 }
 
-for dependency in docker jq git; do
+# The commit an existing image says it was built from (its OCI revision label), for a reuse that
+# is not signature-verified (local builds). Empty when the registry does not say.
+image_revision_label() {
+  docker buildx imagetools inspect "$1" --format '{{json .Image}}' 2>/dev/null |
+    jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' 2>/dev/null || true
+}
+
+for dependency in docker jq git python3; do
   command -v "$dependency" >/dev/null 2>&1 || fail "missing dependency: $dependency"
 done
 
@@ -223,7 +238,20 @@ process_image() {
   source_commit="$(jq -r --arg repository "$source_repository" \
     '.repositories[$repository].commit' "$metadata_tmp")"
   context_dir="$WORKSPACE_ROOT/$context_rel"
-  fingerprint_material="$source_commit|$platform|$(printf '%s' "$image_entry" | jq -cS .)"
+  # Content, not commit, when the matrix says what the image is built from: the git object ids
+  # of exactly those paths (image-source-fingerprint.py, which also refuses paths that reach
+  # outside them). A commit that leaves this image's sources alone then reuses its signed image,
+  # and Kubernetes does not restart it. An entry without sourcePaths keeps the repository commit.
+  content_fingerprinted=false
+  if [ "$(printf '%s' "$image_entry" | jq -r '(.sourcePaths // []) | length')" -gt 0 ]; then
+    source_listing="$(python3 "$INFRA_ROOT/scripts/image-source-fingerprint.py" \
+      "$WORKSPACE_ROOT/$source_repository" "$source_commit" "$image_entry")" ||
+      fail "could not fingerprint the sources of $image_name"
+    fingerprint_material="sources:$source_listing|$platform|$(printf '%s' "$image_entry" | jq -cS .)"
+    content_fingerprinted=true
+  else
+    fingerprint_material="$source_commit|$platform|$(printf '%s' "$image_entry" | jq -cS .)"
+  fi
 
   for arg_name in $(echo "$image_entry" | jq -r '.buildArgs[]? // empty'); do
     arg_value="$(printenv "$arg_name" 2>/dev/null || true)"
@@ -234,17 +262,26 @@ process_image() {
   build_fingerprint="$(printf '%s' "$fingerprint_material" | sha256_text)"
   image_ref="$REGISTRY/$image_name:src-$build_fingerprint"
   reused=false
+  built_commit="$source_commit"
 
   if [ "$PUSH_IMAGES" = "true" ] && [ "$REUSE_IMAGES" = "true" ]; then
     if digest="$(inspect_existing_digest "$image_ref")"; then
-      if [ "$VERIFY_REUSED_IMAGES" = "false" ] ||
-        verify_reusable_image \
+      if [ "$VERIFY_REUSED_IMAGES" = "false" ]; then
+        reused=true
+        if [ "$content_fingerprinted" = "true" ]; then
+          label_commit="$(image_revision_label "$image_ref@$digest")"
+          [ -z "$label_commit" ] || built_commit="$label_commit"
+        fi
+        echo "release build: reusing $image_ref@$digest (built from $built_commit)" >&2
+      elif verified_commit="$(verify_reusable_image \
           "$image_ref@$digest" \
           "$source_repository" \
           "$source_commit" \
-          "$build_fingerprint"; then
+          "$build_fingerprint" \
+          "$content_fingerprinted")" && [ -n "$verified_commit" ]; then
         reused=true
-        echo "release build: reusing verified $image_ref@$digest" >&2
+        built_commit="$verified_commit"
+        echo "release build: reusing verified $image_ref@$digest (built from $built_commit)" >&2
       else
         echo "release build: cached digest is unsigned or untrusted; rebuilding $image_ref" >&2
       fi
@@ -302,7 +339,7 @@ process_image() {
     --arg ref "$image_ref" \
     --arg digest "$digest" \
     --arg source_repository "$source_repository" \
-    --arg source_commit "$source_commit" \
+    --arg source_commit "$built_commit" \
     --arg build_fingerprint "$build_fingerprint" \
     --argjson reused "$reused" \
     '{
