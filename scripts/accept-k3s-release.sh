@@ -94,12 +94,17 @@ kubectl get rabbitmqcluster warptalk-rabbitmq --namespace "$NAMESPACE" -o json |
     any(.status.conditions[]?; .type == "AllReplicasReady" and .status == "True")
   ' >/dev/null || fail "RabbitMQ does not have all of its replicas ready"
 
-# Redis runs one sentinel per node with quorum 2, so fewer than three nodes can never fail over.
-kubectl get statefulset warptalk-redis-node --namespace "$DATA_NAMESPACE" -o json |
-  jq -e '
-    (.spec.replicas // 0) >= 3 and
+# Redis runs one sentinel per node with quorum 2. Production runs TWO nodes (infra #216: the Data
+# node could not hold a third), which keeps a replica of every key but cannot elect a new master if
+# one node is lost. That is a known, accepted gap, so it is a warning here, not a failure: v224 was
+# rolled back only because this line still demanded three after #216 made it two.
+redis_json="$(kubectl get statefulset warptalk-redis-node --namespace "$DATA_NAMESPACE" -o json)"
+printf '%s\n' "$redis_json" | jq -e '
+    (.spec.replicas // 0) >= 2 and
     (.status.readyReplicas // 0) == .spec.replicas
-  ' >/dev/null || fail "Redis needs three ready nodes for a sentinel quorum of two"
+  ' >/dev/null || fail "Redis does not have all of its (at least two) nodes ready"
+printf '%s\n' "$redis_json" | jq -e '(.spec.replicas // 0) >= 3' >/dev/null ||
+  echo "::warning::K3s acceptance: Redis runs $(printf '%s\n' "$redis_json" | jq '.spec.replicas') nodes; sentinel quorum 2 cannot fail over until it has three"
 kubectl get statefulset warptalk-qdrant --namespace "$DATA_NAMESPACE" -o json |
   jq -e '
     (.spec.replicas // 0) >= 1 and
