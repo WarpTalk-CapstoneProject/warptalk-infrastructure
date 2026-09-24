@@ -6,31 +6,30 @@ credentials never belong in Git.
 
 ## Production on the three Vietnix VMs
 
-Everything in this section is what `deploy_target=k8s` in
-`.github/workflows/release.yml` does. The generic HA target described further down is
+Everything in this section is what `.github/workflows/release.yml` does; Kubernetes is its only
+deploy target. The generic HA target described further down is
 still valid for a larger cluster; production is the smaller shape below.
 
 **Production already runs here** (verified read-only on 2026-09-23): kubeadm v1.31.14 on
 `warptalk-infra-master` (control plane), `warptalk-app-worker` and `warptalk-data-node`, all
 three addressed on the tailnet (100.70.83.108 / 100.72.255.18 / 100.122.196.85; API server
 `https://100.70.83.108:6443`), Calico pool 192.168.0.0/16, every workload in `warptalk`,
-Traefik holding :80/:443 on the App VM with host ports. So `deploy_target` defaults to `k8s`;
-compose is a fallback for a rebuilt Docker host, not the running system.
+Traefik holding :80/:443 on the App VM with host ports. The workflow no longer has a compose
+(SSH + `docker compose`) job or a staging job; `scripts/deploy-release.sh` and the compose files
+stay in the repo for manual recovery of a rebuilt Docker host only.
 
 ### Release path
 
 | Job | Identity | What it does |
 | --- | --- | --- |
 | `build-scan-sign` | release env | Builds, SBOMs, Trivy HIGH/CRITICAL gate, Cosign signing, uploads `release-manifest.json`. Unchanged. |
-| `k8s-bootstrap` (opt-in `k8s_bootstrap=true`) | `K8S_BOOTSTRAP_KUBECONFIG` (cluster-admin) | Applies `deploy/k3s/cluster/deployer-rbac.yaml`, materializes secrets, labels/taints nodes, installs the locked add-ons (`install-k3s-addons.sh`). Idempotent. |
 | `production-k8s` | `K8S_KUBECONFIG` (the `warptalk-deployer` ServiceAccount; the job refuses a cluster-admin credential) | Materializes secrets from GitHub `production`, labels/taints nodes, `deploy-k3s-data.sh`, `deploy-k3s-release.sh` (image refs and `releaseId` from the signed manifest; migrations as the pre-upgrade hook; `accept-k3s-release.sh`; automatic `helm rollback` on failed acceptance), `smoke-production.sh`, then a Kubernetes-mode health inspection into the run summary. |
 
 `k8s_dry_run=true` runs every `production-k8s` step server-side (`kubectl apply
 --dry-run=server`, `helm upgrade --dry-run=server`) plus all contract checks and changes
-nothing. The bootstrap is not affected by it: it only installs add-ons, RBAC, node labels and
-secrets idempotently, and a server-side dry run of the release needs the add-on CRDs to exist.
-It is also how Traefik and kube-prometheus-stack pick up the locked values in this directory:
-a release never touches the `traefik` or `monitoring` namespaces.
+nothing. A server-side dry run of the release needs the add-on CRDs to exist, so the cluster
+must have been bootstrapped first (see "Cluster bootstrap by hand" below). A release never
+touches the `traefik` or `monitoring` namespaces; only the bootstrap applies their locked values.
 
 Every Helm call goes through `scripts/helm-locked.sh`, i.e. `HELM_IMAGE` from
 `addons.lock.env` (3.18.6), never the runner's `helm`. Every script requires an explicit
@@ -221,10 +220,41 @@ NOT installed: it is another webhook + controller (~200Mi) on an App node that i
    the runtime secrets off the `fake` ClusterSecretStore - whose values sit in plain text in the
    store's own spec - onto GitHub `production`. Without it the release still runs, on the store,
    and warns.
-5. Dispatch with `k8s_dry_run=true` (no changes), then for real. `k8s_bootstrap=true` (needs
-   `K8S_BOOTSTRAP_KUBECONFIG` and `K8S_RUNTIME_ENV`) applies the locked Traefik and monitoring
-   values; until it has run, acceptance reports Traefik as "not yet on locked values" instead of
-   checking the redirect.
+5. Dispatch with `k8s_dry_run=true` (no changes), then for real. The locked Traefik and
+   monitoring values come from the cluster bootstrap below; until it has run, acceptance reports
+   Traefik as "not yet on locked values" instead of checking the redirect.
+
+### Cluster bootstrap by hand
+
+The release workflow used to carry an opt-in `k8s-bootstrap` job; it was removed because it was
+always skipped. The cluster is already bootstrapped. If it is ever rebuilt, or the locked
+Traefik/monitoring/add-on values change, run the same idempotent steps from a checkout of
+`warptalk-infrastructure` with an **admin** kubeconfig (cluster-admin, never the deployer one),
+over the tailnet, with Docker running (every Helm call goes through `scripts/helm-locked.sh`):
+
+```sh
+export KUBECONFIG=~/.kube/config-warptalk-prod    # admin; every script refuses an implicit one
+export K3S_STORAGE_CLASS=local-path
+
+# 1. Deployer identity and namespaces
+kubectl apply --server-side -f deploy/k3s/cluster/deployer-rbac.yaml
+
+# 2. Runtime secrets (Alertmanager and Grafana read them). The file is K8S_RUNTIME_ENV from the
+#    GitHub `production` environment (template: runtime-env.template); delete it afterwards.
+K8S_RUNTIME_ENV_FILE=/path/to/k8s-runtime.env ./scripts/materialize-k8s-runtime-secrets.sh
+
+# 3. Node roles and taints (same addresses as vars.PRODUCTION_DATA_HOST / PRODUCTION_INFRA_HOST)
+K8S_DATA_NODE_IP=<data node IP> K8S_INFRA_NODE_IP=<infra node IP> ./scripts/label-k8s-nodes.sh
+
+# 4. Locked add-ons (Traefik, kube-prometheus-stack, metrics-server, external-secrets, ...)
+INSTALL_METRICS_SERVER=true METRICS_SERVER_KUBELET_INSECURE_TLS=true \
+  INSTALL_EXTERNAL_SECRETS=true ./scripts/install-k3s-addons.sh
+```
+
+Every step is `upgrade --install` or a server-side apply, so re-running is safe. Step 2 overlays
+`STRIPE_*`, `LIVEKIT_*`, `GOOGLE_*`, `CARTESIA_*` and `GHCR_PULL_*` only when they are exported;
+the next release overlays them from GitHub anyway. Follow with a `k8s_dry_run=true` dispatch.
+For a brand-new cluster, `scripts/k8s-cluster-bootstrap.sh` covers the kubeadm steps before this.
 
 ## Topology and prerequisites
 

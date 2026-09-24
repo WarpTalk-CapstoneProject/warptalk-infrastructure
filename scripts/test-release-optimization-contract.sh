@@ -242,26 +242,27 @@ grep -Eq '^    permissions:$' "$workflow" ||
   fail "job-level least-privilege permissions are missing"
 grep -Eq 'test-release-optimization-contract\.sh' "$ci_workflow" ||
   fail "release optimization regressions are not enforced by infrastructure CI"
-grep -Eq 'stage_role\(\)' "$workflow" ||
-  fail "workflow cannot skip staging unchanged production roles"
-awk '
-  /^[[:space:]]*stage_host\(\)/ { inside_stage_host = 1 }
-  inside_stage_host && /^[[:space:]]*REMOTE$/ { remote_payload_closed = 1 }
-  remote_payload_closed && /^[[:space:]]*stage_role\(\)/ { stage_role_is_local = 1 }
-  END { exit(stage_role_is_local ? 0 : 1) }
-' "$workflow" || fail "stage_role is defined inside the remote staging payload"
-grep -Eq '\.roles\[\$role\]\.deploy' "$workflow" ||
-  fail "production staging is not controlled by the deployment plan"
-if grep -Eq '^[[:space:]]+stage_host production-(data|infra|app)' "$workflow"; then
-  fail "workflow still stages every production host unconditionally"
-fi
-grep -Fq "/opt/warptalk/current/scripts/smoke-production.sh" "$workflow" ||
-  fail "smoke checks do not use the active release when the app role is unchanged"
-
-duplicate_staging_destination="$({
-  sed -n '/scp "\$manifest"/,/ssh "\$STAGING_USER/p' "$workflow" || true
-} | grep -Ec 'STAGING_USER.*STAGING_HOST.*releases' || true)"
-[[ "$duplicate_staging_destination" -le 1 ]] ||
-  fail "staging manifest destination is duplicated as a shell command"
+# The compose staging/deploy path (stage_host / stage_role over SSH, planned per role) and the
+# staging job are gone: production-k8s is the only deploy job. deploy-release.sh and the planner
+# above stay covered because they remain the manual recovery path for a compose host.
+k8s_job="$(awk '/^  production-k8s:$/,0' "$workflow")"
+[[ -n "$k8s_job" ]] || fail "the Kubernetes release job is missing"
+for compose_marker in 'stage_host' 'stage_role' 'deploy_host' '.roles[$role].deploy' 'STAGING_USER' '/opt/warptalk/current/scripts/'; do
+  if grep -Fq "$compose_marker" "$workflow"; then
+    fail "workflow still carries the removed compose/staging deploy path ($compose_marker)"
+  fi
+done
+# Helm diffs the release itself, so an unchanged workload is not restarted; the job must go through
+# the release script that owns that diff, the pre-upgrade migration hook and the rollback.
+printf '%s\n' "$k8s_job" | grep -Fq 'run: ./scripts/deploy-k3s-release.sh' ||
+  fail "the k8s release does not deploy through deploy-k3s-release.sh"
+# Smoke checks run from the dispatched infrastructure checkout, and only when something changed.
+smoke_step="$(printf '%s\n' "$k8s_job" | awk '/- name: Public health endpoints$/,/run: /')"
+printf '%s\n' "$smoke_step" | grep -Fq 'if: ${{ !inputs.k8s_dry_run }}' ||
+  fail "smoke checks must be skipped on a k8s dry run, which changes nothing"
+printf '%s\n' "$smoke_step" | grep -Fq 'working-directory: warptalk-infrastructure' ||
+  fail "smoke checks must run from the dispatched infrastructure checkout"
+printf '%s\n' "$smoke_step" | grep -Fq 'run: ./scripts/smoke-production.sh' ||
+  fail "smoke checks do not run smoke-production.sh"
 
 echo "release optimization contract: PASS"
