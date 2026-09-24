@@ -5,13 +5,16 @@
 # select node.warptalk.io/role=infra and tolerate the control-plane taint. That keeps ~1.4 GiB of
 # requests off the App node (deploy/k3s/README.md "Capacity plan").
 
+# The monitoring stack runs on the App node, NOT the infra node. On 25 Sep 2026 these values put
+# Prometheus, Alertmanager, Grafana, the operator and kube-state-metrics on warptalk-infra-master
+# (the kubeadm control plane, ~3.8Gi): the node reached 88% memory within minutes and
+# kube-apiserver, kube-controller-manager and kube-scheduler all restarted. Move it back to the
+# infra node only after that node is resized well past the control plane's own ~2Gi.
+# (The anchor keeps its old name so every `<<: *infra-placement` below stays valid.)
 x-infra-placement: &infra-placement
   nodeSelector:
-    node.warptalk.io/role: infra
-  tolerations:
-    - key: node-role.kubernetes.io/control-plane
-      operator: Exists
-      effect: NoSchedule
+    node.warptalk.io/role: app
+  tolerations: []
 
 alertmanager:
   alertmanagerSpec:
