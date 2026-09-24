@@ -162,6 +162,24 @@ case "$(value_of LIVEKIT_URL)" in
   *) fail "LIVEKIT_URL must be a LiveKit Cloud WebSocket URL" ;;
 esac
 
+# WT-824: a region Cloudflare R2 will reject loses every recording, silently and after the fact.
+#
+# R2 accepts "auto", an empty value or "us-east-1" and answers InvalidRegionName to anything else.
+# LiveKit hands this string to its S3 client as-is, so the failure happens inside LiveKit Cloud
+# when the meeting is already over: the egress ends EGRESS_FAILED, the file is never uploaded, and
+# LiveKit Cloud keeps no copy. Nothing about the recording UI can hint at a region.
+#
+# Checked only for an R2 endpoint, because the same value is correct for a real AWS bucket.
+egress_endpoint="$(value_of LIVEKIT_EGRESS_S3_ENDPOINT)"
+case "$egress_endpoint" in
+  *r2.cloudflarestorage.com*)
+    case "$(value_of LIVEKIT_EGRESS_S3_REGION)" in
+      ""|auto|us-east-1) ;;
+      *) fail "LIVEKIT_EGRESS_S3_REGION must be 'auto' for a Cloudflare R2 endpoint (R2 rejects other regions, and every recording upload fails)" ;;
+    esac
+    ;;
+esac
+
 case "$(value_of ALERT_EMAIL_TO)" in
   *@*.*) ;;
   *) fail "ALERT_EMAIL_TO must be an email address" ;;
