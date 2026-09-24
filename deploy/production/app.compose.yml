@@ -138,6 +138,9 @@ services:
       # Required by WorkspaceInvitationGrpcClient, which verifies and accepts workspace
       # invitation tokens. Same failure mode as above.
       GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
+      # Required by the email template composer: the verification and password-reset emails read
+      # their admin-edited template from the notification service (GetEmailTemplate).
+      GrpcSettings__NotificationServiceUrl: http://notification-service:50054
       HEALTH_PORT: "5101"
       AppBaseUrl: https://${APP_DOMAIN:?}
       Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID:?}
