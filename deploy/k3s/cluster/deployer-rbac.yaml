@@ -1,6 +1,6 @@
 # The identity the production-k8s release job deploys as (GitHub `production` secret
-# K8S_KUBECONFIG). Applied by the one-time k8s-bootstrap job in release.yml, which runs with the
-# cluster-admin K8S_BOOTSTRAP_KUBECONFIG; scripts/render-k8s-deployer-kubeconfig.sh turns the token
+# K8S_KUBECONFIG). Applied by hand with an admin kubeconfig (deploy/k3s/README.md, "Cluster
+# bootstrap by hand"); scripts/render-k8s-deployer-kubeconfig.sh turns the token
 # below into the K8S_KUBECONFIG value.
 #
 # What it can do, and why:
