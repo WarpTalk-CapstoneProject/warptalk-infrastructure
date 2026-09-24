@@ -114,6 +114,13 @@ grep -Fq "name: metrics-exporter" "$RENDERED_FILE"
 grep -Fq "path: /metrics" "$RENDERED_FILE"
 grep -Fq "kind: PrometheusRule" "$RENDERED_FILE"
 grep -Fq "name: warptalk-grafana-dashboard" "$RENDERED_FILE"
+# The admin System Health page builds /grafana/d/<uid> from these uids (warptalk-web).
+grep -Fq "name: warptalk-grafana-dashboards" "$RENDERED_FILE"
+for dashboard_uid in warptalk-meetings warptalk-platform warptalk-pods; do
+  grep -Fq "\"uid\": \"$dashboard_uid\"" "$RENDERED_FILE"
+done
+grep -Fq "warptalk_meeting_ended_total" "$RENDERED_FILE"
+grep -Fq "warptalk_stage_messages_total" "$RENDERED_FILE"
 grep -Fq "redis_stream_group_lag" "$RENDERED_FILE"
 grep -Fq "redis_stream_group_messages_pending" "$RENDERED_FILE"
 grep -Fq "redis_keys_count" "$RENDERED_FILE"
@@ -540,6 +547,8 @@ if "name: gateway" in hosts["app.warptalk.io.vn"] or "name: frontend" in hosts["
 config = by_kind.get("ConfigMap", {}).get("warptalk-runtime", "")
 for needle, message in (
     ("monitoring-kube-prometheus-prometheus.monitoring.svc", "Monitoring__PrometheusUrl must point at the monitoring namespace"),
+    ("monitoring-kube-prometheus-alertmanager.monitoring.svc", "Monitoring__AlertmanagerUrl must point at Alertmanager, the only place silences exist"),
+    ('Monitoring__GrafanaEmbedPath: "/grafana"', "Monitoring__GrafanaEmbedPath must be the same-origin /grafana path the Grafana Ingress serves"),
     ('RateLimits__LoginPermitLimit: "5"', "login rate limit must be back at the compose value of 5"),
     ('ForwardedHeaders__KnownNetworks__0: "192.168.0.0/16"', "the gateway must trust X-Forwarded-For from the live Calico pod CIDR"),
     ('AllowedOrigins__0: "https://app.warptalk.io.vn"', "AllowedOrigins must hold the app origin"),
@@ -786,6 +795,51 @@ for name, minimum in live.items():
         fail(f"{name} claim {per_claim[name]:.0f} GiB is below the live {minimum} GiB; a PVC cannot shrink")
 total = postgres + rabbit + redis + qdrant
 print(f"K3s production contract: data claims {total:.0f} GiB nominal (none below the live sizes)")
+PY
+
+# The embedded Grafana and the control-plane scrape fix (deploy/k3s/monitoring-values.yaml).
+python3 - "$ROOT_DIR/deploy/k3s/monitoring-values.yaml" <<'PY'
+import sys
+import yaml
+
+values = yaml.safe_load(open(sys.argv[1]))
+
+def fail(message):
+    print(f"K3s monitoring contract: {message}", file=sys.stderr)
+    sys.exit(1)
+
+# kubeadm binds these to localhost; scraping them only produced down targets and false alerts.
+for component in ("kubeEtcd", "kubeScheduler", "kubeControllerManager", "kubeProxy"):
+    if values.get(component, {}).get("enabled", True) is not False:
+        fail(f"{component} must stay disabled until its metrics bind beyond 127.0.0.1")
+
+grafana = values["grafana"]
+ini = grafana["grafana.ini"]
+if ini.get("auth.anonymous", {}).get("enabled") is not False:
+    fail("Grafana must never allow anonymous access")
+proxy = ini.get("auth.proxy", {})
+if not proxy.get("enabled") or proxy.get("header_name") != "X-WEBAUTH-USER":
+    fail("Grafana must authenticate through the gateway ForwardAuth header")
+if proxy.get("whitelist") != "192.168.0.0/16":
+    fail("auth.proxy must trust the header only from the Calico pod CIDR")
+if ini.get("users", {}).get("auto_assign_org_role") != "Viewer":
+    fail("proxy-authenticated admins must land as Viewer")
+if ini["security"].get("allow_embedding") is not True or ini["security"].get("cookie_samesite") != "lax":
+    fail("the admin page embeds Grafana same-origin: allow_embedding true, SameSite=Lax")
+if not ini["server"]["root_url"].endswith("/grafana/") or ini["server"].get("serve_from_sub_path") is not True:
+    fail("Grafana must be served from the /grafana sub-path")
+ingress = grafana["ingress"]
+if ingress.get("path") != "/grafana" or "monitoring-grafana-admin-auth@kubernetescrd" not in ingress["annotations"].get("traefik.ingress.kubernetes.io/router.middlewares", ""):
+    fail("the Grafana Ingress must serve /grafana behind the admin ForwardAuth middleware")
+objects = {o["metadata"]["name"]: o for o in grafana.get("extraObjects", [])}
+auth = objects.get("grafana-admin-auth", {}).get("spec", {}).get("forwardAuth", {})
+if not auth.get("address", "").endswith("/internal/grafana/auth") or auth.get("authResponseHeaders") != ["X-WEBAUTH-USER"]:
+    fail("the ForwardAuth must ask the gateway and copy back only X-WEBAUTH-USER")
+if "grafana-ingress" not in objects:
+    fail("a NetworkPolicy must keep everything but Traefik and monitoring away from Grafana")
+if "frame-ancestors 'self'" not in objects.get("grafana-embed-headers", {}).get("spec", {}).get("headers", {}).get("contentSecurityPolicy", ""):
+    fail("Grafana must be frameable by its own origin only")
+print("K3s monitoring contract: Grafana embed and control-plane scrape settings OK")
 PY
 
 "$ROOT_DIR/scripts/check-k3s-compose-url-parity.sh"

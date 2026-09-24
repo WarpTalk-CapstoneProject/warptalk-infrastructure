@@ -255,6 +255,22 @@ add Kubernetes rules (crash loops, OOM kills, unavailable replicas, filling volu
 stream-group coverage so a regression to a hard-coded exporter list is visible).
 `Monitoring__PrometheusUrl` points at the `monitoring` namespace.
 
+**Grafana in the admin portal.** Grafana is published at `https://app.warptalk.io.vn/grafana/`
+(same origin as the admin portal) and embedded by `/admin/health`. Every request passes a Traefik
+ForwardAuth to the gateway's `/internal/grafana/auth`, which validates the WarpTalk JWT from the
+`access_token` cookie and requires the system-admin role; Grafana runs `auth.proxy` and trusts
+`X-WEBAUTH-USER` only from the pod CIDR, and a NetworkPolicy admits only Traefik and the
+`monitoring` namespace. There is no anonymous access. Break-glass: `kubectl -n monitoring
+port-forward svc/monitoring-grafana 3000:80`, then `http://localhost:3000/grafana/` with the
+`warptalk-grafana-admin` password. The provisioned dashboards (`chart/files/dashboards`, uids
+`warptalk-meetings`, `warptalk-platform`, `warptalk-pods`) ship with the app release; the
+Grafana settings, the Middlewares and the platform alert rules ship with `monitoring-values.yaml`,
+which is applied only by the add-on bootstrap (`k8s_bootstrap=true`), not by a normal release.
+
+The kubeadm control plane (etcd, scheduler, controller-manager, kube-proxy) binds its metrics to
+127.0.0.1, so those four components are disabled in `monitoring-values.yaml` rather than left as
+permanently-down targets raising false critical alerts.
+
 ### Supply chain at admission
 
 Images are signed with Cosign in `build-scan-sign`, and the cluster only ever runs the
