@@ -675,6 +675,12 @@ services:
       # closes the turn. Per-room override `translationRoom:{id}:flash_mode` still wins
       # in both directions, so a bad room can be moved back without a deploy.
       STT_STREAMING_ENABLED: "true"
+      # WT-716 tier 1: the deterministic filler/stutter prepass that runs inside this worker
+      # and publishes clean_text alongside the raw text on stt:results. Same flag name as the
+      # one on transcript-clean-worker on purpose — they are two halves of one feature, and
+      # turning tier 2 off while leaving tier 1 on (or the reverse) is a half-clean transcript.
+      # original_text is never touched either way, so this is safe to flip back.
+      TRANSCRIPT_CLEAN_ENABLED: "true"
     healthcheck: *ai-healthcheck
     deploy:
       resources:
@@ -749,6 +755,57 @@ services:
       # the mini tier cannot use the ASR-repair machinery, and these lines were transcribed
       # under exactly the conditions that needs.
       TRANSLATION_MODEL: gpt-4.1
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  # WT-716 tier 2 of "clean transcript": whole cleaned SENTENCES over the raw segments, read off
+  # transcript:clean and stored beside the raw rows, never instead of them. Tier 1 (fillers and
+  # stutters, per segment, deterministic) runs inside stt-worker on the live path; this is the
+  # LLM pass that joins segments into sentences once they are final.
+  #
+  # Same ai-translation image, different module and stream — the same arrangement as
+  # translation-backfill-worker above. The builder stage of warptalk-ai/Dockerfile installs every
+  # worker package into one venv, so no new build target, scan or signature enters the release
+  # pipeline for this container; `command` is what picks the worker.
+  #
+  # A separate container rather than a loop inside translation-worker: this pass waits for
+  # segments to settle and then calls an LLM per sentence, which must never queue in front of a
+  # live translation somebody is listening for.
+  transcript-clean-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-translation:${IMAGE_TAG:?}
+    command: ["python", "-m", "transcript_clean_worker"]
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: transcript-clean
+      # The kill switch for the whole feature, also set on stt-worker for tier 1. Off means the
+      # transcript is served raw, which is what every reader already falls back to when
+      # clean_text is NULL.
+      TRANSCRIPT_CLEAN_ENABLED: "true"
+      # Segments closer together than this are joined into one sentence candidate; a gap wider
+      # than it ends the sentence.
+      TRANSCRIPT_CLEAN_MERGE_GAP_MS: "1200"
+      # A hard ceiling so an unbroken monologue is still cut into sentences rather than growing
+      # one unbounded prompt.
+      TRANSCRIPT_CLEAN_MAX_SENTENCE_MS: "30000"
+      # A speaker who simply stopped talking must not leave the last sentence unflushed.
+      TRANSCRIPT_CLEAN_IDLE_FLUSH_MS: "4000"
+      # Nothing downstream waits on this worker, but a hung call would hold the consumer group's
+      # floor. On timeout the sentence falls back to the raw text (flag fallback_raw).
+      TRANSCRIPT_CLEAN_LLM_TIMEOUT_S: "8"
+      # The guardrail that keeps "cleaning" from becoming "summarising": a candidate that deletes
+      # more than this fraction of the source is rejected and the raw text is kept instead.
+      TRANSCRIPT_CLEAN_MAX_DELETE_RATIO: "0.4"
+      # Pinned rather than left to the worker default, for the reason TRANSLATION_REALTIME_MODEL
+      # spells out above: an unpinned model means a code default silently decides what production
+      # runs. The same non-reasoning chat model translation-worker uses off the realtime socket —
+      # this pass rewrites transcribed speech under exactly the conditions that model is tuned
+      # for, and a reasoning tier buys nothing for filler removal.
+      TRANSCRIPT_CLEAN_MODEL: gpt-4.1
     healthcheck: *ai-healthcheck
     deploy:
       resources:
