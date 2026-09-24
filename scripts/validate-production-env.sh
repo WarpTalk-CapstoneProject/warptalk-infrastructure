@@ -144,9 +144,40 @@ echo "${google_workspace_client_id%%-*}" | grep -Eq '^[0-9]{8,}$' ||
 
 require_length GOOGLE_WORKSPACE_CLIENT_SECRET 24
 
+# Cartesia usage sync — OPTIONAL, so only a value that is present is checked. The usage API only
+# accepts an ADMIN key; a standard TTS key (sk_car_...) pasted here passes every presence check,
+# answers 401 on every sync, and leaves Insights estimating with nothing but a log line to say so.
+cartesia_admin_key="$(value_of CARTESIA_ADMIN_API_KEY)"
+case "$cartesia_admin_key" in
+  ""|sk_car_admin_*) ;;
+  *) fail "CARTESIA_ADMIN_API_KEY must be a Cartesia admin API key (sk_car_admin_...)" ;;
+esac
+cartesia_usage_key_id="$(value_of CARTESIA_USAGE_API_KEY_ID)"
+[ -z "$cartesia_usage_key_id" ] ||
+  echo "$cartesia_usage_key_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' ||
+  fail "CARTESIA_USAGE_API_KEY_ID must be a Cartesia API key id (a UUID from GET /api-keys)"
+
 case "$(value_of LIVEKIT_URL)" in
   wss://*.livekit.cloud) ;;
   *) fail "LIVEKIT_URL must be a LiveKit Cloud WebSocket URL" ;;
+esac
+
+# WT-824: a region Cloudflare R2 will reject loses every recording, silently and after the fact.
+#
+# R2 accepts "auto", an empty value or "us-east-1" and answers InvalidRegionName to anything else.
+# LiveKit hands this string to its S3 client as-is, so the failure happens inside LiveKit Cloud
+# when the meeting is already over: the egress ends EGRESS_FAILED, the file is never uploaded, and
+# LiveKit Cloud keeps no copy. Nothing about the recording UI can hint at a region.
+#
+# Checked only for an R2 endpoint, because the same value is correct for a real AWS bucket.
+egress_endpoint="$(value_of LIVEKIT_EGRESS_S3_ENDPOINT)"
+case "$egress_endpoint" in
+  *r2.cloudflarestorage.com*)
+    case "$(value_of LIVEKIT_EGRESS_S3_REGION)" in
+      ""|auto|us-east-1) ;;
+      *) fail "LIVEKIT_EGRESS_S3_REGION must be 'auto' for a Cloudflare R2 endpoint (R2 rejects other regions, and every recording upload fails)" ;;
+    esac
+    ;;
 esac
 
 case "$(value_of ALERT_EMAIL_TO)" in

@@ -1,7 +1,10 @@
 # Copy outside the repository, replace every CHANGE_ME value and pass the copy
 # as K3S_VALUES_FILE. Runtime credentials remain in the external secret store.
 global:
+  # The app host (APP_DOMAIN) and the API host (API_DOMAIN), split as production compose splits
+  # them. deploy/k3s/k8s-app-values.yaml is the production copy of this file.
   domain: CHANGE_ME.warptalk.io.vn
+  apiDomain: CHANGE_ME-api.warptalk.io.vn
 
 secret:
   externalSecret:

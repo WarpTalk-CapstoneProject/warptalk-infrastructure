@@ -3,11 +3,34 @@ global:
   imageRegistry: ghcr.io/warptalk
   imageTag: replace-with-git-sha
   imagePullPolicy: IfNotPresent
+  # Registry credentials for the WarpTalk images (ghcr.io). Production names warptalk-ghcr, which
+  # the release job writes from GHCR_PULL_TOKEN; a public registry needs none.
+  imagePullSecrets: []
   domain: app.example.com
+  # The API host, exactly as production compose splits them: APP_DOMAIN serves the frontend,
+  # API_DOMAIN the gateway, and every OAuth/MCP callback compose builds from ${API_DOMAIN} is
+  # built from this. Empty means a single-host install: the app host also routes /api, /hubs
+  # and /oauth/client-metadata to the gateway, and the callbacks use global.domain.
+  apiDomain: ""
+  # Set by the deploy from the release manifest's tag; never written in a values file.
   releaseId: local
+
+# Where application pods may run. Empty here so kind and single-node clusters schedule anywhere;
+# deploy/k3s/k8s-app-values.yaml pins them to the App node.
+placement:
+  nodeSelector: {}
+  tolerations: []
+
+network:
+  # Pod CIDRs the gateway trusts X-Forwarded-For from (the Traefik pods live here). Must match
+  # the cluster's --pod-network-cidr; see scripts/k8s-cluster-bootstrap.sh.
+  podCidrs: []
 
 secret:
   name: warptalk-runtime
+  # Production materializes warptalk-runtime from the GitHub `production` environment in the
+  # release job (scripts/materialize-k8s-runtime-secrets.sh) and sets this to false. External
+  # Secrets stays available behind the flag for a cluster that has a real secret store.
   externalSecret:
     enabled: true
     secretStoreName: warptalk-production
@@ -23,6 +46,20 @@ config:
   ASPNETCORE_ENVIRONMENT: Production
   Jwt__Issuer: WarpTalk.AuthService
   Jwt__Audience: WarpTalk
+  GrpcUrls__AuthServiceUrl: http://auth-service:50051
+  GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
+  GrpcUrls__TranslationRoomService: http://translation-room-service:50052
+  GrpcUrls__BillingServiceUrl: http://billing-service:50057
+  GrpcUrls__BillingService: http://billing-service:50057
+  GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
+  GrpcUrls__NotificationServiceUrl: http://notification-service:50054
+  GrpcUrls__TranscriptServiceUrl: http://transcript-service:50053
+  GrpcSettings__AuthServiceUrl: http://auth-service:50051
+  GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
+  GrpcSettings__BillingServiceUrl: http://billing-service:50057
+  GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
+  GrpcSettings__NotificationServiceUrl: http://notification-service:50054
+  GrpcSettings__TranscriptServiceUrl: http://transcript-service:50053
   Observability__Enabled: "true"
   OTEL_EXPORTER_OTLP_ENDPOINT: http://warptalk-otel-collector:4317
   OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -34,6 +71,9 @@ config:
   RabbitMq__Host: warptalk-rabbitmq.warptalk.svc.cluster.local
   RabbitMq__VirtualHost: /
   VECTOR_DB_URL: http://warptalk-qdrant.warptalk-data.svc.cluster.local:6333
+  VectorDb__Url: http://warptalk-qdrant.warptalk-data.svc.cluster.local:6333
+  # kube-prometheus-stack is installed into the `monitoring` namespace (install-k3s-addons.sh).
+  Monitoring__PrometheusUrl: http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
   VECTOR_DB_PROVIDER: qdrant
   EMBEDDING_PROVIDER: openai
   EMBEDDING_MODEL: text-embedding-3-small
@@ -80,6 +120,10 @@ config:
   BillingRates__VoiceClonePerMinute: "40"
   BillingRates__AiSummaryPerRequest: "5"
   BillingRates__AiChatPerRequest: "2"
+  # The compose defaults. They were raised 4-7x (login 5 -> 20) because every client arrived as
+  # one address; the gateway now sees the real client IP (externalTrafficPolicy: Local on the
+  # Traefik Service plus ForwardedHeaders__KnownNetworks for the pod CIDR), so a per-IP budget
+  # means per client again.
   RateLimits__IpPermitLimit: "300"
   RateLimits__UserPermitLimit: "180"
   RateLimits__WorkspacePermitLimit: "1000"
@@ -148,11 +192,15 @@ workloads:
     cpuLimit: "1"
     memoryLimit: 768Mi
     autoscaling: {enabled: true, min: 2, max: 8, cpu: 70}
+    # The SignalR hubs terminate here: negotiate and the WebSocket upgrade must reach the same pod.
+    stickySession:
+      cookieName: warptalk_gateway_affinity
     secretEnv:
       Jwt__Secret: JWT_SECRET
       Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
       Grpc__InternalSecret: GRPC_INTERNAL_SECRET
       Redis__ConnectionString: Redis__ConnectionString
+      SignalR__Redis: Redis__ConnectionString
   auth-service:
     image: auth-service
     replicas: 2
@@ -166,6 +214,10 @@ workloads:
     autoscaling: {enabled: true, min: 2, max: 5, cpu: 70}
     secretEnv:
       ConnectionStrings__AuthDb: AUTH_CONNECTION_STRING
+      # Google sign-in. Production compose sets it (Authentication__Google__ClientId from
+      # GOOGLE_CLIENT_ID, the id the web bundle is built with); the chart never did, so every
+      # Google sign-in on the cluster would have failed with "Invalid Google token".
+      Authentication__Google__ClientId: GOOGLE_CLIENT_ID
       Jwt__Secret: JWT_SECRET
       Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
       Grpc__InternalSecret: GRPC_INTERNAL_SECRET
@@ -180,6 +232,10 @@ workloads:
       Storage__S3__BucketName: VOICE_SAMPLES_STORAGE_S3_BUCKET_NAME
   translation-room-service:
     image: translation-room-service
+    # Hosted background loops that must not run concurrently on two replicas. Rendered as the
+    # warptalk.io/singleton-workers annotation only; the guard itself is the backend's Redis
+    # lock (fix/multi-replica-safety). Until that ships these loops run on every replica.
+    singletonWorkers: [AbandonedRoomSweepWorker, IdleRoomMonitoringWorker, ReminderNotificationWorker, RecurringSeriesMaterializationWorker, ArtifactsReconciliationWorker, ArtifactsRecoveryWorker]
     replicas: 2
     port: 5102
     grpcPort: 50052
@@ -249,9 +305,16 @@ workloads:
       Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
       Grpc__InternalSecret: GRPC_INTERNAL_SECRET
       Redis__ConnectionString: Redis__ConnectionString
+      Resend__ApiKey: RESEND_API_KEY
+      Resend__FromEmail: RESEND_FROM_EMAIL
+      Resend__FromName: RESEND_FROM_NAME
       RESEND_API_KEY: RESEND_API_KEY
   meeting-service:
     image: meeting-service
+    # Hosted background loops that must not run concurrently on two replicas. Rendered as the
+    # warptalk.io/singleton-workers annotation only; the guard itself is the backend's Redis
+    # lock (fix/multi-replica-safety). Until that ships these loops run on every replica.
+    singletonWorkers: [EgressReconciliationWorker, HostFallbackConsumerWorker]
     replicas: 2
     port: 5105
     grpcPort: 50055
@@ -267,6 +330,10 @@ workloads:
       Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
       Grpc__InternalSecret: GRPC_INTERNAL_SECRET
       Redis__ConnectionString: Redis__ConnectionString
+      # MeetingChatHub (/api/v1/meetings/chat-hub) is hosted HERE, not in the gateway, and this
+      # service runs 2+ replicas: without a backplane a message sent to one pod never reaches the
+      # clients connected to the other. Same key the gateway reads (Program.cs "SignalR:Redis").
+      SignalR__Redis: Redis__ConnectionString
       LiveKit__Url: LIVEKIT_URL
       LiveKit__ApiKey: LIVEKIT_API_KEY
       LiveKit__ApiSecret: LIVEKIT_API_SECRET
@@ -314,8 +381,13 @@ workloads:
       Storage__S3__AccessKey: STORAGE_S3_ACCESS_KEY
       Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
       Storage__S3__BucketName: STORAGE_S3_BUCKET_NAME
+      VectorDb__ApiKey: VECTOR_DB_API_KEY
   billing-service:
     image: billing-service
+    # Hosted background loops that must not run concurrently on two replicas. Rendered as the
+    # warptalk.io/singleton-workers annotation only; the guard itself is the backend's Redis
+    # lock (fix/multi-replica-safety). Until that ships these loops run on every replica.
+    singletonWorkers: [SubscriptionExpirationWorker, SessionMonitorWorker, BillingCycleWorker, InvoiceOverdueSweeper, DailyAuditAggregationWorker, BillingAggregationWorker, BillingOutboxWorker, EntitlementReconcileWorker]
     replicas: 2
     port: 5107
     grpcPort: 50057
@@ -333,8 +405,16 @@ workloads:
       Jwt__PreviousSecrets: JWT_PREVIOUS_SECRETS
       Grpc__InternalSecret: GRPC_INTERNAL_SECRET
       Redis__ConnectionString: Redis__ConnectionString
+      # BillingHub is hosted in this service as well as in the gateway; backplane as above.
+      SignalR__Redis: Redis__ConnectionString
       Stripe__SecretKey: STRIPE_SECRET_KEY
       Stripe__WebhookSecret: STRIPE_WEBHOOK_SECRET
+    # CartesiaUsageSyncWorker (admin Insights, measured dubbing cost). Optional: without the admin
+    # key the worker logs once that it is disabled and Insights estimate. Several replicas are safe:
+    # they share one sync schedule through a Redis lease, so Cartesia sees one sync per interval.
+    optionalSecretEnv:
+      Cartesia__AdminApiKey: CARTESIA_ADMIN_API_KEY
+      Cartesia__UsageApiKeyId: CARTESIA_USAGE_API_KEY_ID
   assistant-service:
     image: assistant-service
     replicas: 2
@@ -351,21 +431,26 @@ workloads:
     # the one place the host is written down: this chart serves a single host with /api and
     # /oauth routed to the gateway, where production compose splits APP_DOMAIN from API_DOMAIN.
     env:
-      Plugins__Mcp__Client__RedirectUri: https://{{ .Values.global.domain }}/api/v1/assistant/plugins/mcp/oauth/callback
-      Plugins__Mcp__Client__ClientMetadataUrl: https://{{ .Values.global.domain }}/oauth/client-metadata/v1.json
-      Plugins__Mcp__Client__JwksUrl: https://{{ .Values.global.domain }}/oauth/client-metadata/jwks.json
+      # Host by host as in deploy/production/app.compose.yml: the three URLs compose builds from
+      # ${API_DOMAIN} use the API host, ClientUri the app host. These are registered with Google
+      # and with every MCP provider a workspace has connected, so a cutover that changed one of
+      # them would break OAuth for everyone; scripts/check-k3s-compose-url-parity.sh fails the
+      # build when any of them drifts from compose.
+      Plugins__Mcp__Client__RedirectUri: https://{{ include "warptalk.apiHost" . }}/api/v1/assistant/plugins/mcp/oauth/callback
+      Plugins__Mcp__Client__ClientMetadataUrl: https://{{ include "warptalk.apiHost" . }}/oauth/client-metadata/v1.json
+      Plugins__Mcp__Client__JwksUrl: https://{{ include "warptalk.apiHost" . }}/oauth/client-metadata/jwks.json
       Plugins__Mcp__Client__ClientUri: https://{{ .Values.global.domain }}
       # Kept in step with deploy/production/app.compose.yml: one redirect URI for the whole
       # provider, with the plugin key in the protected state. Google matches it exactly on both
       # the authorization request and the token exchange, so Cloud Console has to carry this
       # exact string - a deployment whose console entry names the old per-plugin path cannot
       # connect any Google plugin at all.
-      Plugins__GoogleWorkspace__OAuth__RedirectUri: https://{{ .Values.global.domain }}/api/v1/assistant/plugins/oauth/google/callback
+      Plugins__GoogleWorkspace__OAuth__RedirectUri: https://{{ include "warptalk.apiHost" . }}/api/v1/assistant/plugins/oauth/google/callback
       # The retired per-plugin URI, which only finishes consents that were already authorized
       # against it when the deploy landed. Both URIs have to be registered in Cloud Console while
       # this is set; an authorization code lives minutes, so once a deploy has settled, delete
       # this line, the legacy route and the console entry together.
-      Plugins__GoogleWorkspace__OAuth__LegacyRedirectUri: https://{{ .Values.global.domain }}/api/v1/assistant/plugins/google_workspace/oauth/callback
+      Plugins__GoogleWorkspace__OAuth__LegacyRedirectUri: https://{{ include "warptalk.apiHost" . }}/api/v1/assistant/plugins/google_workspace/oauth/callback
       # Every plugin secret and user token in assistant.plugins / plugin_connections is encrypted
       # with this ring. Program.cs takes the path silently when it is absent and keeps the keys in
       # memory, so an unset value here is not an error anywhere - it is a rollout that orphans
@@ -384,6 +469,8 @@ workloads:
       Jwt__SecretKey: JWT_SECRET
       Grpc__InternalSecret: GRPC_INTERNAL_SECRET
       Redis__ConnectionString: Redis__ConnectionString
+      # AssistantHub (/api/v1/assistant/chat-hub) is hosted here; backplane as above.
+      SignalR__Redis: Redis__ConnectionString
       # A secretKeyRef to a key the runtime secret does not carry leaves the pod in
       # CreateContainerConfigError, which is the loud half of the lesson from the release where
       # an unset client id started cleanly and died on Google's consent screen instead.
@@ -448,6 +535,7 @@ workloads:
     secretEnv:
       REDIS_PASSWORD: REDIS_PASSWORD
       OPENAI_API_KEY: OPENAI_API_KEY
+      VECTOR_DB_API_KEY: VECTOR_DB_API_KEY
   suggestion-worker:
     image: ai-suggestion
     workerHealthName: suggestion
@@ -458,6 +546,7 @@ workloads:
     # fraction of the conversation, which degrades the decision quality this feature exists
     # for. It is also not on the latency path — nothing waits on a suggestion.
     replicas: 1
+    singleton: true
     cpu: 100m
     memory: 256Mi
     cpuLimit: "500m"
@@ -524,7 +613,10 @@ workloads:
       OPENAI_API_KEY: OPENAI_API_KEY
   metrics-exporter:
     image: ai-metrics
-    replicas: 2
+    # One scraper is enough: a second publishes every stream series twice and doubles the
+    # XINFO load on Redis for nothing.
+    replicas: 1
+    singleton: true
     port: 9108
     healthPath: /health/ready
     cpu: 100m
@@ -553,7 +645,13 @@ gotenberg:
 ingress:
   enabled: true
   className: traefik
+  # Optional bare domain served like the app host (frontend). Its own Certificate, so an apex
+  # whose DNS does not point at the cluster cannot hold the app/api certificate hostage.
+  apexDomain: ""
+  apexTlsSecretName: warptalk-apex-tls
   tlsSecretName: warptalk-tls
+  # TLS secret for global.apiDomain; empty means it shares tlsSecretName.
+  apiTlsSecretName: ""
   certManager:
     enabled: false
     clusterIssuerName: warptalk-letsencrypt
@@ -566,9 +664,21 @@ networkPolicy:
 telemetry:
   replicas: 2
   image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib@sha256:f2f01157055a9b2aab9df7118e1f1c9abf345e99b23bc7a2bc791db374a7d0f6
+  # The memory limit is paired with memory_limiter in files/otel-collector.yaml (limit_mib 300):
+  # keep the container limit ~20% above it, never below.
   resources:
-    requests: {cpu: 100m, memory: 128Mi}
-    limits: {cpu: 500m, memory: 512Mi}
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 200m, memory: 384Mi}
+
+# Logs and traces (see templates/seq.yaml). Same image and digest as production compose.
+seq:
+  enabled: true
+  image: datalust/seq:2026.1.17004-x64@sha256:6f9a27389bc8deff86319c9591b21c1216ee24ceb71315127e33c68f14b38bc9
+  storageClass: ""
+  storageSize: 10Gi
+  resources:
+    requests: {cpu: 100m, memory: 384Mi}
+    limits: {cpu: 200m, memory: 640Mi}
 
 costObservability:
   enabled: true

@@ -292,3 +292,70 @@ class HostRoleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KubernetesModeTests(unittest.TestCase):
+    """--platform k8s: the same verdicts, read from the API server instead of the Docker socket."""
+
+    @staticmethod
+    def _pod(phase="Running", *, waiting=None, ready=True, restarts=0, last=None):
+        from inspector import evaluate_pod  # noqa: F401  (import check)
+
+        container = {
+            "name": "gateway",
+            "ready": ready,
+            "restartCount": restarts,
+            "state": {"waiting": {"reason": waiting}} if waiting else {"running": {}},
+            "lastState": {"terminated": last} if last else {},
+        }
+        return {
+            "metadata": {"name": "gateway-abc", "uid": "u1", "labels": {"app.kubernetes.io/name": "gateway"}},
+            "status": {"phase": phase, "containerStatuses": [container]},
+        }
+
+    def test_healthy_pod_reports_nothing(self):
+        from inspector import evaluate_pod
+
+        self.assertEqual(evaluate_pod(self._pod()), [])
+
+    def test_crash_loop_is_critical(self):
+        from inspector import evaluate_pod
+
+        [result] = evaluate_pod(self._pod(waiting="CrashLoopBackOff", ready=False))
+        self.assertEqual(result.status, "critical")
+        self.assertIn("CrashLoopBackOff", result.detail)
+
+    def test_new_oom_restart_is_critical_and_old_restarts_are_not_news(self):
+        from inspector import evaluate_pod
+
+        pod = self._pod(restarts=3, last={"reason": "OOMKilled", "exitCode": 137})
+        [result] = evaluate_pod(pod, {"gateway/gateway-abc:gateway": 2})
+        self.assertEqual(result.status, "critical")
+        self.assertIn("OOMKilled", result.detail)
+        self.assertEqual(evaluate_pod(pod, {"gateway/gateway-abc:gateway": 3}), [])
+
+    def test_deployment_with_nothing_available_is_critical(self):
+        from inspector import evaluate_deployment
+
+        deployment = {"metadata": {"name": "gateway"}, "spec": {"replicas": 2}, "status": {}}
+        self.assertEqual(evaluate_deployment(deployment).status, "critical")
+        deployment["status"] = {"availableReplicas": 1, "updatedReplicas": 2}
+        self.assertEqual(evaluate_deployment(deployment).status, "warning")
+        deployment["status"] = {"availableReplicas": 2, "updatedReplicas": 2}
+        self.assertEqual(evaluate_deployment(deployment).status, "pass")
+
+    def test_node_pressure_is_a_warning_and_not_ready_is_critical(self):
+        from inspector import evaluate_node
+
+        node = {"metadata": {"name": "data"}, "spec": {}, "status": {"conditions": [
+            {"type": "Ready", "status": "True"}, {"type": "MemoryPressure", "status": "True"}]}}
+        self.assertEqual(evaluate_node(node).status, "warning")
+        node["status"]["conditions"][0]["status"] = "False"
+        self.assertEqual(evaluate_node(node).status, "critical")
+
+    def test_until_bounds_kubernetes_logs(self):
+        from inspector import within_until
+
+        line = "2026-09-23T10:00:05.123Z error: boom"
+        self.assertTrue(within_until(line, "2026-09-23T10:00:10Z"))
+        self.assertFalse(within_until(line, "2026-09-23T09:59:59Z"))

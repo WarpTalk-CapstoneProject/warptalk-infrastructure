@@ -34,7 +34,14 @@ printf '%s\n' "$secret_json" | jq -e --slurpfile contract "$contract_file" '
   all($contract.pgbouncerConnectionKeys[];
     ($data[.] | @base64d | contains($contract.pgbouncerHost))) and
   ($data | to_entries | all(.[]; (.value | @base64d |
-    contains("CHANGE_ME") | not)))
+    contains("CHANGE_ME") | not))) and
+  all(($contract.optionalKeyPrefixes // {}) | to_entries[];
+    .value as $prefix |
+    (($data[.key] // "") | @base64d) as $value |
+    ($value == "" or ($value | startswith($prefix)))) and
+  all(($contract.optionalUuidKeys // [])[];
+    (($data[.] // "") | @base64d) as $value |
+    ($value == "" or ($value | test("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))))
 ' >/dev/null ||
   fail "missing, empty, weak, placeholder, or non-PgBouncer runtime value"
 

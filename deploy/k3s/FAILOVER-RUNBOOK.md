@@ -64,3 +64,16 @@ Abort rollout and invoke the immutable release rollback when error rate is at
 least 1%, p95 exceeds the release SLO for ten minutes, any acknowledged message
 is lost, database replication loses quorum, or migrations cannot complete.
 Never force quorum by discarding the surviving data set.
+
+## Production on one Data VM
+
+The three-VM production cluster (deploy/k3s/README.md, "Production on the three Vietnix
+VMs") has a single Data node, so the quorum steps above apply to pod failures only. Losing the
+Data VM itself is a restore:
+
+- Postgres: CloudNativePG `bootstrap.recovery` from the Barman object store
+  (`warptalk-postgres-backup`), RPO ~5 minutes (`archive_timeout`).
+- Qdrant: the nightly `warptalk-qdrant-snapshot` CronJob uploads a full-storage snapshot to the
+  same bucket; restore it with `POST /snapshots/recover` (or the chart's `snapshotRestoration`),
+  or re-embed from Postgres if the snapshot is older than the documents that matter.
+- Redis holds no durable state beyond AOF on the node; live meetings in progress are lost.

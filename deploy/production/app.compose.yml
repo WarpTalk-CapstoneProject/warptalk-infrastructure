@@ -368,6 +368,11 @@ services:
     environment:
       <<: *dotnet-environment
       HEALTH_PORT: "5104"
+      # WT-699 / TC4104: BROADCAST and SEGMENT admin announcements resolve their audience
+      # through AuthService (every active account) and WorkspaceService (one workspace's members).
+      # Without these the two modes are refused with a sentence saying so.
+      GrpcUrls__AuthServiceUrl: http://auth-service:50051
+      GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
       ConnectionStrings__DefaultConnection: Host=${DATA_PRIVATE_IP:?};Port=6432;Database=warptalk_notification;Username=warptalk_notification;Password=${NOTIFICATION_DB_PASSWORD:?};Search Path=notification,public;GSS Encryption Mode=Disable
       RabbitMQ__Host: ${INFRA_PRIVATE_IP:?}
       RabbitMQ__VirtualHost: ${RABBITMQ_VHOST:-/}
@@ -534,6 +539,13 @@ services:
       BillingRates__VoiceClonePerMinute: ${BILLING_RATE_VOICE_CLONE_PER_MINUTE:-40}
       BillingRates__AiSummaryPerRequest: ${BILLING_RATE_AI_SUMMARY_PER_REQUEST:-5}
       BillingRates__AiChatPerRequest: ${BILLING_RATE_AI_CHAT_PER_REQUEST:-2}
+      # CartesiaUsageSyncWorker: measured Cartesia credits for admin Insights' dubbing cost.
+      # OPTIONAL on purpose (`:-`, not `:?`): with no admin key the worker logs once that it is
+      # disabled and Insights keep the rate-card estimate, so a host without the GitHub secret
+      # still deploys. Both values arrive through release.yml's add_runtime_secret; the key id
+      # limits usage to the production TTS key (empty = every key on the Cartesia account).
+      Cartesia__AdminApiKey: ${CARTESIA_ADMIN_API_KEY:-}
+      Cartesia__UsageApiKeyId: ${CARTESIA_USAGE_API_KEY_ID:-}
     depends_on:
       migrator:
         condition: service_completed_successfully

@@ -49,6 +49,18 @@ required_files=(
   "$ROOT_DIR/scripts/pin-qdrant-images.sh"
   "$ROOT_DIR/deploy/k3s/migrator.Dockerfile"
   "$ROOT_DIR/scripts/run-k3s-migrations.sh"
+  "$ROOT_DIR/scripts/helm-locked.sh"
+  "$ROOT_DIR/scripts/materialize-k8s-runtime-secrets.sh"
+  "$ROOT_DIR/scripts/label-k8s-nodes.sh"
+  "$ROOT_DIR/scripts/render-k8s-deployer-kubeconfig.sh"
+  "$ROOT_DIR/scripts/check-k3s-compose-url-parity.sh"
+  "$ROOT_DIR/scripts/test-k8s-runtime-secrets-contract.sh"
+  "$ROOT_DIR/deploy/k3s/cluster/deployer-rbac.yaml"
+  "$ROOT_DIR/deploy/k3s/monitoring-values.yaml"
+  "$ROOT_DIR/deploy/k3s/runtime-env.template"
+  "$ROOT_DIR/deploy/k3s/local/kind-local-cluster.yaml"
+  "$CHART_DIR/templates/seq.yaml"
+  "$DATA_CHART_DIR/templates/qdrant-snapshots.yaml"
 )
 
 for file in "${required_files[@]}"; do
@@ -58,15 +70,9 @@ for file in "${required_files[@]}"; do
   }
 done
 
-docker run --rm \
-  -v "$CHART_DIR:/chart:ro" \
-  alpine/helm:3.18.6 \
-  template warptalk /chart --namespace warptalk >"$RENDERED_FILE"
-
-docker run --rm \
-  -v "$DATA_CHART_DIR:/chart:ro" \
-  alpine/helm:3.18.6 \
-  template warptalk-data /chart --namespace warptalk-data >"$DATA_RENDERED_FILE"
+HELM="$ROOT_DIR/scripts/helm-locked.sh"
+"$HELM" template warptalk "$CHART_DIR" --namespace warptalk >"$RENDERED_FILE"
+"$HELM" template warptalk-data "$DATA_CHART_DIR" --namespace warptalk-data >"$DATA_RENDERED_FILE"
 
 docker run --rm -i \
   ghcr.io/yannh/kubeconform:v0.7.0-alpine \
@@ -330,7 +336,10 @@ grep -Fq "name: warptalk-postgres-pooler-rw" "$DATA_RENDERED_FILE"
 grep -Fq "poolMode: transaction" "$DATA_RENDERED_FILE"
 grep -Fq 'max_client_conn: "1000"' "$DATA_RENDERED_FILE"
 grep -Fq "app.kubernetes.io/name: warptalk-postgres-pooler" "$DATA_RENDERED_FILE"
-grep -Fq "minAvailable: 2" "$DATA_RENDERED_FILE"
+# The pooler PDB allows one voluntary eviction at a time. It was `minAvailable: 2`, which over the
+# production single pooler would forbid every drain; maxUnavailable means the same thing at three
+# poolers and stays drainable at any count (and it is not rendered at all below two).
+grep -Fq "maxUnavailable: 1" "$DATA_RENDERED_FILE"
 grep -Fq "apiVersion: barmancloud.cnpg.io/v1" "$DATA_RENDERED_FILE"
 grep -Fq "kind: ObjectStore" "$DATA_RENDERED_FILE"
 grep -Fq "name: barman-cloud.cloudnative-pg.io" "$DATA_RENDERED_FILE"
@@ -348,7 +357,15 @@ if grep -Fq "barmanObjectStore:" "$DATA_RENDERED_FILE"; then
 fi
 grep -Fq "replicas: 3" "$DATA_RENDERED_FILE"
 grep -Fq "sentinel:" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
-grep -Fq "replicaCount: 3" "$ROOT_DIR/deploy/k3s/data/qdrant-values.yaml"
+# One Qdrant node: Raft needs three peers, and three peers on the single Data VM would triple the
+# index for no protection against losing the VM. Recovery is the nightly S3 snapshot instead, so
+# the snapshot wiring is asserted in its place.
+grep -Fq "replicaCount: 1" "$ROOT_DIR/deploy/k3s/data/qdrant-values.yaml"
+grep -Fq "snapshots_storage: s3" "$ROOT_DIR/deploy/k3s/data/qdrant-snapshots-s3.yaml"
+# Three Redis nodes: one sentinel per node with quorum 2 cannot fail over with two.
+grep -Fq "replicaCount: 3" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
+grep -Fq "quorum: 2" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
+grep -Fq "maxmemory-policy noeviction" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "warptalk-qdrant-auth" "$ROOT_DIR/deploy/k3s/data/qdrant-values.yaml"
 grep -Fq "recovery window: 5 minutes" "$ROOT_DIR/deploy/k3s/FAILOVER-RUNBOOK.md"
 
@@ -360,5 +377,264 @@ grep -Fq "$REDIS_SENTINEL_IMAGE_DIGEST" "$ROOT_DIR/deploy/k3s/data/redis-values.
 grep -Fq "$REDIS_EXPORTER_IMAGE_DIGEST" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "$QDRANT_TEST_IMAGE_DIGEST" "$ROOT_DIR/deploy/k3s/data/qdrant-values.yaml"
 grep -Fq 'QDRANT_IMAGE_DIGEST' "$ROOT_DIR/scripts/pin-qdrant-images.sh"
+
+# ---------------------------------------------------------------------------------------------
+# Production values: the release job renders the chart with deploy/k3s/k8s-app-values.yaml plus
+# image references from the signed manifest, so assert on exactly that.
+# ---------------------------------------------------------------------------------------------
+PROD_RENDERED="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prod.XXXXXX")"
+PROD_DATA_RENDERED="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prod-data.XXXXXX")"
+PROD_IMAGES="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prod-images.XXXXXX")"
+trap 'rm -f "$deployment_documents" "$PROD_RENDERED" "$PROD_DATA_RENDERED" "$PROD_IMAGES"' EXIT
+
+# Nothing release-specific may live in a values file: no digests, no image refs, no release id.
+for values_file in "$ROOT_DIR/deploy/k3s/k8s-app-values.yaml" "$ROOT_DIR/deploy/k3s/k8s-data-values.yaml"; do
+  if grep -Eq 'imageRef:|@sha256:|releaseId:|prod-k8s-v[0-9]' "$values_file"; then
+    echo "$values_file hard-codes an image reference, digest or release id; the release job passes them" >&2
+    exit 1
+  fi
+done
+# The account-scoped object-store endpoint is a runtime value, not a committed one.
+if grep -Fq 'r2.cloudflarestorage.com' "$ROOT_DIR/deploy/k3s/k8s-data-values.yaml"; then
+  echo "the backup endpoint belongs in BACKUP_S3_ENDPOINT_URL, not in git" >&2
+  exit 1
+fi
+
+jq '{
+  global: {releaseId: "contract01"},
+  migrator: {imageRef: ("ghcr.io/warptalk/migrator:contract01@sha256:" + ("1" * 64))},
+  workloads: ([.images[] | select(.k3s != false and .service != "migrator") |
+    {key: .service, value: {imageRef: ("ghcr.io/warptalk/" + .name + ":contract01@sha256:" + ("1" * 64))}}
+  ] | from_entries)
+}' "$ROOT_DIR/deploy/production/image-matrix.json" >"$PROD_IMAGES"
+"$HELM" template warptalk "$CHART_DIR" --namespace warptalk \
+  -f "$ROOT_DIR/deploy/k3s/k8s-app-values.yaml" -f "$PROD_IMAGES" >"$PROD_RENDERED"
+# As the release job renders it with GitHub-sourced secrets (which enables the Qdrant snapshots).
+"$HELM" template warptalk-data "$DATA_CHART_DIR" --namespace warptalk-data \
+  -f "$ROOT_DIR/deploy/k3s/k8s-data-values.yaml" \
+  --set qdrantSnapshots.enabled=true \
+  --set-string postgres.backup.endpointURL=https://object-store.warptalk.invalid >"$PROD_DATA_RENDERED"
+docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0-alpine \
+  -strict -summary -ignore-missing-schemas <"$PROD_RENDERED"
+docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0-alpine \
+  -strict -summary -ignore-missing-schemas <"$PROD_DATA_RENDERED"
+
+prod_fail() {
+  echo "K3s production contract: $*" >&2
+  exit 1
+}
+
+# One secret source: GitHub `production`, materialized by the release job.
+if grep -Fq "kind: ExternalSecret" "$PROD_RENDERED" "$PROD_DATA_RENDERED"; then
+  prod_fail "production must not render ExternalSecrets; runtime secrets come from GitHub production"
+fi
+
+python3 - "$PROD_RENDERED" "$PROD_DATA_RENDERED" "$ROOT_DIR" <<'PY'
+import re
+import sys
+
+prod_path, data_path, root = sys.argv[1:4]
+
+
+def documents(path):
+    text = open(path, encoding="utf-8").read()
+    return [d for d in re.split(r"(?m)^---\s*$", text) if d.strip()]
+
+
+def kind_name(doc):
+    kind = re.search(r"(?m)^kind:\s*(\S+)", doc)
+    name = re.search(r"(?m)^metadata:\n(?:  .*\n)*?  name:\s*(\S+)", doc)
+    return (kind.group(1) if kind else None, name.group(1) if name else None)
+
+
+def fail(message):
+    sys.exit(f"K3s production contract: {message}")
+
+
+def cpu(value):
+    value = value.strip('"')
+    return float(value[:-1]) if value.endswith("m") else float(value) * 1000
+
+
+def mem(value):
+    value = value.strip('"')
+    units = {"Ki": 1 / 1024, "Mi": 1, "Gi": 1024}
+    for suffix, factor in units.items():
+        if value.endswith(suffix):
+            return float(value[: -len(suffix)]) * factor
+    return float(value) / (1024 * 1024)
+
+
+docs = documents(prod_path)
+by_kind = {}
+for doc in docs:
+    kind, name = kind_name(doc)
+    by_kind.setdefault(kind, {})[name] = doc
+
+# 2. ServiceAccounts: warptalk is a release resource, warptalk-migrator is the hook identity.
+sas = by_kind.get("ServiceAccount", {})
+if "warptalk" not in sas or "helm.sh/hook" in sas["warptalk"]:
+    fail("ServiceAccount warptalk must exist and must not be a Helm hook")
+if "warptalk-migrator" not in sas or "pre-install,pre-upgrade" not in sas["warptalk-migrator"]:
+    fail("ServiceAccount warptalk-migrator must be the pre-install/pre-upgrade hook identity")
+job = next((d for n, d in by_kind.get("Job", {}).items() if n.startswith("warptalk-migrations-")), "")
+if "serviceAccountName: warptalk-migrator" not in job:
+    fail("the migration Job must run as warptalk-migrator")
+
+# 3. Stickiness on the gateway Service only, with a cookie name of its own; none on the Ingress.
+sticky = [n for n, d in by_kind.get("Service", {}).items() if "service.sticky.cookie:" in d]
+if sticky != ["gateway"]:
+    fail(f"exactly the gateway Service must be sticky, found {sticky}")
+if "warptalk_gateway_affinity" not in by_kind["Service"]["gateway"]:
+    fail("the gateway sticky cookie must have its own name")
+ingress = by_kind.get("Ingress", {}).get("warptalk", "")
+if "sticky" in ingress:
+    fail("sticky annotations on the Ingress are ignored by Traefik; they belong on the Service")
+
+# 3. Backplanes on every service that hosts a SignalR hub.
+deployments = by_kind.get("Deployment", {})
+for service in ("gateway", "meeting-service", "assistant-service", "billing-service"):
+    if "name: SignalR__Redis" not in deployments.get(service, ""):
+        fail(f"{service} hosts a SignalR hub and needs SignalR__Redis")
+
+# 4. The middleware reference names the namespace the chart creates the Middleware in.
+if "router.middlewares: warptalk-warptalk-security-headers@kubernetescrd" not in ingress:
+    fail("the Ingress must reference warptalk-warptalk-security-headers@kubernetescrd")
+middleware = by_kind.get("Middleware", {}).get("warptalk-security-headers", "")
+for header in ("contentSecurityPolicy:", "stsSeconds: 31536000", "customFrameOptionsValue: DENY"):
+    if header not in middleware:
+        fail(f"the security-headers Middleware is missing {header}")
+
+# 13. Hosts exactly as compose/Caddy: app -> frontend, api -> gateway.
+rules = re.findall(r'- host: "([^"]+)"\n\s+http:\n\s+paths:\n((?:\s+.*\n?)*?)(?=\s+- host:|\Z)', ingress)
+hosts = {host: body for host, body in rules}
+if set(hosts) != {"app.warptalk.io.vn", "api.warptalk.io.vn"}:
+    fail(f"the Ingress must serve app. and api. as compose does, got {sorted(hosts)}")
+if "name: gateway" in hosts["app.warptalk.io.vn"] or "name: frontend" in hosts["api.warptalk.io.vn"]:
+    fail("app. must route to the frontend only and api. to the gateway only, as in the Caddyfile")
+
+config = by_kind.get("ConfigMap", {}).get("warptalk-runtime", "")
+for needle, message in (
+    ("monitoring-kube-prometheus-prometheus.monitoring.svc", "Monitoring__PrometheusUrl must point at the monitoring namespace"),
+    ('RateLimits__LoginPermitLimit: "5"', "login rate limit must be back at the compose value of 5"),
+    ('ForwardedHeaders__KnownNetworks__0: "192.168.0.0/16"', "the gateway must trust X-Forwarded-For from the live Calico pod CIDR"),
+    ('AllowedOrigins__0: "https://app.warptalk.io.vn"', "AllowedOrigins must hold the app origin"),
+):
+    if needle not in config:
+        fail(message)
+
+# 5/10/11/15. Per-workload rules.
+hpas = by_kind.get("HorizontalPodAutoscaler", {})
+scaled = by_kind.get("ScaledObject", {})
+pdbs = by_kind.get("PodDisruptionBudget", {})
+total_cpu = 0.0
+total_mem = 0.0
+for name, doc in deployments.items():
+    if "node.warptalk.io/role: app" not in doc:
+        fail(f"{name} is not pinned to the App node")
+    uids = set(re.findall(r"runAsUser: (\d+)", doc))
+    if name != "seq" and len(uids) != 1:
+        fail(f"{name} runs its pod and container as different users {sorted(uids)}")
+    autoscaled = name in hpas or f"{name}-queue-lag" in scaled
+    replicas = re.search(r"(?m)^  replicas: (\d+)", doc)
+    if not autoscaled and not replicas:
+        fail(f"{name} has no autoscaler and no rendered replica count")
+    if autoscaled and replicas:
+        fail(f"{name} is autoscaled but also renders a static replica count")
+    if name in hpas:
+        minimum = int(re.search(r"minReplicas: (\d+)", hpas[name]).group(1))
+    elif f"{name}-queue-lag" in scaled:
+        minimum = int(re.search(r"minReplicaCount: (\d+)", scaled[f"{name}-queue-lag"]).group(1))
+    else:
+        minimum = int(replicas.group(1))
+    if minimum < 2 and name in pdbs:
+        fail(f"{name} runs one pod and must not have a PDB")
+    for request in re.findall(r"requests:\n\s+cpu: (\S+)\n\s+memory: (\S+)", doc):
+        total_cpu += cpu(request[0]) * minimum
+        total_mem += mem(request[1]) * minimum
+for name, doc in pdbs.items():
+    if "minAvailable" in doc:
+        fail(f"PDB {name} uses minAvailable; use maxUnavailable")
+for singleton in ("suggestion-worker", "metrics-exporter"):
+    if "type: Recreate" not in deployments[singleton] or "replicas: 1" not in deployments[singleton]:
+        fail(f"{singleton} is a singleton: one replica and a Recreate rollout")
+
+# 5. Capacity: the App node is 8 vCPU / 16 GiB. After kubelet/system reservations (~7.6 CPU /
+# ~14.8 GiB) and the add-ons that land there (Traefik, KEDA, cert-manager, operators, CNI, ~0.9 CPU
+# / ~1.4 GiB; monitoring runs on the Infra node) the WarpTalk requests at minimum replicas must
+# leave room for autoscaling. deploy/k3s/README.md "Capacity plan" has the per-workload table.
+if total_cpu > 5000 or total_mem > 11 * 1024:
+    fail(f"App-node requests at minimum replicas are {total_cpu:.0f}m / {total_mem:.0f}Mi; budget is 5000m / 11264Mi")
+print(f"K3s production contract: App-node requests at minimum replicas {total_cpu:.0f}m CPU / {total_mem:.0f}Mi")
+
+# 5. Collector: container memory limit ~20% above the memory_limiter.
+collector = deployments["warptalk-otel-collector"]
+limit = mem(re.search(r"limits:\n\s+cpu: \S+\n\s+memory: (\S+)", collector).group(1))
+limiter = float(re.search(r"limit_mib: (\d+)", open(f"{root}/deploy/k3s/chart/files/otel-collector.yaml").read()).group(1))
+if not limit >= limiter * 1.2:
+    fail(f"collector memory limit {limit:.0f}Mi must be >= 1.2 x memory_limiter {limiter:.0f}MiB")
+if "debug" in re.search(r"(?s)service:.*", open(f"{root}/deploy/k3s/chart/files/otel-collector.yaml").read()).group(0):
+    fail("collector pipelines must export to Seq, not to the debug exporter")
+
+# 7. Alert rules: the Kubernetes rules are the compose rules plus Kubernetes extras.
+compose_rules = open(f"{root}/observability/alerts/warptalk.rules.yml", encoding="utf-8").read()
+chart_rules = open(f"{root}/deploy/k3s/chart/files/warptalk.rules.yml", encoding="utf-8").read()
+if not chart_rules.startswith(compose_rules.rstrip("\n")):
+    fail("deploy/k3s/chart/files/warptalk.rules.yml must begin with observability/alerts/warptalk.rules.yml verbatim")
+for alert in ("WarpTalkServiceHighErrorRatio", "WarpTalkAiStreamLag", "WarpTalkDeadLetterPresent",
+              "WarpTalkStreamGroupUnread", "WarpTalkStreamGroupCoverageLow", "WarpTalkRedisMaxmemoryUnset"):
+    if f"alert: {alert}" not in chart_rules:
+        fail(f"missing alert {alert}")
+
+# 6. Data layer on one VM.
+data = open(data_path, encoding="utf-8").read()
+for needle, message in (
+    ("instances: 2", "Postgres runs two instances"),
+    ("dataDurability: preferred", "two instances need preferred durability so a lost standby does not stop writes"),
+    ("pg_stat_statements.max", "pg_stat_statements must be preloaded through CloudNativePG"),
+    ("values: [data]", "data pods must prefer the Data node"),
+    ("effect: NoSchedule", "data pods must tolerate the Data node taint"),
+    ("name: warptalk-qdrant-snapshot", "Qdrant needs its nightly snapshot"),
+):
+    if needle not in data:
+        fail(message)
+if "minSyncReplicas" in data:
+    fail("minSyncReplicas conflicts with the synchronous stanza")
+if "containers: []" not in data:
+    # Not dead: the RabbitmqCluster CRD requires `containers` whenever the override pod template
+    # has a spec, and the live object carries `containers: []`. Dropping it made Helm's patch
+    # remove a required field and failed the first k8s release (run 35946575671).
+    fail("the RabbitMQ override pod template must keep `containers: []` (required by the CRD)")
+
+# 6. Storage. The live claims were created at these sizes and a PVC cannot shrink (CloudNativePG
+# rejects it, and StatefulSet volumeClaimTemplates are immutable), so the values must never go
+# below them. Together they exceed the 35 GB Data volume on paper; local-path does not enforce
+# sizes and actual use is under 1 GiB (README "Capacity plan"), watched by
+# WarpTalkPersistentVolumeFilling.
+def size(text, pattern):
+    return mem(re.search(pattern, text).group(1)) / 1024
+
+values = open(f"{root}/deploy/k3s/k8s-data-values.yaml", encoding="utf-8").read()
+redis_values = open(f"{root}/deploy/k3s/data/redis-values.yaml", encoding="utf-8").read()
+qdrant_values = open(f"{root}/deploy/k3s/data/qdrant-values.yaml", encoding="utf-8").read()
+postgres = size(values, r"storageSize: (\S+)") * int(re.search(r"(?m)^  instances: (\d+)", values).group(1))
+rabbit = size(values, r"(?s)rabbitmq:.*?storageSize: (\S+)")
+redis = size(redis_values, r"(?s)persistence:.*?size: (\S+)") * int(re.search(r"replicaCount: (\d+)", redis_values).group(1))
+qdrant = size(qdrant_values, r"(?s)persistence:.*?size: (\S+)")
+live = {"postgres": 25, "rabbitmq": 5, "redis": 20, "qdrant": 50}
+per_claim = {
+    "postgres": size(values, r"storageSize: (\S+)"),
+    "rabbitmq": rabbit,
+    "redis": size(redis_values, r"(?s)persistence:.*?size: (\S+)"),
+    "qdrant": qdrant,
+}
+for name, minimum in live.items():
+    if per_claim[name] < minimum:
+        fail(f"{name} claim {per_claim[name]:.0f} GiB is below the live {minimum} GiB; a PVC cannot shrink")
+total = postgres + rabbit + redis + qdrant
+print(f"K3s production contract: data claims {total:.0f} GiB nominal (none below the live sizes)")
+PY
+
+"$ROOT_DIR/scripts/check-k3s-compose-url-parity.sh"
 
 echo "K3s deployment contract: PASS"
