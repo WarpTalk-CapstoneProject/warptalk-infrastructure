@@ -24,6 +24,11 @@ spec:
             labels:
               warptalk.io/component: rabbitmq
           spec:
+            # Required by the RabbitmqCluster CRD whenever the override pod template has a spec.
+            # The operator merges its own rabbitmq container in; an empty list adds nothing. Without
+            # it the first k8s release (run 35946575671) was rejected with
+            # "spec.override.statefulSet.spec.template.spec.containers: Required value".
+            containers: []
             {{- with .Values.placement.nodeSelector }}
             nodeSelector:
               {{- toYaml . | nindent 14 }}

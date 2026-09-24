@@ -600,8 +600,11 @@ for needle, message in (
         fail(message)
 if "minSyncReplicas" in data:
     fail("minSyncReplicas conflicts with the synchronous stanza")
-if "containers: []" in data:
-    fail("dead `containers: []` override is back in the RabbitMQ template")
+if "containers: []" not in data:
+    # Not dead: the RabbitmqCluster CRD requires `containers` whenever the override pod template
+    # has a spec, and the live object carries `containers: []`. Dropping it made Helm's patch
+    # remove a required field and failed the first k8s release (run 35946575671).
+    fail("the RabbitMQ override pod template must keep `containers: []` (required by the CRD)")
 
 # 6. Storage. The live claims were created at these sizes and a PVC cannot shrink (CloudNativePG
 # rejects it, and StatefulSet volumeClaimTemplates are immutable), so the values must never go
