@@ -241,10 +241,13 @@ kubectl get service warptalk-rabbitmq --namespace "$NAMESPACE" >/dev/null 2>&1 |
   require_or_note "required messaging service is unavailable: $NAMESPACE/warptalk-rabbitmq"
 kubectl get secret warptalk-rabbitmq-default-user --namespace "$NAMESPACE" >/dev/null 2>&1 ||
   require_or_note "RabbitMQ generated credentials are unavailable"
-if [ "$K3S_SECRET_SOURCE" = "github" ] && [ "$K3S_DRY_RUN" = "true" ] &&
-  ! kubectl get secret "${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}" --namespace "$NAMESPACE" >/dev/null 2>&1; then
-  # materialize-k8s-runtime-secrets.sh already validated the content against the contract.
-  echo "K3s release (dry run): runtime secret not written yet (dry run); its content was validated offline" >&2
+if [ "$K3S_SECRET_SOURCE" = "github" ] && [ "$K3S_DRY_RUN" = "true" ]; then
+  # A dry run does not write the Secret, so whatever is on the cluster is the PREVIOUS one — the
+  # very thing this release replaces. materialize-k8s-runtime-secrets.sh already validated the
+  # content this release would write against the same contract; checking the old Secret here only
+  # fails a dry run on keys the new one adds (first k8s dry run: GOOGLE_CLIENT_ID,
+  # SEQ_ADMIN_PASSWORD_HASH), while the real run would pass.
+  echo "K3s release (dry run): runtime secret not written (dry run); its content was validated offline" >&2
 elif [ "$K3S_SECRET_SOURCE" = "github" ]; then
   # Materialized by the release job before this script; its absence is a job defect, not
   # something to paper over. The pre-install migration hook reads it before any pod starts.
