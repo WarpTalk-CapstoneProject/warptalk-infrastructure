@@ -35,11 +35,15 @@ spec:
   strategy:
     type: Recreate
   {{- else }}
+  {{- $multi := ge (int ($app.replicas | default 1)) 2 }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      # A workload with two or more pods may replace one at a time in place (see
+      # rollout.multiReplica in the values): on a single, full App node a surge pod has nowhere
+      # to schedule, the rollout never progresses and Helm times out. One pod keeps serving.
+      maxUnavailable: {{ if $multi }}{{ $.Values.rollout.multiReplica.maxUnavailable }}{{ else }}0{{ end }}
+      maxSurge: {{ if $multi }}{{ $.Values.rollout.multiReplica.maxSurge }}{{ else }}1{{ end }}
   {{- end }}
   minReadySeconds: 3
   selector:
