@@ -82,7 +82,11 @@ rollout_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-rollout.XXXXXX")"
 printf '{}\n' >"$rollout_file"
 capacity_nodes_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-nodes.XXXXXX")"
 capacity_pods_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-pods.XXXXXX")"
-trap 'rm -f "$override_file" "$rendered_file" "$migration_file" "$rollout_file" "$capacity_nodes_file" "$capacity_pods_file"' EXIT INT TERM
+# reconcile_prestop_handlers: the target's workloads (YAML, then JSON) and the live ones.
+prestop_target_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-target.XXXXXX")"
+prestop_desired_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-desired.XXXXXX")"
+prestop_live_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-live.XXXXXX")"
+trap 'rm -f "$override_file" "$rendered_file" "$migration_file" "$rollout_file" "$capacity_nodes_file" "$capacity_pods_file" "$prestop_target_file" "$prestop_desired_file" "$prestop_live_file"' EXIT INT TERM
 
 jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
   ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
@@ -348,9 +352,62 @@ if "$helm_locked" status "$RELEASE_NAME" --namespace "$NAMESPACE" >/dev/null 2>&
     fail "release $RELEASE_NAME has no DEPLOYED revision to return to; refusing to upgrade without a rollback target"
 fi
 
+# ---------------------------------------------------------------------------------------------
+# A container lifecycle hook may name ONE handler (exec, httpGet, tcpSocket or sleep). Helm's
+# three-way merge only deletes a field that its last RECORDED revision had and the target lacks;
+# it never deletes one that only the live object has. After a failed upgrade and a rollback the two
+# disagree: on 24 Sep (v223) the live Deployments carried revision 10's `preStop.exec` while the
+# last recorded revision already had `preStop.sleep`, so the patch added `sleep` next to `exec`,
+# the API server refused all 21 Deployments, and the rollback to revision 10 failed the same way.
+#
+# So, before Helm touches a workload, any live preStop whose handler type differs from the target
+# manifest's is replaced outright with the target's. This starts a rollout of that workload a few
+# seconds ahead of Helm's own (maxUnavailable 0: nothing stops serving), and is a no-op whenever
+# live and target already agree, which is every release after the first one it runs in.
+# ---------------------------------------------------------------------------------------------
+reconcile_prestop_handlers() {
+  awk '
+    function flush() { if (keep) printf "---\n%s", doc; doc = ""; keep = 0 }
+    /^---/ { flush(); next }
+    { doc = doc $0 "\n" }
+    /^kind: (Deployment|StatefulSet)$/ { keep = 1 }
+    END { flush() }
+  ' "$1" >"$prestop_target_file"
+  [ -s "$prestop_target_file" ] || return 0
+  kubectl create --dry-run=client -o json -f "$prestop_target_file" >"$prestop_desired_file" ||
+    return 1
+  [ -s "$prestop_desired_file" ] || return 0
+  kubectl get deployments,statefulsets --namespace "$NAMESPACE" -o json >"$prestop_live_file" ||
+    return 1
+  jq -r --slurpfile desired_doc "$prestop_desired_file" '
+    # One object per workload, streamed (a List only from some kubectl versions).
+    [$desired_doc[] | if .kind == "List" then .items[] else . end] as $desired |
+    .items[] as $live |
+    ($desired[] | select(.kind == $live.kind and .metadata.name == $live.metadata.name)) as $want |
+    [ $live.spec.template.spec.containers | to_entries[] |
+      .key as $index | .value as $container |
+      ($want.spec.template.spec.containers[] | select(.name == $container.name)
+        | .lifecycle.preStop) as $target |
+      ($container.lifecycle.preStop) as $current |
+      select($target != null and $current != null and ($target | keys) != ($current | keys)) |
+      {op: "replace", path: "/spec/template/spec/containers/\($index)/lifecycle/preStop", value: $target}
+    ] | select(length > 0) |
+    "\($live.kind | ascii_downcase)/\($live.metadata.name)\t\(tojson)"
+  ' "$prestop_live_file" >"$prestop_target_file" || return 1
+  while IFS="$(printf '\t')" read -r workload patch; do
+    echo "K3s release: $workload preStop handler differs from the target; replacing it"
+    kubectl patch "$workload" --namespace "$NAMESPACE" --type json --patch "$patch" >/dev/null ||
+      return 1
+  done <"$prestop_target_file"
+}
+
 rollback_release() {
   if [ -n "$previous_revision" ]; then
     echo "K3s release: rolling back to the last DEPLOYED revision $previous_revision" >&2
+    "$helm_locked" get manifest "$RELEASE_NAME" --revision "$previous_revision" \
+      --namespace "$NAMESPACE" >"$rendered_file" &&
+      reconcile_prestop_handlers "$rendered_file" ||
+      echo "::warning::K3s release: could not reconcile preStop handlers before the rollback" >&2
     "$helm_locked" rollback "$RELEASE_NAME" "$previous_revision" \
       --namespace "$NAMESPACE" \
       --wait \
@@ -511,6 +568,9 @@ if ! run_migration_gate; then
 fi
 
 choose_rollout_mode
+
+reconcile_prestop_handlers "$rendered_file" ||
+  fail "could not reconcile live preStop handlers with this release; nothing was upgraded"
 
 # ---------------------------------------------------------------------------------------------
 # Step 3: the upgrade. `--wait` (every Deployment rolled out and Ready), not `--atomic`: on failure
