@@ -47,6 +47,11 @@ EXPECTED_SERVICES: dict[str, ServiceProbe] = {
 PRODUCTION_AI_SERVICES = {
     "stt-worker",
     "translation-worker",
+    # WT-716. Runs the ai-translation image under a different command, so a release pins it
+    # through that image's alsoServices — but it still needs its own entry here, because the
+    # heartbeat probe is per WORKER_HEALTH_NAME and a container whose consume loop died keeps
+    # reporting a running image.
+    "transcript-clean-worker",
     "tts-worker",
     "assistant-worker",
     "suggestion-worker",
