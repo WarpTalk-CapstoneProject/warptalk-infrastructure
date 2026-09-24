@@ -29,6 +29,9 @@ spec:
             # it the first k8s release (run 35946575671) was rejected with
             # "spec.override.statefulSet.spec.template.spec.containers: Required value".
             containers: []
+            {{- with .Values.rabbitmq.priorityClassName }}
+            priorityClassName: {{ . }}
+            {{- end }}
             {{- with .Values.placement.nodeSelector }}
             nodeSelector:
               {{- toYaml . | nindent 14 }}
