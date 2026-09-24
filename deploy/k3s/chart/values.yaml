@@ -85,6 +85,12 @@ config:
   VectorDb__Url: http://warptalk-qdrant.warptalk-data.svc.cluster.local:6333
   # kube-prometheus-stack is installed into the `monitoring` namespace (install-k3s-addons.sh).
   Monitoring__PrometheusUrl: http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+  # Firing alerts on the admin System Health page come from Alertmanager, the only place silences
+  # and inhibitions exist (Prometheus rule state lists silenced alerts as firing).
+  Monitoring__AlertmanagerUrl: http://monitoring-kube-prometheus-alertmanager.monitoring.svc.cluster.local:9093
+  # Same-origin path the admin-only Grafana is published under (monitoring-values.yaml grafana.ingress,
+  # behind the gateway ForwardAuth). The System Health page embeds its dashboards from here.
+  Monitoring__GrafanaEmbedPath: /grafana
   VECTOR_DB_PROVIDER: qdrant
   EMBEDDING_PROVIDER: openai
   EMBEDDING_MODEL: text-embedding-3-small
