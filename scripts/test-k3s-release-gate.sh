@@ -24,6 +24,13 @@ REAL_HELM="$(command -v "$REAL_HELM")" || {
   echo "release gate contract: cannot find $REAL_HELM" >&2
   exit 1
 }
+# The stubs below go first on PATH for the deploy script. Chart rendering must NOT see them: the
+# locked Helm (helm-locked.sh) runs through `docker`, and on the CI runner it found the kubeconform
+# stub instead, rendered nothing, and the gate failed with "could not render the migration Job".
+# So `helm template` runs with the caller's PATH, and without the fake KUBECONFIG (helm-locked.sh
+# would try to mount it).
+REAL_PATH="$PATH"
+export REAL_HELM REAL_PATH
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/warptalk-release-gate.XXXXXX")"
 trap 'rm -rf "$work"' EXIT INT TERM
@@ -45,7 +52,11 @@ jq '{
 cat >"$work/bin/docker" <<'EOF'
 #!/bin/sh
 # kubeconform only; the offline half of the deploy script is covered by test-k3s-release-contract.sh.
-cat >/dev/null
+# Anything else reaching this stub is a wiring bug in the test: fail loudly, never render nothing.
+case "$*" in
+  *kubeconform*) cat >/dev/null ;;
+  *) echo "release gate stub docker: unexpected call: $*" >&2; exit 97 ;;
+esac
 EOF
 
 cat >"$work/bin/kubectl" <<'EOF'
@@ -81,7 +92,7 @@ cat >"$work/bin/helm" <<'EOF'
 #!/bin/sh
 log="$FAKE_LOG"
 case "$1" in
-  template) exec "$REAL_HELM" "$@" ;;
+  template) exec env -u KUBECONFIG PATH="$REAL_PATH" "$REAL_HELM" "$@" ;;
   status) [ -n "$FAKE_HELM_HISTORY" ] ;;
   history) printf '%s\n' "$FAKE_HELM_HISTORY" ;;
   upgrade)
@@ -101,6 +112,17 @@ case "$1" in
 esac
 EOF
 chmod +x "$work/bin/docker" "$work/bin/kubectl" "$work/bin/helm"
+
+# Fail fast, and say why, if the real Helm cannot render the chart here at all.
+"$work/bin/helm" template warptalk "$infra_root/deploy/k3s/chart" --namespace warptalk \
+  --set migrations.mode=job \
+  --set global.releaseId=gate-preflight \
+  --show-only templates/migration-job.yaml 2>"$work/preflight.err" |
+  grep -q '^  name: warptalk-migrations-gate-preflight' || {
+  echo "release gate contract: $REAL_HELM cannot render the chart:" >&2
+  cat "$work/preflight.err" >&2
+  exit 1
+}
 
 HISTORY_WITH_FAILURES='[{"revision":3,"status":"superseded"},{"revision":4,"status":"deployed"},{"revision":5,"status":"failed"},{"revision":6,"status":"failed"}]'
 
@@ -173,6 +195,25 @@ grep -Fxq "helm rollback warptalk 4" "$work/upgrade-fails.log" ||
   fail "failed acceptance did not fail the release"
 grep -Fxq "helm rollback warptalk 4" "$work/acceptance-fails.log" ||
   fail "failed acceptance must roll back to the last DEPLOYED revision (4)"
+
+# 3b. Production's history on 24 Sep: the latest revision is FAILED (not pending) - rev 8's upgrade
+# and the manual rollback to 4 (rev 9) both hit "context deadline exceeded" - and the only DEPLOYED
+# revision is 3. A failed latest revision must not block the release: it upgrades from it, and a
+# failure goes back to 3, never to 9, 8 or the superseded 4.
+PROD_HISTORY='[{"revision":3,"status":"deployed"},{"revision":4,"status":"superseded"},{"revision":5,"status":"failed"},{"revision":6,"status":"failed"},{"revision":7,"status":"failed"},{"revision":8,"status":"failed"},{"revision":9,"status":"failed"}]'
+[ "$(run latest-failed-ok ok 0 64Gi "$PROD_HISTORY")" = fail ] ||
+  fail "the stubbed acceptance always fails; this scenario must end in a rollback"
+grep -q "^helm upgrade " "$work/latest-failed-ok.log" ||
+  fail "a latest-FAILED revision must not block the upgrade"
+grep -Fxq "helm rollback warptalk 3" "$work/latest-failed-ok.log" ||
+  fail "with rev 9 failed, the rollback target must be rev 3, the last DEPLOYED revision"
+[ "$(run latest-failed-upgrade-fails ok 1 64Gi "$PROD_HISTORY")" = fail ] ||
+  fail "a failed upgrade over a failed latest revision did not fail the release"
+grep -Fxq "helm rollback warptalk 3" "$work/latest-failed-upgrade-fails.log" ||
+  fail "a failed upgrade over a failed latest revision must roll back to rev 3"
+if grep -Eq '^helm rollback warptalk (4|8|9)$' "$work/latest-failed-upgrade-fails.log"; then
+  fail "rolled back to a superseded or failed revision"
+fi
 
 # 4. A release left pending by an interrupted run is refused before anything changes.
 [ "$(run pending ok 0 64Gi '[{"revision":4,"status":"deployed"},{"revision":5,"status":"pending-upgrade"}]')" = fail ] ||

@@ -638,6 +638,20 @@ workloads:
     secretEnv:
       REDIS_PASSWORD: REDIS_PASSWORD
 
+# Exec probes of the Python workers (every workload with workerHealthName). Each run starts a new
+# interpreter and imports the Redis client before it reads the heartbeat; on a CPU-pressed node
+# that took longer than the old 5s timeout, and the kubelet killed healthy workers into
+# CrashLoopBackOff. 15s is a realistic ceiling; startup allows 15s x 12 = 3 min; liveness needs
+# 3 misses 30s apart (~1.5 min) before a restart. scripts/check-k3s-deployment.sh pins the floors.
+workerProbe:
+  timeoutSeconds: 15
+  startup:
+    periodSeconds: 15
+    failureThreshold: 12
+  liveness:
+    periodSeconds: 30
+    failureThreshold: 3
+
 # DOCX -> PDF for the exported biên bản. A third-party image, so it is pinned by digest and
 # locked in deploy/k3s/addons.lock.env like the collector and the SQL exporter, rather than
 # living in .Values.workloads — nothing in a WarpTalk release rewrites this tag.

@@ -333,6 +333,9 @@ if "$helm_locked" status "$RELEASE_NAME" --namespace "$NAMESPACE" >/dev/null 2>&
   history_json="$("$helm_locked" history "$RELEASE_NAME" --namespace "$NAMESPACE" --output json)"
   previous_revision="$(printf '%s\n' "$history_json" |
     jq -r '[.[] | select(.status == "deployed")] | last | .revision // empty')"
+  # A FAILED latest revision (24 Sep: rev 8's upgrade and the manual rollback, rev 9) does not
+  # block anything: Helm upgrades from it, and the rollback target above is still the last
+  # DEPLOYED revision. Only a pending-* one is refused below.
   latest_status="$(printf '%s\n' "$history_json" | jq -r 'last | .status // empty')"
   case "$latest_status" in
     pending-*)

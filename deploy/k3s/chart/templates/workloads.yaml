@@ -177,19 +177,25 @@ spec:
             - name: WORKER_HEALTH_NAME
               value: {{ . | quote }}
           {{- end }}
-          {{- with $app.workerHealthName }}
+          {{- if $app.workerHealthName }}
+          {{- $probe := $.Values.workerProbe }}
+          # The Python workers expose no port, so their probe is an exec of shared.health_probe:
+          # a fresh interpreter that imports the worker's Redis client and reads its heartbeat.
+          # The import alone passes 5s on a CPU-pressed node, and the old 5s timeout then had the
+          # kubelet SIGTERM healthy billing/suggestion/security workers into CrashLoopBackOff
+          # (24 Sep). See workerProbe in values.yaml.
           startupProbe:
             exec:
               command: ["python", "-m", "shared.health_probe"]
-            periodSeconds: 5
-            timeoutSeconds: 5
-            failureThreshold: 24
+            periodSeconds: {{ $probe.startup.periodSeconds }}
+            timeoutSeconds: {{ $probe.timeoutSeconds }}
+            failureThreshold: {{ $probe.startup.failureThreshold }}
           livenessProbe:
             exec:
               command: ["python", "-m", "shared.health_probe"]
-            periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 3
+            periodSeconds: {{ $probe.liveness.periodSeconds }}
+            timeoutSeconds: {{ $probe.timeoutSeconds }}
+            failureThreshold: {{ $probe.liveness.failureThreshold }}
           {{- end }}
           {{- with $app.port }}
           ports:

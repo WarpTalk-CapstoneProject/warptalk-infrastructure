@@ -600,6 +600,23 @@ for name, doc in deployments.items():
     if "type: Recreate" not in doc:
         if int_field(doc, "maxSurge") != 1 or int_field(doc, "maxUnavailable") != 0:
             fail(f"{name} must roll out with maxSurge 1 / maxUnavailable 0")
+    # Exec probes (the Python workers expose no port): a new interpreter per run, so a 5s
+    # timeout killed healthy workers on a busy node. Pin a realistic timeout and a startup
+    # window of at least 2 minutes.
+    for probe in ("startupProbe", "livenessProbe", "readinessProbe"):
+        block = re.search(rf"(?m)^(\s+){probe}:\n((?:\1\s+.*\n)+)", doc)
+        if not block or "exec:" not in block.group(2):
+            continue
+        timeout = re.search(r"timeoutSeconds: (\d+)", block.group(2))
+        if not timeout or int(timeout.group(1)) < 15:
+            fail(f"{name} {probe} is an exec probe (python start-up included) and needs timeoutSeconds >= 15")
+        if probe == "startupProbe":
+            period = int(re.search(r"periodSeconds: (\d+)", block.group(2)).group(1))
+            threshold = int(re.search(r"failureThreshold: (\d+)", block.group(2)).group(1))
+            if period * threshold < 120:
+                fail(f"{name} startup probe allows {period * threshold}s; a worker needs at least 2 minutes on a busy node")
+    if "containerPort:" in doc and "exec:\n" in doc.split("readinessProbe:", 1)[-1][:120]:
+        fail(f"{name} exposes a port; probe it over HTTP or TCP, not exec")
     if name in INTERNAL_ONLY:
         continue
     # Drain: preStop sleep so Traefik and kube-proxy stop routing before SIGTERM, and a grace
