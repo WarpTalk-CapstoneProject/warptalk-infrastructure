@@ -13,7 +13,10 @@ fail() {
 sh -n "$script" || fail "validator has invalid shell syntax"
 # GOOGLE_CLIENT_ID is here because its absence cost every Google sign-in in production: the host
 # held `google-oauth-disabled.apps.googleusercontent.com` and no gate objected.
-for contract in CHANGE_ME duplicate 0600 JWT_SECRET GRPC_INTERNAL_SECRET IMAGE_TAG INFRA_PRIVATE_IP STRIPE_WEBHOOK_SECRET ALERT_EMAIL_TO GOOGLE_CLIENT_ID CARTESIA_ADMIN_API_KEY CARTESIA_USAGE_API_KEY_ID; do
+# LIVEKIT_EGRESS_S3_REGION joins them for the same reason (WT-824): the host carried
+# ap-southeast-1 against a Cloudflare R2 endpoint, R2 rejects every region but "auto", and the
+# recording was uploaded nowhere — found out after the meeting, with no copy kept anywhere.
+for contract in CHANGE_ME duplicate 0600 JWT_SECRET GRPC_INTERNAL_SECRET IMAGE_TAG INFRA_PRIVATE_IP STRIPE_WEBHOOK_SECRET ALERT_EMAIL_TO GOOGLE_CLIENT_ID CARTESIA_ADMIN_API_KEY CARTESIA_USAGE_API_KEY_ID LIVEKIT_EGRESS_S3_REGION; do
   rg -q "$contract" "$script" || fail "validator is missing $contract contract"
 done
 rg -q 'validate-production-env\.sh' "$repo_root/scripts/deploy-release.sh" ||
