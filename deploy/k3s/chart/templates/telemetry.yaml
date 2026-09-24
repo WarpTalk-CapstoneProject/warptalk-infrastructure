@@ -18,11 +18,12 @@ metadata:
     {{- include "warptalk.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.telemetry.replicas }}
+  {{- $shape := ternary .Values.rollout.multiReplica .Values.rollout.singleReplica (ge (int .Values.telemetry.replicas) 2) }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      maxUnavailable: {{ $shape.maxUnavailable }}
+      maxSurge: {{ $shape.maxSurge }}
   selector:
     matchLabels:
       app.kubernetes.io/name: warptalk-otel-collector
@@ -38,7 +39,10 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile: {type: RuntimeDefault}
+      {{- include "warptalk.placement" . | nindent 6 }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -74,6 +78,9 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
             capabilities: {drop: ["ALL"]}
           resources:
             {{- toYaml .Values.telemetry.resources | nindent 12 }}
@@ -101,6 +108,7 @@ spec:
     - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
     - {name: otlp-http, port: 4318, targetPort: otlp-http}
     - {name: metrics, port: 8889, targetPort: metrics}
+{{- if ge (int .Values.telemetry.replicas) 2 }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -109,10 +117,11 @@ metadata:
   labels:
     {{- include "warptalk.labels" . | nindent 4 }}
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: warptalk-otel-collector
+{{- end }}
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

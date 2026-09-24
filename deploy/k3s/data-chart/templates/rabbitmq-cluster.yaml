@@ -9,12 +9,7 @@ spec:
     storageClassName: {{ .Values.storageClass }}
     storage: {{ .Values.rabbitmq.storageSize }}
   resources:
-    requests:
-      cpu: 300m
-      memory: 1Gi
-    limits:
-      cpu: "2"
-      memory: 3Gi
+    {{- toYaml .Values.rabbitmq.resources | nindent 4 }}
   rabbitmq:
     additionalConfig: |
       cluster_partition_handling = pause_minority
@@ -29,10 +24,37 @@ spec:
             labels:
               warptalk.io/component: rabbitmq
           spec:
+            # Required by the RabbitmqCluster CRD whenever the override pod template has a spec.
+            # The operator merges its own rabbitmq container in; an empty list adds nothing. Without
+            # it the first k8s release (run 35946575671) was rejected with
+            # "spec.override.statefulSet.spec.template.spec.containers: Required value".
+            containers: []
+            {{- with .Values.rabbitmq.priorityClassName }}
+            priorityClassName: {{ . }}
+            {{- end }}
+            {{- with .Values.placement.nodeSelector }}
+            nodeSelector:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+            {{- with .Values.placement.tolerations }}
+            tolerations:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+            {{- with .Values.placement.preferredRole }}
+            affinity:
+              nodeAffinity:
+                preferredDuringSchedulingIgnoredDuringExecution:
+                  - weight: 100
+                    preference:
+                      matchExpressions:
+                        - key: node.warptalk.io/role
+                          operator: In
+                          values: [{{ . }}]
+            {{- end }}
             topologySpreadConstraints:
               - maxSkew: 1
                 topologyKey: kubernetes.io/hostname
-                whenUnsatisfiable: DoNotSchedule
+                whenUnsatisfiable: ScheduleAnyway
                 labelSelector:
                   matchLabels:
                     warptalk.io/component: rabbitmq

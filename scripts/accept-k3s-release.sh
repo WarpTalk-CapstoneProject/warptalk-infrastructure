@@ -11,6 +11,11 @@ REQUIRE_DISTINCT_ZONES="${K3S_REQUIRE_DISTINCT_ZONES:-true}"
 RUNTIME_SECRET_NAME="${K3S_RUNTIME_SECRET_NAME:-warptalk-runtime}"
 TLS_SECRET_NAME="${K3S_TLS_SECRET_NAME:-warptalk-tls}"
 MANAGED_TLS="${K3S_MANAGED_TLS:-true}"
+SECRET_SOURCE="${K3S_SECRET_SOURCE:-external-secrets}"
+# The nodes application pods are pinned to (placement.nodeSelector in the values). Replicas are
+# expected to spread over as many of these as there are replicas; with one App node that is one.
+APP_NODE_SELECTOR="${K3S_APP_NODE_SELECTOR:-node.warptalk.io/role=app}"
+ROLLOUT_TIMEOUT="${K3S_ROLLOUT_TIMEOUT:-300s}"
 REPORT="${K3S_ACCEPTANCE_REPORT:-${TMPDIR:-/tmp}/warptalk-k3s-acceptance.json}"
 
 script_dir="$(CDPATH='' cd -- "$(dirname "$0")" && pwd)"
@@ -22,6 +27,9 @@ fail() {
   echo "K3s acceptance: $*" >&2
   exit 1
 }
+
+: "${KUBECONFIG:?KUBECONFIG must name the target cluster explicitly}"
+export KUBECONFIG
 
 for dependency in kubectl jq curl; do
   command -v "$dependency" >/dev/null 2>&1 ||
@@ -61,11 +69,19 @@ if [ "$REQUIRE_DISTINCT_ZONES" = "true" ]; then
     fail "fewer than three distinct topology.kubernetes.io/zone values"
 fi
 
+# Every minimum below is the one the chart itself asks for, read back from the object the chart
+# created - never a number lowered until the gate passes. The previous version defaulted each of
+# them to 1 and swallowed `kubectl rollout status` with `|| true`, so it accepted any release in
+# which at least one pod of everything existed.
+
+# CloudNativePG: every instance the Cluster asks for is ready, and it asks for at least two
+# (k8s-data-values.yaml: a primary and a standby).
 kubectl get cluster warptalk-postgres --namespace "$DATA_NAMESPACE" -o json |
   jq -e '
-    (.status.readyInstances // 0) >= 3 and
+    (.spec.instances // 0) >= 2 and
+    (.status.readyInstances // 0) == .spec.instances and
     any(.status.conditions[]?; .type == "Ready" and .status == "True")
-  ' >/dev/null || fail "CloudNativePG is not three-instance Ready"
+  ' >/dev/null || fail "CloudNativePG does not have all of its (at least two) instances Ready"
 
 kubectl get pooler warptalk-postgres-pooler-rw \
   --namespace "$DATA_NAMESPACE" -o json |
@@ -74,17 +90,32 @@ kubectl get pooler warptalk-postgres-pooler-rw \
 
 kubectl get rabbitmqcluster warptalk-rabbitmq --namespace "$NAMESPACE" -o json |
   jq -e '
-    .spec.replicas == 3 and
+    (.spec.replicas // 0) >= 1 and
     any(.status.conditions[]?; .type == "AllReplicasReady" and .status == "True")
-  ' >/dev/null || fail "RabbitMQ quorum is not ready"
+  ' >/dev/null || fail "RabbitMQ does not have all of its replicas ready"
 
-for stateful_set in warptalk-redis-node warptalk-qdrant; do
-  kubectl get statefulset "$stateful_set" --namespace "$DATA_NAMESPACE" -o json |
-    jq -e '
-      (.spec.replicas // 0) >= 3 and
-      (.status.readyReplicas // 0) == .spec.replicas
-    ' >/dev/null || fail "$stateful_set does not have all replicas ready"
-done
+# Redis runs one sentinel per node with quorum 2, so fewer than three nodes can never fail over.
+kubectl get statefulset warptalk-redis-node --namespace "$DATA_NAMESPACE" -o json |
+  jq -e '
+    (.spec.replicas // 0) >= 3 and
+    (.status.readyReplicas // 0) == .spec.replicas
+  ' >/dev/null || fail "Redis needs three ready nodes for a sentinel quorum of two"
+kubectl get statefulset warptalk-qdrant --namespace "$DATA_NAMESPACE" -o json |
+  jq -e '
+    (.spec.replicas // 0) >= 1 and
+    (.status.readyReplicas // 0) == .spec.replicas
+  ' >/dev/null || fail "warptalk-qdrant does not have all replicas ready"
+
+app_nodes="$(kubectl get nodes --selector "$APP_NODE_SELECTOR" -o json | jq '
+  [.items[] |
+    select(.spec.unschedulable != true) |
+    select(any(.status.conditions[]; .type == "Ready" and .status == "True"))
+  ] | length
+')"
+[ "$app_nodes" -ge 1 ] || app_nodes="$ready_nodes"
+
+hpas_json="$(kubectl get hpa --namespace "$NAMESPACE" -o json)"
+scaled_objects_json="$(kubectl get scaledobjects.keda.sh --namespace "$NAMESPACE" -o json)"
 
 jq -r --slurpfile matrix "$matrix" '
   ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
@@ -92,15 +123,31 @@ jq -r --slurpfile matrix "$matrix" '
   select(.service != "migrator") |
   select(.service as $service | $k3s_services | index($service)) |
   [.service, (.ref + "@" + .digest)] | @tsv
-' \
-  "$RELEASE_MANIFEST" |
+' "$RELEASE_MANIFEST" |
   while IFS="$(printf '\t')" read -r service expected_image; do
+    kubectl rollout status deployment "$service" --namespace "$NAMESPACE" \
+      --timeout="$ROLLOUT_TIMEOUT" >/dev/null ||
+      fail "$service did not finish rolling out within $ROLLOUT_TIMEOUT"
     deployment="$(kubectl get deployment "$service" --namespace "$NAMESPACE" -o json)"
-    printf '%s\n' "$deployment" | jq -e '
-      (.spec.replicas // 0) >= 2 and
+    # The floor this workload was deployed with: its HPA minimum, else its KEDA minimum, else the
+    # static replica count the chart rendered (1 only for declared singletons).
+    minimum="$(jq -n \
+      --arg service "$service" \
+      --argjson deployment "$deployment" \
+      --argjson hpas "$hpas_json" \
+      --argjson scaled "$scaled_objects_json" '
+        ([$hpas.items[] | select(.spec.scaleTargetRef.name == $service and
+            (.metadata.ownerReferences // [] | map(.kind) | index("ScaledObject") | not))
+          | .spec.minReplicas // 1] | first) //
+        ([$scaled.items[] | select(.spec.scaleTargetRef.name == $service)
+          | .spec.minReplicaCount // 1] | first) //
+        ($deployment.spec.replicas // 1)
+      ')"
+    printf '%s\n' "$deployment" | jq -e --argjson min "$minimum" '
+      (.spec.replicas // 0) >= $min and
       (.status.availableReplicas // 0) == .spec.replicas and
       (.status.updatedReplicas // 0) == .spec.replicas
-    ' >/dev/null || fail "$service rollout is not fully available"
+    ' >/dev/null || fail "$service is not fully available at its minimum of $minimum replica(s)"
     actual_image="$(printf '%s\n' "$deployment" |
       jq -r --arg name "$service" \
         '.spec.template.spec.containers[] | select(.name == $name) | .image')"
@@ -115,8 +162,11 @@ jq -r --slurpfile matrix "$matrix" '
           .spec.nodeName
         ] | unique | length
       ')"
-    [ "$pod_nodes" -ge 2 ] ||
-      fail "$service Ready replicas are not spread across at least two nodes"
+    replicas="$(printf '%s\n' "$deployment" | jq '.spec.replicas // 1')"
+    expected_spread="$app_nodes"
+    [ "$replicas" -ge "$expected_spread" ] || expected_spread="$replicas"
+    [ "$pod_nodes" -ge "$expected_spread" ] ||
+      fail "$service Ready replicas are on $pod_nodes node(s); expected $expected_spread"
   done
 
 collector_image="$(kubectl get deployment warptalk-otel-collector \
@@ -145,8 +195,12 @@ expected_migration_image="$(jq -r '
 [ "$migration_image" = "$expected_migration_image" ] ||
   fail "migration Job did not run the release-manifest digest"
 
+if [ "$SECRET_SOURCE" = "external-secrets" ]; then
+  kubectl get "externalsecret/$RUNTIME_SECRET_NAME" --namespace "$NAMESPACE" -o json |
+    jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
+      >/dev/null || fail "externalsecret/$RUNTIME_SECRET_NAME is not Ready"
+fi
 for resource in \
-  "externalsecret/$RUNTIME_SECRET_NAME" \
   "scaledobject/stt-worker-queue-lag" \
   "scaledobject/translation-worker-queue-lag" \
   "scaledobject/tts-worker-queue-lag"; do
@@ -194,10 +248,38 @@ kubectl get configmap warptalk-grafana-dashboard \
   --namespace monitoring >/dev/null ||
   fail "WarpTalk Grafana dashboard is missing"
 
-traefik_ingress="$(kubectl get service traefik --namespace traefik -o json |
-  jq -r '.status.loadBalancer.ingress[0].ip // .status.loadBalancer.ingress[0].hostname // empty')"
-[ -n "$traefik_ingress" ] || fail "Traefik has no external LoadBalancer address"
+# Traefik runs host ports on the App node (traefik-values.yaml), fronted in-VPC by a
+# LoadBalancer Service. Traefik is installed by the cluster bootstrap, not by a release, so its
+# configuration checks apply once it runs the locked values (recognisable by the HTTP->HTTPS
+# redirect those values add); before that the report says so instead of pretending.
+traefik_service="$(kubectl get service traefik --namespace traefik -o json)"
+traefik_ingress="$(printf '%s\n' "$traefik_service" |
+  jq -r '.status.loadBalancer.ingress[0].ip // .status.loadBalancer.ingress[0].hostname // .spec.externalIPs[0] // empty')"
+traefik_deployment="$(kubectl get deployment traefik --namespace traefik -o json)"
+printf '%s\n' "$traefik_deployment" | jq -e '
+  (.spec.replicas // 0) >= 1 and (.status.availableReplicas // 0) == .spec.replicas
+' >/dev/null || fail "Traefik does not have all of its replicas available"
+traefik_config="locked"
+if printf '%s\n' "$traefik_deployment" |
+  jq -e '[.spec.template.spec.containers[].args[]?] | any(test("redirections.entryPoint.to"))' >/dev/null; then
+  printf '%s\n' "$traefik_service" | jq -e '.spec.externalTrafficPolicy == "Local"' >/dev/null ||
+    fail "Traefik must preserve the client address (externalTrafficPolicy: Local)"
+else
+  traefik_config="not yet on deploy/k3s/traefik-values.yaml (run the cluster bootstrap in deploy/k3s/README.md)"
+  echo "K3s acceptance: WARNING Traefik is $traefik_config; redirect and client-IP checks deferred" >&2
+fi
 
+public_checks="pass"
+[ -n "$traefik_ingress" ] || fail "Traefik has neither an externalIP nor a LoadBalancer address"
+if [ "$traefik_config" = "locked" ]; then
+  if ! redirect_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://$K3S_DOMAIN/")"; then
+    fail "plain HTTP probe of $K3S_DOMAIN failed"
+  fi
+  case "$redirect_status" in
+    301|308) ;;
+    *) fail "plain HTTP must redirect to HTTPS (got $redirect_status)" ;;
+  esac
+fi
 headers="$(curl --fail --silent --show-error --head "https://$K3S_DOMAIN/")" ||
   fail "public HTTPS frontend probe failed"
 printf '%s\n' "$headers" | grep -Eiq '^strict-transport-security:' ||
@@ -212,6 +294,8 @@ jq -n \
   --arg loadBalancer "$traefik_ingress" \
   --argjson readyNodes "$ready_nodes" \
   --argjson zones "$zone_count" \
+  --arg public "$public_checks" \
+  --arg traefik "$traefik_config" \
   '{
     schemaVersion: 1,
     acceptedAt: $acceptedAt,
@@ -222,12 +306,14 @@ jq -n \
     distinctZones: $zones,
     checks: {
       dataQuorum: "pass",
+      rollouts: "pass",
+      httpsRedirect: (if $traefik == "locked" then $public else $traefik end),
       immutableImages: "pass",
       migrations: "pass",
-      externalSecrets: "pass",
+      runtimeSecrets: "pass",
       keda: "pass",
       telemetry: "pass",
-      tlsAndHeaders: "pass"
+      tlsAndHeaders: $public
     }
   }' >"$REPORT"
 

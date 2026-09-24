@@ -74,7 +74,12 @@ FRONTEND_LIVEKIT_URL=wss://<project-subdomain>.livekit.cloud
 LIVEKIT_EGRESS_S3_ACCESS_KEY=<your-s3-access-key>
 LIVEKIT_EGRESS_S3_SECRET=<your-s3-secret>
 LIVEKIT_EGRESS_S3_BUCKET=warptalk-recordings
-LIVEKIT_EGRESS_S3_REGION=ap-southeast-1
+# WT-824: "auto" because the bucket is Cloudflare R2, which accepts only "auto", an empty
+# value or "us-east-1" and answers InvalidRegionName to anything else. LiveKit signs the
+# upload with this string verbatim, so a wrong region fails EVERY recording upload — after
+# the meeting, inside LiveKit Cloud, and the file is gone. This said ap-southeast-1 for weeks.
+# An AWS S3 bucket takes its real region here instead.
+LIVEKIT_EGRESS_S3_REGION=auto
 LIVEKIT_EGRESS_S3_ENDPOINT=https://<your-s3-compatible-endpoint>
 
 # ── Backup (S3/MinIO) ───────────────────────────────────────────────

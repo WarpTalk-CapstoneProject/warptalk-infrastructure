@@ -47,4 +47,23 @@ if K3S_RUNTIME_SECRET_FILE="$invalid" "$checker" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Optional keys: absent is fine, and so is a well-formed value; a standard Cartesia key in the admin
+# slot is not (the usage API refuses it with 401 on every sync, and nothing else would notice).
+jq '.data.CARTESIA_ADMIN_API_KEY = ("sk_car_admin_contract" | @base64)
+  | .data.CARTESIA_USAGE_API_KEY_ID = ("00000000-0000-4000-8000-000000000001" | @base64)' "$fixture" >"$invalid"
+K3S_RUNTIME_SECRET_FILE="$invalid" "$checker" >/dev/null ||
+  { echo "runtime secret contract rejected a valid optional Cartesia admin key" >&2; exit 1; }
+
+jq '.data.CARTESIA_ADMIN_API_KEY = ("sk_car_standard_contract" | @base64)' "$fixture" >"$invalid"
+if K3S_RUNTIME_SECRET_FILE="$invalid" "$checker" >/dev/null 2>&1; then
+  echo "runtime secret contract accepted a non-admin Cartesia key" >&2
+  exit 1
+fi
+
+jq '.data.CARTESIA_USAGE_API_KEY_ID = ("production" | @base64)' "$fixture" >"$invalid"
+if K3S_RUNTIME_SECRET_FILE="$invalid" "$checker" >/dev/null 2>&1; then
+  echo "runtime secret contract accepted a Cartesia key id that is not a UUID" >&2
+  exit 1
+fi
+
 echo "K3s runtime secret contract tests: PASS"

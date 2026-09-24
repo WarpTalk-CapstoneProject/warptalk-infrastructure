@@ -1,6 +1,46 @@
+{{- /*
+The database release gate. Three modes (values.yaml `migrations.mode`):
+
+  hook      a pre-install/pre-upgrade Helm hook, as local and contract installs have always run it.
+  external  nothing here. Production: scripts/deploy-k3s-release.sh renders this template with
+            mode=job and runs the Job as its own step BEFORE `helm upgrade`. A failed migration then
+            stops the release with nothing rolled, instead of failing inside an upgrade that
+            `--atomic` half-reverts (24 Sep: new images left running on an unmigrated schema).
+  job       the Job and its ServiceAccount as plain objects, for the deploy script to apply. Named
+            after the release id, so a re-run of one release replaces its own Job and the evidence
+            of every earlier release stays until its TTL.
+
+The runner is idempotent: run-migrations.sh records each applied file and skips it next time, so
+running the gate again for the same release is harmless.
+*/ -}}
+{{- $mode := .Values.migrations.mode | default "hook" }}
+{{- if not (has $mode (list "hook" "external" "job")) }}
+{{- fail (printf "migrations.mode must be hook, external or job, not %q" $mode) }}
+{{- end }}
+{{- if ne $mode "external" }}
+{{- if eq $mode "job" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: warptalk-migrator
+  labels:
+    app.kubernetes.io/name: warptalk-migrator
+    app.kubernetes.io/part-of: warptalk
+    app.kubernetes.io/managed-by: warptalk-release-gate
+automountServiceAccountToken: false
+---
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
+  {{- if eq $mode "job" }}
+  name: {{ printf "warptalk-migrations-%s" (regexReplaceAll "[^a-z0-9-]+" (lower .Values.global.releaseId) "-") | trunc 63 | trimSuffix "-" }}
+  labels:
+    app.kubernetes.io/name: warptalk-migrator
+    app.kubernetes.io/part-of: warptalk
+    app.kubernetes.io/managed-by: warptalk-release-gate
+    warptalk.io/release-id: {{ regexReplaceAll "[^a-z0-9._-]+" (lower .Values.global.releaseId) "-" | trunc 63 | trimSuffix "-" | quote }}
+  {{- else }}
   name: warptalk-migrations-{{ .Release.Revision }}
   labels:
     {{- include "warptalk.labels" . | nindent 4 }}
@@ -8,6 +48,7 @@ metadata:
     helm.sh/hook: pre-install,pre-upgrade
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation
+  {{- end }}
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 900
@@ -19,9 +60,18 @@ spec:
         {{- include "warptalk.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
-      serviceAccountName: warptalk
+      serviceAccountName: warptalk-migrator
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      {{- include "warptalk.placement" . | nindent 6 }}
       securityContext:
         runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: migrator
@@ -36,9 +86,17 @@ spec:
           {{- end }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           envFrom:
-            - configMapRef: {name: warptalk-runtime}
+            # Optional: in job mode the gate runs BEFORE the release that creates or updates this
+            # ConfigMap, so the two keys the runner needs from it are also set explicitly below.
+            - configMapRef: {name: warptalk-runtime, optional: true}
             - secretRef: {name: {{ .Values.secret.name }}}
           env:
+            - name: PGHOST
+              value: {{ .Values.config.PGHOST | quote }}
+            - name: PGPORT
+              value: {{ .Values.config.PGPORT | quote }}
+            - name: PGDATABASE
+              value: warptalk
             - name: RELEASE_ID
               value: {{ .Values.global.releaseId | quote }}
             - name: MIGRATION_APPLIED_BY
@@ -53,3 +111,4 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+{{- end }}

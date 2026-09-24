@@ -1,0 +1,336 @@
+# kube-prometheus-stack for the WarpTalk cluster (version locked in addons.lock.env).
+#
+# Placement mirrors production compose, where Prometheus, Alertmanager and Grafana run on the
+# Infra VM (deploy/production/infra.compose.yml): here that VM is the control plane, so these pods
+# select node.warptalk.io/role=infra and tolerate the control-plane taint. That keeps ~1.4 GiB of
+# requests off the App node (deploy/k3s/README.md "Capacity plan").
+
+x-infra-placement: &infra-placement
+  nodeSelector:
+    node.warptalk.io/role: infra
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+
+alertmanager:
+  alertmanagerSpec:
+    <<: *infra-placement
+    # Real receivers. The secret holds alertmanager.yaml rendered from
+    # observability/alertmanager.yml.example by scripts/render-alertmanager-config.sh - the same
+    # Resend SMTP route and the same dead-letter mute production compose uses - with credentials
+    # from the GitHub `production` runtime env (RESEND_API_KEY, RESEND_FROM_EMAIL, ALERT_EMAIL_TO).
+    # scripts/materialize-k8s-runtime-secrets.sh writes it; the chart's own default config has a
+    # single "null" receiver, which is how every alert was evaluated and then dropped.
+    configSecret: warptalk-alertmanager
+    resources:
+      requests: {cpu: 25m, memory: 48Mi}
+      limits: {cpu: 100m, memory: 128Mi}
+
+prometheus:
+  prometheusSpec:
+    <<: *infra-placement
+    retention: 7d
+    retentionSize: 4GB
+    # Select every ServiceMonitor/PodMonitor/PrometheusRule in the cluster, not only the ones
+    # labelled release=monitoring: the Redis, Qdrant and CloudNativePG monitors come from other
+    # charts and would otherwise be silently ignored.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests: {cpu: 200m, memory: 768Mi}
+      limits: {cpu: "1", memory: 1536Mi}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 5Gi
+
+# EMBEDDED IN THE ADMIN PORTAL, BEHIND WARPTALK'S OWN ADMIN AUTH.
+#
+# The admin System Health page (https://app.warptalk.io.vn/admin/health) iframes these dashboards
+# from https://app.warptalk.io.vn/grafana/ — the SAME ORIGIN as the page, which is what lets the
+# iframe carry the admin's session and keeps every cookie SameSite=Lax. The chain:
+#
+#   browser --/grafana/*--> Traefik --ForwardAuth--> gateway /internal/grafana/auth
+#                                                     (validates the WarpTalk JWT from the
+#                                                      access_token cookie, requires the
+#                                                      system-admin policy, answers 200 with
+#                                                      X-WEBAUTH-USER: <email>)
+#           Traefik --X-WEBAUTH-USER--> Grafana auth.proxy (Viewer, auto sign-up)
+#
+# Why this and not the alternatives:
+#   * anonymous / public dashboards: anyone with the URL reads production internals. Refused.
+#   * a viewer service account + the render API proxied by the backend: images, not live charts,
+#     and grafana-image-renderer is a headless Chromium the Infra node has no memory for.
+#   * auth proxy (this): live, interactive, no second login, and revoked the moment WarpTalk
+#     revokes the admin role — every request is re-authorised, nothing is cached.
+#
+# What stops a spoofed X-WEBAUTH-USER: Traefik OVERWRITES the header with the gateway's answer
+# (authResponseHeaders), Grafana trusts it only from the pod CIDR (auth.proxy.whitelist), and the
+# NetworkPolicy below admits only Traefik and this namespace to the Grafana pod. The login is the
+# admin's email (never a bare word), so it cannot collide with Grafana's built-in "admin".
+# Break-glass: `kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80` and the admin
+# password in warptalk-grafana-admin, at http://localhost:3000/grafana/.
+grafana:
+  <<: *infra-placement
+  admin:
+    # Written from GRAFANA_ADMIN_PASSWORD (GitHub `production`), as compose reads it; the chart
+    # default is the public string "prom-operator".
+    existingSecret: warptalk-grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  resources:
+    requests: {cpu: 50m, memory: 160Mi}
+    limits: {cpu: 200m, memory: 320Mi}
+  grafana.ini:
+    server:
+      domain: app.warptalk.io.vn
+      root_url: https://app.warptalk.io.vn/grafana/
+      # Grafana serves /grafana/* itself, so Traefik forwards the path untouched (no strip-prefix).
+      serve_from_sub_path: true
+    security:
+      # Grafana otherwise sends X-Frame-Options: deny. frame-ancestors 'self' is set by the
+      # grafana-embed-headers Middleware below, so only the app origin can frame it.
+      allow_embedding: true
+      cookie_secure: true
+      # Same-origin iframe: Lax is enough, and None is what cross-site embedding would need.
+      cookie_samesite: lax
+      disable_gravatar: true
+    auth.proxy:
+      enabled: true
+      header_name: X-WEBAUTH-USER
+      header_property: username
+      auto_sign_up: true
+      # Re-read the header every minute rather than trusting a Grafana session for longer.
+      sync_ttl: 1
+      # The Calico pod CIDR (network.podCidrs / ForwardedHeaders__KnownNetworks__0). Traefik
+      # reaches Grafana from a pod address; nothing outside the cluster network is trusted.
+      whitelist: 192.168.0.0/16
+      enable_login_token: false
+    auth.anonymous:
+      enabled: false
+    users:
+      allow_sign_up: false
+      auto_assign_org: true
+      auto_assign_org_role: Viewer
+      viewers_can_edit: false
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+      check_for_plugin_updates: false
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      traefik.ingress.kubernetes.io/router.entrypoints: websecure
+      # No tls.secretName here: Traefik's certificate store is global, and the app host's
+      # certificate (warptalk/warptalk-tls) already matches app.warptalk.io.vn by SNI.
+      traefik.ingress.kubernetes.io/router.tls: "true"
+      traefik.ingress.kubernetes.io/router.middlewares: monitoring-grafana-admin-auth@kubernetescrd,monitoring-grafana-embed-headers@kubernetescrd
+    hosts:
+      - app.warptalk.io.vn
+    # Longer than the app Ingress's "/" rule, so Traefik routes /grafana here and everything else
+    # to the frontend.
+    path: /grafana
+    pathType: Prefix
+  extraObjects:
+    - apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: grafana-admin-auth
+        namespace: monitoring
+      spec:
+        forwardAuth:
+          address: http://gateway.warptalk.svc.cluster.local:5200/internal/grafana/auth
+          trustForwardHeader: false
+          # Only the session cookie goes to the gateway; only the identity comes back.
+          authRequestHeaders:
+            - Cookie
+          authResponseHeaders:
+            - X-WEBAUTH-USER
+    - apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: grafana-embed-headers
+        namespace: monitoring
+      spec:
+        headers:
+          # The app's own Middleware says frame-ancestors 'none' / DENY; Grafana must be frameable,
+          # but only by the admin page on its own origin.
+          customFrameOptionsValue: SAMEORIGIN
+          contentSecurityPolicy: "frame-ancestors 'self'"
+          contentTypeNosniff: true
+          referrerPolicy: same-origin
+          stsSeconds: 31536000
+          stsIncludeSubdomains: true
+          customResponseHeaders:
+            Cache-Control: no-store
+    - apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: grafana-ingress
+        namespace: monitoring
+      spec:
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: grafana
+        policyTypes: [Ingress]
+        ingress:
+          - from:
+              # Traefik: the only route in from outside, and the only source of X-WEBAUTH-USER.
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: traefik
+                podSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: traefik
+              # Prometheus scraping Grafana's /metrics, and the rest of the monitoring stack.
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: monitoring
+            ports:
+              - port: 3000
+                protocol: TCP
+
+prometheusOperator:
+  <<: *infra-placement
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 192Mi}
+  admissionWebhooks:
+    patch:
+      <<: *infra-placement
+
+kube-state-metrics:
+  <<: *infra-placement
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 192Mi}
+
+prometheus-node-exporter:
+  # Every node, including the tainted Data VM and the control plane.
+  tolerations:
+    - operator: Exists
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 100m, memory: 64Mi}
+
+# THE KUBEADM CONTROL PLANE IS NOT SCRAPED.
+#
+# kubeadm binds etcd metrics (:2381), kube-scheduler (:10259) and kube-controller-manager (:10257)
+# to 127.0.0.1, and kube-proxy's metricsBindAddress defaults to 127.0.0.1:10249. Prometheus reaches
+# none of them, so the chart's defaults produced six permanently-down targets and a standing set of
+# false alerts: etcdInsufficientMembers / etcdMembersDown (critical), KubeSchedulerDown,
+# KubeControllerManagerDown, KubeProxyDown, TargetDown and WarpTalkTargetDown for each. They were
+# silenced for 30 days on 2026-09-24; this is the fix at the source.
+#
+# Disabling each component removes its Service, ServiceMonitor AND the default alert/recording
+# rules the chart gates on it, so nothing is left evaluating a metric that cannot exist. To scrape
+# them for real instead: set --bind-address=0.0.0.0 (scheduler, controller-manager) and
+# --listen-metrics-urls=http://0.0.0.0:2381 (etcd) in /etc/kubernetes/manifests on the control
+# plane, metricsBindAddress: 0.0.0.0:10249 in the kube-proxy ConfigMap, open those ports to the pod
+# CIDR only, and flip these back to true.
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+# Platform rules that are about nodes and data, not one WarpTalk service; the application rules
+# stay in deploy/k3s/chart/files/warptalk.rules.yml.
+additionalPrometheusRulesMap:
+  warptalk-platform:
+    groups:
+      - name: warptalk-node-disk
+        rules:
+          # The App node holds the Postgres volume (local-path), and failing WAL archiving keeps
+          # every WAL segment on it: it was at 84% on 2026-09-24. The chart's own
+          # NodeFilesystemAlmostOutOfSpace waits for < 5% free, which on a database node is too late.
+          - alert: WarpTalkNodeDiskUsageHigh
+            expr: |
+              (1 - node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs", mountpoint!~"/boot.*"}
+                 / node_filesystem_size_bytes{fstype=~"ext4|xfs|btrfs", mountpoint!~"/boot.*"})
+                * on (instance) group_left (nodename) node_uname_info > 0.80
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "{{ $labels.nodename }} {{ $labels.mountpoint }} is {{ $value | humanizePercentage }} full"
+              description: >-
+                Check Postgres WAL first on the App node: a failing archive_command keeps every
+                segment. kubectl -n warptalk-data exec warptalk-postgres-1 -- du -sh /var/lib/postgresql/data/pgdata/pg_wal
+          - alert: WarpTalkNodeDiskUsageCritical
+            expr: |
+              (1 - node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs", mountpoint!~"/boot.*"}
+                 / node_filesystem_size_bytes{fstype=~"ext4|xfs|btrfs", mountpoint!~"/boot.*"})
+                * on (instance) group_left (nodename) node_uname_info > 0.90
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "{{ $labels.nodename }} {{ $labels.mountpoint }} is {{ $value | humanizePercentage }} full"
+          - alert: WarpTalkNodeDiskFillingIn24h
+            expr: |
+              predict_linear(node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs", mountpoint!~"/boot.*"}[6h], 24 * 3600) < 0
+                and on (instance, mountpoint)
+              (1 - node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs", mountpoint!~"/boot.*"}
+                 / node_filesystem_size_bytes{fstype=~"ext4|xfs|btrfs", mountpoint!~"/boot.*"}) > 0.70
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "{{ $labels.instance }} {{ $labels.mountpoint }} will be full within 24h at the current rate"
+      - name: warptalk-postgres
+        rules:
+          # A rule over a metric with no series is indistinguishable from a healthy system: on
+          # 2026-09-24 the CNPG PodMonitor existed and produced NO targets, because the live
+          # monitoring release was hand-installed without this file (its Prometheus selects only
+          # release=monitoring, and the PodMonitor has no such label). Zero cnpg_* series meant no
+          # WAL alert could ever fire. Applying this file (podMonitorSelectorNilUsesHelmValues:
+          # false) should fix it; this alert is what proves it did, and catches the next time.
+          - alert: WarpTalkPostgresMetricsMissing
+            expr: absent(cnpg_collector_up)
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "No CloudNativePG metrics are being scraped; WAL archiving and replication are unmonitored"
+          - alert: WarpTalkPostgresWalArchivingFailing
+            expr: increase(cnpg_pg_stat_archiver_failed_count[30m]) > 0
+            for: 15m
+            labels:
+              severity: critical
+            annotations:
+              summary: "{{ $labels.pod }}: WAL archiving is failing; pg_wal grows until the node disk fills"
+      - name: warptalk-meetings
+        rules:
+          # The headline. Needs a handful of meetings before it means anything.
+          - alert: WarpTalkMeetingSuccessRateLow
+            expr: |
+              sum(increase(warptalk_meeting_ended_total{reached_live="true"}[6h]))
+                / sum(increase(warptalk_meeting_ended_total[6h])) < 0.5
+              and sum(increase(warptalk_meeting_ended_total[6h])) >= 4
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Only {{ $value | humanizePercentage }} of meetings in the last 6h reached live (two people and a caption)"
+          - alert: WarpTalkPipelineStageFailing
+            expr: |
+              sum by (stage) (rate(warptalk_stage_messages_total{stage=~"stt|translation|tts", outcome=~"error|timeout|vendor_error"}[15m]))
+                / sum by (stage) (rate(warptalk_stage_messages_total{stage=~"stt|translation|tts", outcome!="dead_letter"}[15m])) > 0.20
+              and sum by (stage) (increase(warptalk_stage_messages_total{stage=~"stt|translation|tts", outcome!="dead_letter"}[15m])) >= 20
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: "{{ $labels.stage }}: {{ $value | humanizePercentage }} of attempts are failing"
+

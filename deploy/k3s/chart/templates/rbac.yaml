@@ -1,3 +1,19 @@
+{{- /*
+Two identities, on purpose.
+
+`warptalk` is what every long-lived pod runs as, so it is an ordinary release resource. It was
+briefly a pre-install/pre-upgrade HOOK so the migration Job could find it before the release
+existed - but Helm does not own hook resources the way it owns the release: it deletes them on
+the next hook run (before-hook-creation) and never re-creates them as part of the manifest, so
+every Deployment pointing at it failed with "serviceaccount not found" on the next rollout.
+
+`warptalk-migrator` is the migration identity, separate so it exists before any release resource
+does. In hook mode it is a pre-install/pre-upgrade hook here, recreated alongside the Job on every
+upgrade. In production (migrations.mode: external) this template does not render it: the release
+gate in scripts/deploy-k3s-release.sh applies it together with the Job from
+templates/migration-job.yaml, before `helm upgrade`. Neither account mounts a token: nothing here
+talks to the Kubernetes API, so neither needs a Role.
+*/ -}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -5,3 +21,18 @@ metadata:
   labels:
     {{- include "warptalk.labels" . | nindent 4 }}
 automountServiceAccountToken: false
+{{- if eq (.Values.migrations.mode | default "hook") "hook" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: warptalk-migrator
+  labels:
+    app.kubernetes.io/name: warptalk-migrator
+    {{- include "warptalk.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-30"
+    helm.sh/hook-delete-policy: before-hook-creation
+automountServiceAccountToken: false
+{{- end }}

@@ -20,11 +20,13 @@ metadata:
     {{- include "warptalk.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.gotenberg.replicas }}
+  {{- $shape := ternary .Values.rollout.multiReplica .Values.rollout.singleReplica (ge (int .Values.gotenberg.replicas) 2) }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      maxUnavailable: {{ $shape.maxUnavailable }}
+      maxSurge: {{ $shape.maxSurge }}
+  minReadySeconds: {{ .Values.rollout.minReadySeconds }}
   selector:
     matchLabels:
       app.kubernetes.io/name: gotenberg
@@ -36,10 +38,14 @@ spec:
     spec:
       serviceAccountName: warptalk
       automountServiceAccountToken: false
-      terminationGracePeriodSeconds: 30
+      # A conversion in flight takes up to --api-timeout (60s); let it finish.
+      terminationGracePeriodSeconds: 75
       securityContext:
         runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
         seccompProfile: {type: RuntimeDefault}
+      {{- include "warptalk.placement" . | nindent 6 }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -71,16 +77,25 @@ spec:
             - --chromium-disable-javascript=true
             - --api-timeout=60s
             - --libreoffice-start-timeout=60s
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.rollout.preStopSleepSeconds }}
           ports:
             - name: http
               containerPort: 3000
           # /health is served by the API before either converter has been started, so this says
           # the process is reachable, not that a conversion will succeed. Readiness on anything
           # heavier would take the pod out of service during the routine soffice restart.
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 36
           readinessProbe:
             httpGet: {path: /health, port: http}
-            initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 3
           # Deliberately slack, because of the version pinned above. Gotenberg only learned to
           # tolerate a transient probe failure and to cache a successful probe result in 8.33.0;
           # on 8.21.1 a /health that answers slowly while LibreOffice is busy is indistinguishable
@@ -90,13 +105,15 @@ spec:
           # the pod is declared dead, which a real hang still reaches.
           livenessProbe:
             httpGet: {path: /health, port: http}
-            initialDelaySeconds: 30
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 6
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
             capabilities: {drop: ["ALL"]}
           resources:
             {{- toYaml .Values.gotenberg.resources | nindent 12 }}
@@ -128,7 +145,10 @@ spec:
     - name: http
       port: 3000
       targetPort: http
+{{- if ge (int .Values.gotenberg.replicas) 2 }}
 ---
+# Only with two or more pods: minAvailable 1 over a single pod forbids every voluntary eviction,
+# which is how one converter replica would block `kubectl drain` on the App node.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -137,7 +157,8 @@ metadata:
     app.kubernetes.io/name: gotenberg
     {{- include "warptalk.labels" . | nindent 4 }}
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: gotenberg
+{{- end }}

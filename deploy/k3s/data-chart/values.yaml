@@ -1,6 +1,28 @@
 storageClass: replicated-nvme
 
+# Where the data pods run. Empty here (kind/contract renders); production pins them to the Data
+# VM and tolerates its NoSchedule taint (deploy/k3s/k8s-data-values.yaml).
+placement:
+  nodeSelector: {}
+  tolerations: []
+  # Soft placement: new pods prefer nodes with node.warptalk.io/role=<preferredRole>. Soft on
+  # purpose - a pod whose local-path volume already lives on another node must stay schedulable
+  # there, or a values change would strand the database.
+  preferredRole: ""
+
+# The data tier's PriorityClass (templates/priority-class.yaml). Each data workload opts in with
+# its own priorityClassName below (Redis and Qdrant in their own values files), because assigning
+# it restarts the pods: see deploy/k3s/DATA-PLACEMENT-RUNBOOK.md for the order.
+priorityClass:
+  create: true
+  name: warptalk-data-critical
+  # Far above the application tier (0, no class) and far below system-cluster-critical (2e9).
+  value: 100000
+
+# External Secrets is optional. Production materializes the four data-namespace secrets from the
+# GitHub `production` environment in the release job and sets enabled: false.
 externalSecrets:
+  enabled: true
   secretStoreName: warptalk-production
   postgresRemoteKey: warptalk/production/postgres-superuser
   backupRemoteKey: warptalk/production/postgres-backup
@@ -10,7 +32,26 @@ externalSecrets:
 postgres:
   namespace: warptalk-data
   instances: 3
+  # Empty = no class. Production sets warptalk-data-critical.
+  priorityClassName: ""
+  # How CloudNativePG updates the primary in a rolling update, after every standby is done:
+  # `switchover` promotes an updated standby first (seconds of write retries), `restart` restarts
+  # the primary in place (writes stop until it is back). CNPG's default is restart.
+  primaryUpdateMethod: switchover
   storageSize: 150Gi
+  # CloudNativePG synchronous replication. `required` waits for a standby on every commit (the
+  # right call with three instances on three hosts); `preferred` commits locally while no standby
+  # is reachable, so losing the only standby does not stop writes.
+  synchronous:
+    method: any
+    number: 1
+    dataDurability: required
+  resources:
+    requests: {cpu: "1", memory: 4Gi}
+    limits: {cpu: "4", memory: 12Gi}
+  parameters:
+    shared_buffers: 1GB
+    effective_cache_size: 3GB
   pooler:
     instances: 3
     maxClientConnections: "1000"
@@ -26,4 +67,19 @@ postgres:
 rabbitmq:
   namespace: warptalk
   replicas: 3
+  # Empty = no class. Assigning it restarts the broker, so production sets it in the RabbitMQ step
+  # of deploy/k3s/DATA-PLACEMENT-RUNBOOK.md, not in an ordinary release.
+  priorityClassName: ""
   storageSize: 30Gi
+  resources:
+    requests: {cpu: 300m, memory: 1Gi}
+    limits: {cpu: "2", memory: 3Gi}
+
+# Nightly full-storage Qdrant snapshot, uploaded by Qdrant itself to the same S3-compatible backup
+# target as the Postgres base backups (see deploy/k3s/data/qdrant-values.yaml for the storage
+# half). The CronJob only asks for it.
+qdrantSnapshots:
+  enabled: false
+  schedule: "30 2 * * *"
+  url: http://warptalk-qdrant:6333
+  image: curlimages/curl:8.16.0@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6

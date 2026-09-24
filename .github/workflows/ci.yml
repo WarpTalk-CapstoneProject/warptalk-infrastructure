@@ -229,11 +229,34 @@ jobs:
       - name: K3s runtime secret contract
         working-directory: warptalk-infrastructure
         run: ./scripts/test-k3s-runtime-secret-contract.sh
+      - name: K8s runtime secrets come from the GitHub production environment
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-k8s-runtime-secrets-contract.sh
+      - name: K8s post-deploy rollback and locked Helm contract
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-k3s-post-deploy-rollback-contract.sh
+      # The release order with kubectl/Helm stubbed: migrations gate the upgrade, no --atomic, a
+      # failure rolls back to the last DEPLOYED revision, and surge vs in-place follows headroom.
+      - name: K8s release gate (migrations first, explicit rollback, rollout shape)
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-k3s-release-gate.sh
+      - name: Health inspector unit tests (Docker and Kubernetes modes)
+        working-directory: warptalk-infrastructure
+        run: python3 -m unittest discover -s health-inspector/tests
       - name: K3s data platform contract
         working-directory: warptalk-infrastructure
         env:
           K3S_DATA_VALUES_FILE: deploy/k3s/data-provider-values.contract.yaml
           K3S_SECRET_STORE_NAME: contract-secret-store
           K3S_STORAGE_CLASS: replicated-nvme
+          OFFLINE_RENDER_ONLY: "true"
+        run: ./scripts/deploy-k3s-data.sh
+      - name: K8s production data platform render (GitHub secret source)
+        working-directory: warptalk-infrastructure
+        env:
+          K3S_DATA_VALUES_FILE: deploy/k3s/k8s-data-values.yaml
+          K3S_SECRET_SOURCE: github
+          K3S_STORAGE_CLASS: local-path
+          K3S_BACKUP_ENDPOINT_URL: https://object-store.warptalk.invalid
           OFFLINE_RENDER_ONLY: "true"
         run: ./scripts/deploy-k3s-data.sh

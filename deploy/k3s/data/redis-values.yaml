@@ -1,3 +1,8 @@
+# Redis with Sentinel for the AI pipeline streams and live meeting state.
+#
+# In sentinel mode the chart runs ONE StatefulSet (warptalk-redis-node) whose pods each carry
+# redis + a sentinel sidecar, configured from `replica.*`. `master.*` is not rendered in this
+# mode, so tolerations and sizes that used to sit there did nothing.
 architecture: replication
 image:
   digest: sha256:08863c2c3f4e051fb6139b38fa223e9c13be5033326a59bead182860d899bf98
@@ -5,31 +10,64 @@ auth:
   enabled: true
   existingSecret: warptalk-redis-auth
   existingSecretPasswordKey: password
-master:
-  persistence:
-    enabled: true
-    storageClass: replicated-nvme
-    size: 20Gi
-  podAntiAffinityPreset: hard
 replica:
-  replicaCount: 3
+  # Two nodes, as production has run since the k8s cutover. A third (redis-node-2) was added with
+  # the k8s readiness PR; on 2026-09-24 its sentinel crash-looped on the Data node (32 restarts,
+  # logs unreachable because the API server cannot reach that node's kubelet on :10250) and the
+  # Redis helm upgrade timed out, failing release v220. With two pods a lost master's sentinel
+  # goes with it, so quorum 2 cannot fail over automatically - a known gap to close together
+  # with the Data-node kubelet reachability, not by guessing at a pod we cannot inspect.
+  replicaCount: 2
+  # noeviction, and a maxmemory under the container limit.
+  #
+  # allkeys-lru is what compose ran, and it is the reason a full Redis never looked full: it
+  # silently deleted the least-recently-used keys - live meeting streams and consumer groups -
+  # while every health check stayed green. noeviction turns "full" into a loud OOM error on the
+  # write instead. 640mb is under compose's 768mb because the 896Mi limit must also hold the
+  # replication/AOF-rewrite buffers and the forked child's copy-on-write pages.
+  configuration: |-
+    maxmemory 640mb
+    maxmemory-policy noeviction
+  resources:
+    requests: {cpu: 75m, memory: 704Mi}
+    limits: {cpu: 300m, memory: 896Mi}
   persistence:
     enabled: true
     storageClass: replicated-nvme
+    # The size the live StatefulSet was created with: volumeClaimTemplates are immutable, so a
+    # different value fails the upgrade. Actual use is a few MiB.
     size: 20Gi
-  podAntiAffinityPreset: hard
+  podAntiAffinityPreset: soft
+  # Soft, like the rest of the data layer: redis-node-0's volume lives on the App node.
+  nodeAffinityPreset:
+    type: soft
+    key: node.warptalk.io/role
+    values: [data]
+  tolerations:
+    - key: node.warptalk.io/role
+      operator: Equal
+      value: data
+      effect: NoSchedule
+  pdb:
+    create: true
+    maxUnavailable: 1
 sentinel:
   enabled: true
   image:
     digest: sha256:ae75dd69c192a632bdeb21baa6721080be5b12347e52add922036398b47631da
   quorum: 2
   automateClusterRecovery: true
-pdb:
-  create: true
-  minAvailable: 2
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 128Mi}
 metrics:
   enabled: true
   image:
     digest: sha256:fb1dae6add1e1104989d086d9407f7d65f58968550aa5fddea20637a758c0773
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 50m, memory: 64Mi}
   serviceMonitor:
     enabled: true
+    additionalLabels:
+      release: monitoring

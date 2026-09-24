@@ -1,4 +1,8 @@
 {{- range $name, $app := .Values.workloads }}
+{{- $kedaManaged := include "warptalk.kedaManaged" (dict "name" $name "root" $) }}
+{{- $hpaManaged := and (not $app.singleton) $app.autoscaling $app.autoscaling.enabled }}
+{{- $uid := include "warptalk.runAsUser" (dict "name" $name "app" $app) }}
+{{- $gid := include "warptalk.runAsGroup" (dict "name" $name "app" $app) }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -7,13 +11,43 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ $name }}
     {{- include "warptalk.labels" $ | nindent 4 }}
+  {{- with $app.singletonWorkers }}
+  annotations:
+    # Background loops in this service that must run on ONE replica at a time. They are safe at
+    # replicas > 1 only once the backend's distributed lock (warptalk-backend
+    # fix/multi-replica-safety) guards them; see deploy/k3s/README.md "Singleton workers".
+    warptalk.io/singleton-workers: {{ join "," . | quote }}
+  {{- end }}
 spec:
+  {{- /*
+  Rendered unless an autoscaler owns the count. It used to be skipped for every "*-worker" name,
+  so a worker with neither an HPA nor a KEDA ScaledObject (security-worker, billing-worker,
+  suggestion-worker, embedding-worker) fell back to the API default of one replica whatever
+  the values said.
+  */}}
+  {{- if $app.singleton }}
+  replicas: 1
+  {{- else if not (or $kedaManaged $hpaManaged) }}
   replicas: {{ $app.replicas }}
+  {{- end }}
+  {{- if $app.singleton }}
+  # A singleton must never overlap itself, and a surge rollout runs old and new side by side.
+  strategy:
+    type: Recreate
+  {{- else }}
+  {{- $multi := ge (include "warptalk.minReplicas" (dict "name" $name "app" $app "root" $) | int) 2 }}
+  {{- $shape := ternary $.Values.rollout.multiReplica $.Values.rollout.singleReplica $multi }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      # Surge by default: the new pod starts and passes readiness while the old one keeps serving,
+      # so nothing is ever unavailable. deploy-k3s-release.sh switches a release to in-place
+      # (surge 0 / unavailable 1) only when the App node cannot fit one more pod; see
+      # rollout.* in values.yaml.
+      maxUnavailable: {{ $shape.maxUnavailable }}
+      maxSurge: {{ $shape.maxSurge }}
+  {{- end }}
+  minReadySeconds: {{ $.Values.rollout.minReadySeconds }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}
@@ -26,9 +60,15 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
     spec:
       serviceAccountName: warptalk
-      terminationGracePeriodSeconds: 30
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $app.terminationGracePeriodSeconds | default $.Values.rollout.terminationGracePeriodSeconds }}
       securityContext:
         runAsNonRoot: true
+        runAsUser: {{ $uid }}
+        runAsGroup: {{ $gid }}
         seccompProfile:
           type: RuntimeDefault
         {{- with $app.persistence }}
@@ -39,13 +79,23 @@ spec:
         fsGroup: {{ .fsGroup | default 1654 }}
         fsGroupChangePolicy: OnRootMismatch
         {{- end }}
+      # Soft on both keys: spread replicas over hosts (and zones) whenever there is room, and still
+      # schedule when there is only one App node. A hard constraint would leave the second replica
+      # Pending on today's single App node.
       topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $name }}
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: {{ $name }}
+      {{- include "warptalk.placement" $ | nindent 6 }}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -70,12 +120,25 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: {{ $uid }}
+            runAsGroup: {{ $gid }}
             capabilities:
               drop: ["ALL"]
+          # The kubelet's own sleep action (Kubernetes 1.30+), not /bin/sleep: it needs no binary in
+          # the image and cannot fail on a read-only or distroless root filesystem.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ $.Values.rollout.preStopSleepSeconds }}
           envFrom:
             - configMapRef:
                 name: warptalk-runtime
           env:
+          {{- with $app.port }}
+            - name: ASPNETCORE_HTTP_PORTS
+              value: {{ . | quote }}
+          {{- end }}
           {{- range $envName, $value := $app.env }}
             - name: {{ $envName }}
               value: {{ tpl (toString $value) $ | quote }}
@@ -86,6 +149,17 @@ spec:
                 secretKeyRef:
                   name: {{ $.Values.secret.name }}
                   key: {{ $secretKey }}
+          {{- end }}
+          {{- /* A key the runtime secret may not carry yet. `optional` keeps the pod starting without it
+                 (a plain secretKeyRef to a missing key is CreateContainerConfigError); the service
+                 itself must treat the empty value as "feature off". */}}
+          {{- range $envName, $secretKey := $app.optionalSecretEnv }}
+            - name: {{ $envName }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secret.name }}
+                  key: {{ $secretKey }}
+                  optional: true
           {{- end }}
           {{- if $app.rabbitmq }}
             - name: RabbitMq__Username
@@ -103,17 +177,25 @@ spec:
             - name: WORKER_HEALTH_NAME
               value: {{ . | quote }}
           {{- end }}
-          {{- with $app.workerHealthName }}
+          {{- if $app.workerHealthName }}
+          {{- $probe := $.Values.workerProbe }}
+          # The Python workers expose no port, so their probe is an exec of shared.health_probe:
+          # a fresh interpreter that imports the worker's Redis client and reads its heartbeat.
+          # The import alone passes 5s on a CPU-pressed node, and the old 5s timeout then had the
+          # kubelet SIGTERM healthy billing/suggestion/security workers into CrashLoopBackOff
+          # (24 Sep). See workerProbe in values.yaml.
           startupProbe:
             exec:
               command: ["python", "-m", "shared.health_probe"]
-            periodSeconds: 5
-            failureThreshold: 24
+            periodSeconds: {{ $probe.startup.periodSeconds }}
+            timeoutSeconds: {{ $probe.timeoutSeconds }}
+            failureThreshold: {{ $probe.startup.failureThreshold }}
           livenessProbe:
             exec:
               command: ["python", "-m", "shared.health_probe"]
-            periodSeconds: 20
-            failureThreshold: 3
+            periodSeconds: {{ $probe.liveness.periodSeconds }}
+            timeoutSeconds: {{ $probe.timeoutSeconds }}
+            failureThreshold: {{ $probe.liveness.failureThreshold }}
           {{- end }}
           {{- with $app.port }}
           ports:
@@ -123,18 +205,32 @@ spec:
             - name: grpc
               containerPort: {{ . }}
             {{- end }}
+          # Startup gates the other two, so a pod that starts slowly on a busy node (a release
+          # starts two dozen at once) is not killed by liveness before it has served once.
+          startupProbe:
+            httpGet:
+              path: {{ $app.healthPath }}
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 36
+          # Readiness is what gates traffic, and during a surge rollout it is what lets the old pod
+          # go: the Service only sends to a pod whose readiness passed. The 1s default timeout
+          # failed healthy pods while the node was starting a release (24 Sep).
           readinessProbe:
             httpGet:
               path: {{ $app.healthPath }}
               port: http
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: {{ $app.healthPath }}
               port: http
-            initialDelaySeconds: 30
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           {{- end }}
           resources:
             requests:

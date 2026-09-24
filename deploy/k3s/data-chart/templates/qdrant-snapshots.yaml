@@ -1,0 +1,71 @@
+{{- if .Values.qdrantSnapshots.enabled }}
+{{- /*
+Nightly full-storage snapshot of Qdrant. Qdrant is configured (deploy/k3s/data/qdrant-values.yaml)
+to write snapshots to S3 - the same object store and credentials as the CloudNativePG base
+backups - so POST /snapshots both creates the snapshot and uploads it; nothing is copied through
+this pod and no snapshot lands on the 35 GB data volume.
+
+The vectors can be rebuilt from Postgres by re-embedding, which is slow and costs OpenAI money;
+this is the fast restore path. Restore: see deploy/k3s/FAILOVER-RUNBOOK.md.
+*/ -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: warptalk-qdrant-snapshot
+  namespace: {{ .Values.postgres.namespace }}
+spec:
+  schedule: {{ .Values.qdrantSnapshots.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: warptalk-qdrant-snapshot
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.placement.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.placement.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: snapshot
+              image: {{ .Values.qdrantSnapshots.image | quote }}
+              env:
+                - name: QDRANT_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: warptalk-qdrant-auth
+                      key: api-key
+                - name: QDRANT_URL
+                  value: {{ .Values.qdrantSnapshots.url | quote }}
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  curl --fail --silent --show-error --max-time 1500 \
+                    -X POST -H "api-key: $QDRANT_API_KEY" \
+                    "$QDRANT_URL/snapshots?wait=true"
+                  echo
+                  echo "qdrant full snapshot uploaded"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: ["ALL"]}
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {cpu: 100m, memory: 64Mi}
+{{- end }}

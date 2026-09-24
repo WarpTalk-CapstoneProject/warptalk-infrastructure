@@ -55,4 +55,47 @@ if RELEASE_MANIFEST="$manifest" \
   exit 1
 fi
 
+# The production path: the k8s release job deploys deploy/k3s/k8s-app-values.yaml with runtime
+# secrets from GitHub (no ExternalSecret, no secret store) and image refs from the manifest.
+RELEASE_MANIFEST="$manifest" \
+K3S_VALUES_FILE="$infra_root/deploy/k3s/k8s-app-values.yaml" \
+K3S_SECRET_SOURCE=github \
+K3S_STORAGE_CLASS=local-path \
+K3S_TLS_SECRET_NAME=warptalk-tls \
+OFFLINE_RENDER_ONLY=true \
+  "$script_dir/deploy-k3s-release.sh"
+
+# The fallback the release job uses until K8S_RUNTIME_ENV exists: the same production values,
+# with the ExternalSecret switched on by the job against the live ClusterSecretStore.
+RELEASE_MANIFEST="$manifest" \
+K3S_VALUES_FILE="$infra_root/deploy/k3s/k8s-app-values.yaml" \
+K3S_SECRET_SOURCE=external-secrets \
+K3S_SECRET_STORE_NAME=warptalk-production-secret-store \
+K3S_STORAGE_CLASS=local-path \
+K3S_TLS_SECRET_NAME=warptalk-tls \
+OFFLINE_RENDER_ONLY=true \
+  "$script_dir/deploy-k3s-release.sh" >/dev/null
+
+# The online path must refuse to run against an implicit ~/.kube/config.
+if env -u KUBECONFIG RELEASE_MANIFEST="$manifest" \
+  K3S_VALUES_FILE="$infra_root/deploy/k3s/k8s-app-values.yaml" \
+  K3S_SECRET_SOURCE=github \
+  K3S_STORAGE_CLASS=local-path \
+  K3S_TLS_SECRET_NAME=warptalk-tls \
+  K3S_DOMAIN=app.warptalk.io.vn \
+  "$script_dir/deploy-k3s-release.sh" >/dev/null 2>&1; then
+  echo "the release deploy ran without an explicit KUBECONFIG" >&2
+  exit 1
+fi
+for script in deploy-k3s-data.sh deploy-k3s-release.sh accept-k3s-release.sh install-k3s-addons.sh; do
+  grep -Fq 'KUBECONFIG must name the target cluster explicitly' "$script_dir/$script" || {
+    echo "$script must require an explicit KUBECONFIG" >&2
+    exit 1
+  }
+  if grep -Fq 'HOME/.kube/config' "$script_dir/$script"; then
+    echo "$script falls back to the operator's ~/.kube/config" >&2
+    exit 1
+  fi
+done
+
 echo "K3s immutable release contract tests: PASS"

@@ -191,6 +191,11 @@ metadata:
     {{- include "warptalk.labels" $ | nindent 4 }}
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ $.Values.rollout.singleReplica.maxUnavailable }}
+      maxSurge: {{ $.Values.rollout.singleReplica.maxSurge }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}
@@ -203,6 +208,7 @@ spec:
         checksum/config: {{ toJson $.Values.costObservability | sha256sum }}
     spec:
       serviceAccountName: warptalk
+      {{- include "warptalk.placement" $ | nindent 6 }}
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
