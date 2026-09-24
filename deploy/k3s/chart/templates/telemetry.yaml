@@ -18,11 +18,12 @@ metadata:
     {{- include "warptalk.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.telemetry.replicas }}
+  {{- $shape := ternary .Values.rollout.multiReplica .Values.rollout.singleReplica (ge (int .Values.telemetry.replicas) 2) }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      maxUnavailable: {{ $shape.maxUnavailable }}
+      maxSurge: {{ $shape.maxSurge }}
   selector:
     matchLabels:
       app.kubernetes.io/name: warptalk-otel-collector

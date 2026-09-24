@@ -35,17 +35,19 @@ spec:
   strategy:
     type: Recreate
   {{- else }}
-  {{- $multi := ge (int ($app.replicas | default 1)) 2 }}
+  {{- $multi := ge (include "warptalk.minReplicas" (dict "name" $name "app" $app "root" $) | int) 2 }}
+  {{- $shape := ternary $.Values.rollout.multiReplica $.Values.rollout.singleReplica $multi }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      # A workload with two or more pods may replace one at a time in place (see
-      # rollout.multiReplica in the values): on a single, full App node a surge pod has nowhere
-      # to schedule, the rollout never progresses and Helm times out. One pod keeps serving.
-      maxUnavailable: {{ if $multi }}{{ $.Values.rollout.multiReplica.maxUnavailable }}{{ else }}0{{ end }}
-      maxSurge: {{ if $multi }}{{ $.Values.rollout.multiReplica.maxSurge }}{{ else }}1{{ end }}
+      # Surge by default: the new pod starts and passes readiness while the old one keeps serving,
+      # so nothing is ever unavailable. deploy-k3s-release.sh switches a release to in-place
+      # (surge 0 / unavailable 1) only when the App node cannot fit one more pod; see
+      # rollout.* in values.yaml.
+      maxUnavailable: {{ $shape.maxUnavailable }}
+      maxSurge: {{ $shape.maxSurge }}
   {{- end }}
-  minReadySeconds: 3
+  minReadySeconds: {{ $.Values.rollout.minReadySeconds }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}
@@ -62,7 +64,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: {{ $app.terminationGracePeriodSeconds | default $.Values.rollout.terminationGracePeriodSeconds }}
       securityContext:
         runAsNonRoot: true
         runAsUser: {{ $uid }}
@@ -77,7 +79,16 @@ spec:
         fsGroup: {{ .fsGroup | default 1654 }}
         fsGroupChangePolicy: OnRootMismatch
         {{- end }}
+      # Soft on both keys: spread replicas over hosts (and zones) whenever there is room, and still
+      # schedule when there is only one App node. A hard constraint would leave the second replica
+      # Pending on today's single App node.
       topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $name }}
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
           whenUnsatisfiable: ScheduleAnyway
@@ -114,10 +125,12 @@ spec:
             runAsGroup: {{ $gid }}
             capabilities:
               drop: ["ALL"]
+          # The kubelet's own sleep action (Kubernetes 1.30+), not /bin/sleep: it needs no binary in
+          # the image and cannot fail on a read-only or distroless root filesystem.
           lifecycle:
             preStop:
-              exec:
-                command: ["/bin/sleep", "5"]
+              sleep:
+                seconds: {{ $.Values.rollout.preStopSleepSeconds }}
           envFrom:
             - configMapRef:
                 name: warptalk-runtime
@@ -164,19 +177,25 @@ spec:
             - name: WORKER_HEALTH_NAME
               value: {{ . | quote }}
           {{- end }}
-          {{- with $app.workerHealthName }}
+          {{- if $app.workerHealthName }}
+          {{- $probe := $.Values.workerProbe }}
+          # The Python workers expose no port, so their probe is an exec of shared.health_probe:
+          # a fresh interpreter that imports the worker's Redis client and reads its heartbeat.
+          # The import alone passes 5s on a CPU-pressed node, and the old 5s timeout then had the
+          # kubelet SIGTERM healthy billing/suggestion/security workers into CrashLoopBackOff
+          # (24 Sep). See workerProbe in values.yaml.
           startupProbe:
             exec:
               command: ["python", "-m", "shared.health_probe"]
-            periodSeconds: 5
-            timeoutSeconds: 5
-            failureThreshold: 24
+            periodSeconds: {{ $probe.startup.periodSeconds }}
+            timeoutSeconds: {{ $probe.timeoutSeconds }}
+            failureThreshold: {{ $probe.startup.failureThreshold }}
           livenessProbe:
             exec:
               command: ["python", "-m", "shared.health_probe"]
-            periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 3
+            periodSeconds: {{ $probe.liveness.periodSeconds }}
+            timeoutSeconds: {{ $probe.timeoutSeconds }}
+            failureThreshold: {{ $probe.liveness.failureThreshold }}
           {{- end }}
           {{- with $app.port }}
           ports:
@@ -186,18 +205,32 @@ spec:
             - name: grpc
               containerPort: {{ . }}
             {{- end }}
+          # Startup gates the other two, so a pod that starts slowly on a busy node (a release
+          # starts two dozen at once) is not killed by liveness before it has served once.
+          startupProbe:
+            httpGet:
+              path: {{ $app.healthPath }}
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 36
+          # Readiness is what gates traffic, and during a surge rollout it is what lets the old pod
+          # go: the Service only sends to a pod whose readiness passed. The 1s default timeout
+          # failed healthy pods while the node was starting a release (24 Sep).
           readinessProbe:
             httpGet:
               path: {{ $app.healthPath }}
               port: http
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: {{ $app.healthPath }}
               port: http
-            initialDelaySeconds: 30
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           {{- end }}
           resources:
             requests:

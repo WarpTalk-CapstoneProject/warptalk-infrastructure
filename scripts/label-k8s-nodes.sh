@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Label and taint the cluster's nodes by role, idempotently. Run by the k8s release job (and the
-# one-time bootstrap job) before anything is deployed, so placement never depends on someone having
-# typed the right `kubectl label` once.
+# manual cluster bootstrap in deploy/k3s/README.md) before anything is deployed, so placement
+# never depends on someone having typed the right `kubectl label` once.
 #
 #   K8S_APP_NODES    comma-separated node names -> node.warptalk.io/role=app
 #   K8S_DATA_NODES   comma-separated node names -> node.warptalk.io/role=data

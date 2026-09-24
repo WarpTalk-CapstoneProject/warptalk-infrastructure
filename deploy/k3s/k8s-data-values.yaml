@@ -42,8 +42,18 @@ postgres:
   # The size the live claims were created with. A PVC cannot shrink and CloudNativePG rejects a
   # smaller spec, so this can only grow. local-path does not enforce it; actual use is ~0.3 GiB.
   storageSize: 25Gi
+  # Data tier outranks the application tier (data-chart/templates/priority-class.yaml). Safe to
+  # assign in a release: CloudNativePG rolls the standby first and then SWITCHES OVER (below), so
+  # the primary never restarts in place.
+  priorityClassName: warptalk-data-critical
+  primaryUpdateMethod: switchover
+  # Right-sized 2026-09-24 from Prometheus over the cluster's life (4.8 days): working set p95
+  # 315Mi / max 402Mi (primary), 259Mi / 263Mi (standby); CPU p95 18m. The request was 1Gi each,
+  # and both instances still sit on the App node, so this alone returns 1 GiB of App-node
+  # requests. The database is ~0.3 GiB, so shared_buffers (512MB) cannot fill past it; raise the
+  # request with the data, and keep the limit where it was.
   resources:
-    requests: {cpu: 300m, memory: 1Gi}
+    requests: {cpu: 100m, memory: 512Mi}
     limits: {cpu: 600m, memory: 2Gi}
   parameters:
     shared_buffers: 512MB
@@ -59,7 +69,11 @@ postgres:
       requests: {cpu: 50m, memory: 64Mi}
       limits: {cpu: 200m, memory: 128Mi}
   backup:
-    destinationPath: s3://warptalk-backups/postgres
+    # The R2 token in warptalk-backup-credentials is scoped to the warptalk-recordings bucket only
+    # (verified 2026-09-24: warptalk-backups answered AccessDenied, so WAL archiving failed from
+    # 2026-09-19 and 9.8 GB of WAL piled up on the App node). Backups live under a _backups/ prefix
+    # of the bucket the token can write; move them back if a dedicated backups token is issued.
+    destinationPath: s3://warptalk-recordings/_backups/postgres
     # endpointURL is deliberately absent: it carries the object-store account id, so the release
     # job passes it from BACKUP_S3_ENDPOINT_URL in the GitHub `production` runtime env
     # (scripts/deploy-k3s-data.sh K3S_BACKUP_ENDPOINT_URL).
@@ -67,6 +81,9 @@ postgres:
 
 rabbitmq:
   replicas: 1
+  # Not yet: assigning a class restarts the only broker. Set it (with the request below cut to the
+  # measured p95 117Mi x 1.3) in the RabbitMQ step of deploy/k3s/DATA-PLACEMENT-RUNBOOK.md.
+  priorityClassName: ""
   # Live claim size; cannot shrink.
   storageSize: 5Gi
   resources:

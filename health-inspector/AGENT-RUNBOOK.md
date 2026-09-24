@@ -43,9 +43,10 @@ scans persist restart baselines in the Docker volume
 
 ## Kubernetes production (after the k8s cutover)
 
-While production runs on Docker Compose, use the commands above. Once releases are dispatched
-with `deploy_target=k8s`, the three roles are namespaces and nodes of one cluster, and the same
-inspector reads them through the API server instead of the Docker socket:
+Production runs on Kubernetes and the release workflow deploys only there; the Docker Compose
+commands above apply only to a host recovered onto compose by hand. On Kubernetes the three roles
+are namespaces and nodes of one cluster, and the same inspector reads them through the API server
+instead of the Docker socket:
 
 ```sh
 KUBECONFIG=<read-only kubeconfig> \

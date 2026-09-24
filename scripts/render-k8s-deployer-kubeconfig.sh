@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Print a kubeconfig for the warptalk-deployer ServiceAccount (deploy/k3s/cluster/deployer-rbac.yaml),
 # to be stored as the GitHub `production` environment secret K8S_KUBECONFIG. Run once, after the
-# k8s-bootstrap job has applied the RBAC, with an admin KUBECONFIG:
+# cluster bootstrap (deploy/k3s/README.md) has applied the RBAC, with an admin KUBECONFIG:
 #
 #   K8S_API_SERVER=https://<tailnet-reachable-address>:6443 \
 #     scripts/render-k8s-deployer-kubeconfig.sh |

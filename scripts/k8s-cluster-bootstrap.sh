@@ -2,7 +2,7 @@
 # WarpTalk upstream Kubernetes (kubeadm) bootstrap for the three Vietnix VMs.
 #
 # One-time host setup, run ON THE CONTROL-PLANE (Infra) VM by an operator. It is not a release
-# path: releases go through .github/workflows/release.yml (deploy_target=k8s).
+# path: releases go through .github/workflows/release.yml (Kubernetes is its only target).
 #
 #   MODE=render (default)  write the kubeadm config to $KUBEADM_CONFIG and print the commands
 #   MODE=init              additionally run `kubeadm init` with it
@@ -129,8 +129,8 @@ SystemdCgroup, kubeadm/kubelet/kubectl $K8S_VERSION) must already be in place.
 3. Approve the kubelet serving certificates (repeat after each kubelet cert rotation):
      kubectl get csr -o name | xargs -r kubectl certificate approve
 4. CNI:  POD_CIDR=$POD_CIDR scripts/k8s-install-cni-metallb.sh
-5. Everything after that (node labels and taints, add-ons, deployer RBAC) is the k8s-bootstrap
-   job in release.yml: dispatch with deploy_target=k8s and k8s_bootstrap=true.
+5. Everything after that (node labels and taints, add-ons, deployer RBAC) is the manual
+   cluster bootstrap in deploy/k3s/README.md ("Cluster bootstrap by hand"), with an admin kubeconfig.
 EOF
 
 if [ "$MODE" = "init" ]; then

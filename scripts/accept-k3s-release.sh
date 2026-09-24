@@ -249,7 +249,7 @@ kubectl get configmap warptalk-grafana-dashboard \
   fail "WarpTalk Grafana dashboard is missing"
 
 # Traefik runs host ports on the App node (traefik-values.yaml), fronted in-VPC by a
-# LoadBalancer Service. Traefik is installed by the k8s-bootstrap job, not by a release, so its
+# LoadBalancer Service. Traefik is installed by the cluster bootstrap, not by a release, so its
 # configuration checks apply once it runs the locked values (recognisable by the HTTP->HTTPS
 # redirect those values add); before that the report says so instead of pretending.
 traefik_service="$(kubectl get service traefik --namespace traefik -o json)"
@@ -265,7 +265,7 @@ if printf '%s\n' "$traefik_deployment" |
   printf '%s\n' "$traefik_service" | jq -e '.spec.externalTrafficPolicy == "Local"' >/dev/null ||
     fail "Traefik must preserve the client address (externalTrafficPolicy: Local)"
 else
-  traefik_config="not yet on deploy/k3s/traefik-values.yaml (run the k8s-bootstrap job)"
+  traefik_config="not yet on deploy/k3s/traefik-values.yaml (run the cluster bootstrap in deploy/k3s/README.md)"
   echo "K3s acceptance: WARNING Traefik is $traefik_config; redirect and client-IP checks deferred" >&2
 fi
 
