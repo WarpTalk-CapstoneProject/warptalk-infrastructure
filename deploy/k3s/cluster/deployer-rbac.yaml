@@ -1,0 +1,267 @@
+# The identity the production-k8s release job deploys as (GitHub `production` secret
+# K8S_KUBECONFIG). Applied by the one-time k8s-bootstrap job in release.yml, which runs with the
+# cluster-admin K8S_BOOTSTRAP_KUBECONFIG; scripts/render-k8s-deployer-kubeconfig.sh turns the token
+# below into the K8S_KUBECONFIG value.
+#
+# What it can do, and why:
+#   * namespaces warptalk and warptalk-data: the built-in `admin` role (every namespaced core and
+#     apps resource the charts create, including the Roles/RoleBindings the Redis chart ships),
+#     plus warptalk-deployer-crds for the custom resources `admin` does not aggregate.
+#   * namespace monitoring: configmaps and secrets only - the Grafana dashboard the app chart
+#     ships, and the Alertmanager/Grafana secrets materialized from GitHub `production`.
+#   * namespace traefik: read-only (the acceptance gate reads the Service and Deployment).
+#   * cluster scope: read nodes/storage/CRDs/ingress classes; patch NODES (the job labels and taints
+#     them idempotently, scripts/label-k8s-nodes.sh); manage the chart's cert-manager ClusterIssuer;
+#     create/label the two application namespaces.
+# What it cannot do: touch kube-system, install or change CRDs, create cluster-wide RBAC, or read
+# secrets outside the three namespaces above.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: warptalk-deploy
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: warptalk-deployer
+  namespace: warptalk-deploy
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: warptalk-deployer-token
+  namespace: warptalk-deploy
+  annotations:
+    kubernetes.io/service-account.name: warptalk-deployer
+type: kubernetes.io/service-account-token
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: warptalk
+  labels:
+    warptalk.io/tier: application
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: warptalk-data
+  labels:
+    warptalk.io/tier: data
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traefik
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: warptalk-deployer-cluster
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch, create, patch]
+  - apiGroups: [""]
+    resources: [persistentvolumes]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingressclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [cert-manager.io]
+    resources: [clusterissuers]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [external-secrets.io]
+    resources: [clustersecretstores]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: warptalk-deployer-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: warptalk-deployer-cluster
+subjects:
+  - kind: ServiceAccount
+    name: warptalk-deployer
+    namespace: warptalk-deploy
+---
+# Custom resources the charts create, which the built-in admin role does not cover. Bound per
+# namespace below, so it grants nothing cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: warptalk-deployer-crds
+rules:
+  - apiGroups: [monitoring.coreos.com]
+    resources: [servicemonitors, podmonitors, prometheusrules]
+    verbs: ["*"]
+  - apiGroups: [traefik.io]
+    resources: [middlewares]
+    verbs: ["*"]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates, certificaterequests]
+    verbs: ["*"]
+  - apiGroups: [external-secrets.io]
+    resources: [externalsecrets]
+    verbs: ["*"]
+  - apiGroups: [keda.sh]
+    resources: [scaledobjects, triggerauthentications]
+    verbs: ["*"]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters, poolers, scheduledbackups, backups]
+    verbs: ["*"]
+  - apiGroups: [barmancloud.cnpg.io]
+    resources: [objectstores]
+    verbs: ["*"]
+  - apiGroups: [rabbitmq.com]
+    resources: [rabbitmqclusters]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: warptalk-deployer-admin
+  namespace: warptalk
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - kind: ServiceAccount
+    name: warptalk-deployer
+    namespace: warptalk-deploy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: warptalk-deployer-crds
+  namespace: warptalk
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: warptalk-deployer-crds
+subjects:
+  - kind: ServiceAccount
+    name: warptalk-deployer
+    namespace: warptalk-deploy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: warptalk-deployer-admin
+  namespace: warptalk-data
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - kind: ServiceAccount
+    name: warptalk-deployer
+    namespace: warptalk-deploy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: warptalk-deployer-crds
+  namespace: warptalk-data
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: warptalk-deployer-crds
+subjects:
+  - kind: ServiceAccount
+    name: warptalk-deployer
+    namespace: warptalk-deploy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: warptalk-deployer
+  namespace: monitoring
+rules:
+  - apiGroups: [""]
+    resources: [configmaps, secrets]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: warptalk-deployer
+  namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: warptalk-deployer
+subjects:
+  - kind: ServiceAccount
+    name: warptalk-deployer
+    namespace: warptalk-deploy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: warptalk-deployer-view
+  namespace: traefik
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: warptalk-deployer
+    namespace: warptalk-deploy
+---
+# Read-only access for the Kubernetes mode of the health inspector
+# (health-inspector/inspector.py --platform k8s). Bound to the deployer so the release job can
+# attach an inspection to every deploy; bind it to a human's identity for ad-hoc triage.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: warptalk-inspector
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, events, nodes, services, persistentvolumeclaims]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters, poolers, backups]
+    verbs: [get, list, watch]
+  - apiGroups: [rabbitmq.com]
+    resources: [rabbitmqclusters]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: warptalk-deployer-inspector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: warptalk-inspector
+subjects:
+  - kind: ServiceAccount
+    name: warptalk-deployer
+    namespace: warptalk-deploy

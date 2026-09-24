@@ -1,0 +1,270 @@
+# Production Kubernetes application values for the three Vietnix VMs
+# (terraform/vietnix: App 8 vCPU / 16 GiB, Data 2 vCPU / 8 GiB, Infra 2 vCPU / 4 GiB).
+#
+# NO image references, digests or release ids live here. The k8s release job
+# (.github/workflows/release.yml, job production-k8s) passes every imageRef and global.releaseId
+# from the signed release manifest the build job produced - see scripts/deploy-k3s-release.sh.
+# A hard-coded digest in this file is exactly what the release gate exists to prevent: a deploy
+# that looks current and runs last month's images.
+#
+# The capacity arithmetic behind every request below is in deploy/k3s/README.md
+# ("Capacity plan"); change a number here and the table there together.
+
+global:
+  production: true
+  # APP_DOMAIN and API_DOMAIN, as production compose has always split them. Every callback URL
+  # compose builds from ${API_DOMAIN} is built from apiDomain here, so a cutover changes no URL
+  # registered at Google, Stripe or an MCP provider (scripts/check-k3s-compose-url-parity.sh).
+  domain: app.warptalk.io.vn
+  apiDomain: api.warptalk.io.vn
+  imageRegistry: ghcr.io/warptalk-capstoneproject
+  # Written by the release job (scripts/materialize-k8s-runtime-secrets.sh) from GHCR_PULL_TOKEN.
+  imagePullSecrets:
+    - name: warptalk-ghcr
+
+placement:
+  # Every application pod on the App VM. The Data VM carries the NoSchedule taint
+  # node.warptalk.io/role=data, and the Infra VM is the control plane; the release job labels
+  # and taints the nodes from K8S_*_NODES before it deploys (scripts/label-k8s-nodes.sh).
+  nodeSelector:
+    node.warptalk.io/role: app
+
+network:
+  # The live Calico pool (default-ipv4-ippool, 192.168.0.0/16; nodes hold 192.168.0-2.0/24).
+  # Must equal POD_CIDR in scripts/k8s-cluster-bootstrap.sh for a rebuilt cluster.
+  podCidrs:
+    - 192.168.0.0/16
+
+secret:
+  # Target: one source of truth, the GitHub `production` environment. The release job writes
+  # warptalk-runtime from K8S_RUNTIME_ENV (scripts/materialize-k8s-runtime-secrets.sh) and keeps
+  # this disabled. Until K8S_RUNTIME_ENV exists the job falls back to the ClusterSecretStore
+  # production was bootstrapped with (a `fake` provider: the values sit in the store's own spec)
+  # and turns this on with the names below.
+  externalSecret:
+    enabled: false
+    secretStoreName: warptalk-production-secret-store
+    remoteKey: warptalk/production/runtime
+    postgresRemoteKey: warptalk/production/postgres-superuser
+    redisRemoteKey: warptalk/production/redis
+    qdrantRemoteKey: warptalk/production/qdrant
+
+ingress:
+  className: traefik
+  # The two secrets production already serves (app host, API host). cert-manager takes them
+  # over in place, so a certificate is never swapped for one that does not cover its host.
+  tlsSecretName: warptalk-tls
+  apiTlsSecretName: warptalk-api-tls
+  # Served like the app host. Production compose never had a Caddy block for it, so it is left
+  # off until its DNS points at the App VM; setting it adds a separate Certificate that cannot
+  # hold the app/api certificate hostage.
+  apexDomain: ""
+  certManager:
+    enabled: true
+    clusterIssuerName: warptalk-letsencrypt
+    email: admin@warptalk.io.vn
+    server: https://acme-v02.api.letsencrypt.org/directory
+
+costObservability:
+  enabled: true
+  rates:
+    sttUsdPerMinute: "0.006"
+    translationUsdPerMinute: "0.02"
+    ttsUsdPerMinute: "0.015"
+    voiceCloneUsdPerMinute: "0.03"
+    livekitUsdPerRoomMinute: "0.004"
+  budgets:
+    sttUsd: "500"
+    translationUsd: "500"
+    ttsUsd: "500"
+    voiceCloneUsd: "300"
+    livekitUsd: "300"
+    objectStorageGb: "500"
+
+gotenberg:
+  replicas: 1
+  resources:
+    # The CPU limit stays at 1: see the load-bearing note in chart/values.yaml.
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+
+telemetry:
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 200m, memory: 384Mi}
+
+seq:
+  storageClass: local-path
+  storageSize: 10Gi
+  resources:
+    requests: {cpu: 100m, memory: 384Mi}
+    limits: {cpu: 200m, memory: 640Mi}
+
+# KEDA owns stt/translation/tts. One replica each at rest, as compose runs them; queue lag
+# scales them out to three.
+keda:
+  workers:
+    stt-worker: {min: 1, max: 3}
+    translation-worker: {min: 1, max: 3}
+    tts-worker: {min: 1, max: 3}
+
+# Requests are what the scheduler reserves, limits are the ceiling compose already runs each
+# service under (deploy/production/app.compose.yml). Memory limit is ~2x the request, CPU limit
+# 2x. HPA targets are a share of the REQUEST, so they were raised with it: at the old 30m
+# request a 75% target meant "scale out above 22 millicores", i.e. always.
+workloads:
+  frontend:
+    replicas: 2
+    cpu: 100m
+    memory: 256Mi
+    cpuLimit: 200m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
+
+  gateway:
+    replicas: 2
+    cpu: 250m
+    memory: 256Mi
+    cpuLimit: 500m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: true, min: 2, max: 4, cpu: 70}
+
+  auth-service:
+    replicas: 2
+    cpu: 100m
+    memory: 256Mi
+    cpuLimit: 200m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
+
+  translation-room-service:
+    replicas: 2
+    cpu: 150m
+    memory: 320Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
+
+  transcript-service:
+    replicas: 2
+    cpu: 150m
+    memory: 320Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
+
+  notification-service:
+    replicas: 2
+    cpu: 100m
+    memory: 192Mi
+    cpuLimit: 200m
+    memoryLimit: 384Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
+
+  meeting-service:
+    replicas: 2
+    cpu: 200m
+    memory: 384Mi
+    cpuLimit: 400m
+    memoryLimit: 768Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
+
+  workspace-service:
+    replicas: 2
+    cpu: 150m
+    memory: 320Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
+
+  billing-service:
+    replicas: 2
+    cpu: 150m
+    memory: 320Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
+
+  # One replica: the data-protection key ring sits on a node-local ReadWriteOnce volume, and
+  # pvcs.yaml refuses RWO for anything that can run two pods.
+  assistant-service:
+    replicas: 1
+    cpu: 150m
+    memory: 320Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: false}
+    persistence:
+      storageClass: local-path
+      accessMode: ReadWriteOnce
+
+  # Worker requests follow measured production usage (24h peak working set 110-280Mi, p95 CPU
+  # ~60m, 2026-09-23); limits keep compose's headroom for bursts.
+  stt-worker:
+    cpu: 150m
+    memory: 384Mi
+    cpuLimit: 600m
+    memoryLimit: 1Gi
+
+  translation-worker:
+    cpu: 150m
+    memory: 384Mi
+    cpuLimit: 300m
+    memoryLimit: 768Mi
+
+  tts-worker:
+    cpu: 150m
+    memory: 384Mi
+    cpuLimit: 500m
+    memoryLimit: 1Gi
+
+  suggestion-worker:
+    cpu: 100m
+    memory: 256Mi
+    cpuLimit: 200m
+    memoryLimit: 512Mi
+
+  embedding-worker:
+    replicas: 1
+    cpu: 150m
+    memory: 512Mi
+    cpuLimit: 300m
+    memoryLimit: 1Gi
+    autoscaling: {enabled: false}
+
+  security-worker:
+    replicas: 1
+    cpu: 100m
+    memory: 192Mi
+    cpuLimit: 200m
+    memoryLimit: 384Mi
+
+  billing-worker:
+    replicas: 1
+    cpu: 100m
+    memory: 192Mi
+    cpuLimit: 200m
+    memoryLimit: 384Mi
+
+  metrics-exporter:
+    cpu: 50m
+    memory: 96Mi
+    cpuLimit: 100m
+    memoryLimit: 192Mi
+
+  livekit-ingress-worker:
+    replicas: 1
+    cpu: 200m
+    memory: 512Mi
+    cpuLimit: 500m
+    memoryLimit: 1Gi
+    autoscaling: {enabled: true, min: 1, max: 3, cpu: 75}
+
+  assistant-worker:
+    replicas: 1
+    cpu: 150m
+    memory: 384Mi
+    cpuLimit: 300m
+    memoryLimit: 768Mi
+    autoscaling: {enabled: true, min: 1, max: 3, cpu: 80}

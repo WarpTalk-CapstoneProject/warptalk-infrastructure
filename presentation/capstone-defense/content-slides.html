@@ -1,0 +1,1064 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WarpTalk — Content Slides</title>
+<style>
+  :root{
+    --ink:#111113; --muted:#8f8c94; --faint:#aaa7af;
+    --soft-1:#f7f6f8; --soft-2:#efedf1; --soft-3:#e4e2e6;
+    --purple:#7448ff; --blue:#4565ff; --violet:#5b56ff; --line:#e6e4e9;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#d9d9dc;font-family:"Avenir Next","Helvetica Neue",Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+
+  .slide{
+    position:relative; width:1920px; height:1080px; overflow:hidden;
+    background:#fff; padding:54px 78px 42px;
+    display:flex; flex-direction:column;
+  }
+
+  /* ---------- chrome ---------- */
+  .top{height:58px; flex:0 0 58px; display:flex; justify-content:space-between; align-items:flex-start}
+  .brands{display:flex; align-items:center; gap:26px}
+  .brands img{display:block; object-fit:contain; object-position:left center}
+  .brands .wt{width:180px; height:43px}
+  .brands .fpt{width:105px; height:44px}
+  .meta{text-align:right; color:#8b8890; font-size:11px; line-height:1.35; letter-spacing:.1em; text-transform:uppercase}
+  .meta strong{display:block; color:var(--ink); font-size:12px; font-weight:680}
+
+  .heading{flex:0 0 auto; display:grid; grid-template-columns:1fr 640px; gap:80px; align-items:end; padding:34px 3px 30px}
+  .kicker{margin-bottom:13px; color:var(--muted); font-size:11px; font-weight:680; letter-spacing:.13em; text-transform:uppercase}
+  .heading h1{margin:0; font-size:68px; line-height:.9; letter-spacing:-4px; font-weight:570}
+  .summary{margin:0 0 4px; color:var(--muted); font-size:23px; line-height:1.22; letter-spacing:-.7px}
+  .summary strong{color:var(--ink); font-weight:620}
+
+  .body{flex:1 1 auto; min-height:0; display:flex; flex-direction:column}
+
+  .footer{flex:0 0 60px; height:60px; display:flex; justify-content:space-between; align-items:flex-end; padding:0 3px 3px}
+  .footer-note{color:#9a979f; font-size:11px; letter-spacing:.12em; text-transform:uppercase}
+  .page{color:#8c8992; font-size:11px; letter-spacing:.12em; text-transform:uppercase}
+  .page strong{margin-left:10px; color:var(--ink); font-size:20px; font-weight:570; letter-spacing:-.5px}
+
+
+  /* The full stop that closes a heading is set in the cover's own material — gradient, noise
+     and a light sweep. At 68px the period is barely 11px wide, so clipping a gradient to the
+     glyph would read as flat colour; it is built as a real element instead. */
+  .heading h1 .dot,.closing h2 .dot{
+    display:inline-block; position:relative; isolation:isolate; overflow:hidden;
+    width:.26em; height:.26em; margin-left:.15em; border-radius:50%; vertical-align:baseline;
+    background:
+      radial-gradient(ellipse 130% 95% at 10% 112%, rgba(149,211,255,.92), transparent 60%),
+      radial-gradient(ellipse 115% 105% at 102% -10%, rgba(119,67,255,.95), transparent 64%),
+      linear-gradient(138deg,#6576ee 0%,#4565ff 50%,#3545e7 100%)}
+  .heading h1 .dot::before,.closing h2 .dot::before{
+    content:""; position:absolute; inset:0; z-index:1; opacity:.4; mix-blend-mode:soft-light;
+    background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.9'/%3E%3C/svg%3E"); background-size:100% 100%}
+  .heading h1 .dot::after,.closing h2 .dot::after{
+    content:""; position:absolute; z-index:2; left:-22%; top:50%; width:146%; height:32%;
+    border-radius:50%; background:rgba(255,255,255,.92); filter:blur(3.2px);
+    transform:rotate(-11deg); opacity:.6}
+
+
+  /* Emphasis inside a heading's deck line, and in the two closers, takes the cover's blue-violet
+     instead of plain black. Weight is kept — the colour is added emphasis, not a replacement for it.
+     box-decoration-break:clone so a phrase that wraps gets the full gradient on each line rather
+     than one gradient stretched across the pair. Excluded on .slide.dark, where the ground is
+     already that colour and the emphasis has to stay white. */
+  .slide:not(.dark) .summary strong,
+  .closing .lead strong,
+  .qa .lead strong{
+    background:linear-gradient(108deg,#3d5bfa 0%,#4a68ff 20%,#6b7fff 38%,#4a63ff 56%,#4f57f0 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    -webkit-box-decoration-break:clone; box-decoration-break:clone}
+
+
+  /* Role capabilities as ruled rows rather than cards (option C): the description gets the full
+     slide width, so every line keeps its original wording and still sits on one line. Same
+     language as the tech-stack bands on slide 12. */
+  .caplist{flex:1; min-height:0; display:flex; flex-direction:column}
+  .caprow{flex:1; min-height:0; display:grid; grid-template-columns:104px 500px 1fr; gap:34px;
+          align-items:center; padding:0 6px; border-top:1px solid var(--line)}
+  .caprow:last-child{border-bottom:1px solid var(--line)}
+  .caprow .n{color:var(--faint); font-size:40px; line-height:1; letter-spacing:-2.5px; font-weight:390;
+             font-variant-numeric:tabular-nums}
+  .caprow h4{margin:0; font-size:34px; line-height:1.05; letter-spacing:-1.4px; font-weight:570}
+  .caprow p{margin:0; color:var(--muted); font-size:22px; line-height:1.3; letter-spacing:-.35px}
+
+
+  /* A full-page figure slide. The source diagram is 1.51 wide; the slide's content box is 2.04.
+     Keeping the usual heading band on top would leave the drawing at 1085px with 679px of dead
+     margin, so the heading moves into a left column and the figure takes the rest. */
+  .figure{flex:1; min-height:0; display:grid; grid-template-columns:380px 1fr; gap:40px; align-items:center}
+  .figure-copy .kicker{margin-bottom:15px}
+  .figure-copy h1{margin:0; font-size:54px; line-height:.92; letter-spacing:-2.8px; font-weight:570}
+  .figure-copy .summary{margin:26px 0 0; max-width:360px; font-size:19px; line-height:1.28; letter-spacing:-.4px}
+  .figure-img{min-width:0; height:100%; display:flex; align-items:center; justify-content:center}
+  .figure-img img{display:block; max-width:100%; max-height:100%; object-fit:contain}
+
+  /* ---------- shared primitives ---------- */
+  .card{position:relative; isolation:isolate; min-width:0; border-radius:22px; background:var(--soft-1); padding:30px 32px; display:flex; flex-direction:column; overflow:hidden}
+  .card .roman{color:var(--muted); font-size:11px; font-weight:680; letter-spacing:.12em; text-transform:uppercase}
+  .card .num{margin-top:auto; color:var(--faint); font-size:72px; line-height:.78; letter-spacing:-4.5px; font-weight:390}
+
+  .eyebrow{color:var(--muted); font-size:12px; font-weight:680; letter-spacing:.13em; text-transform:uppercase}
+
+  /* ---------- slide: two-panel picture/statement ---------- */
+  .duo{flex:1; display:grid; grid-template-columns:1fr 1fr; gap:26px}
+  .panel{border-radius:22px; background:var(--soft-1); padding:38px 42px 40px; display:flex; flex-direction:column}
+  .panel .stage{flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:8px 0 26px}
+  .panel h3{margin:0; font-size:37px; line-height:1.06; letter-spacing:-1.5px; font-weight:570; max-width:640px}
+  .panel p{margin:14px 0 0; max-width:640px; color:var(--muted); font-size:19px; line-height:1.32; letter-spacing:-.3px}
+  .accent.panel h3{color:#fff}
+  .accent.panel p{color:rgba(255,255,255,.74)}
+
+  /* ---------- slide: feature grid ---------- */
+  .grid-6{flex:1; display:grid; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(2,1fr); gap:18px}
+  .feat{border-radius:22px; background:var(--soft-1); padding:30px 32px 28px; display:flex; flex-direction:column; position:relative; isolation:isolate; overflow:hidden}
+  .feat .idx{color:var(--faint); font-size:56px; line-height:.8; letter-spacing:-3.5px; font-weight:390}
+  .feat h3{margin:26px 0 0; font-size:31px; line-height:1.02; letter-spacing:-1.3px; font-weight:570; max-width:400px; color:var(--violet)}
+  .feat p{margin:12px 0 0; max-width:420px; color:var(--muted); font-size:17px; line-height:1.3; letter-spacing:-.25px}
+  .feat.accent .idx{color:rgba(255,255,255,.72)}
+  .feat.accent h3{color:#fff}
+  .feat.accent p{color:rgba(255,255,255,.74)}
+
+  /* ---------- slide: tech stack ---------- */
+  /* One ruled band per layer. Bands share the slide height equally and each hugs its own
+     content, so a layer with two entries costs two entries — no box is padded out to match
+     another. Six bands on one slide instead of five split across two half-empty ones. */
+  .bands{flex:1; min-height:0; display:flex; flex-direction:column}
+  .band{flex:1; min-height:0; display:grid; grid-template-columns:330px 1fr; gap:44px; align-items:center;
+        padding:0 6px; border-top:1px solid var(--line)}
+  .band:last-child{border-bottom:1px solid var(--line)}
+  .band-label{display:flex; align-items:baseline; gap:16px}
+  .band-label .bn{flex:0 0 auto; color:var(--faint); font-size:15px; font-weight:600; letter-spacing:.06em;
+                  font-variant-numeric:tabular-nums}
+  .band-label h3{margin:0; font-size:27px; line-height:1.05; letter-spacing:-1.1px; font-weight:570}
+  .band-items{display:flex; flex-wrap:wrap; align-items:center; gap:14px 34px}
+  .tech{display:flex; align-items:center; gap:11px; min-width:0}
+  .tech svg,.tech img{flex:0 0 32px; width:32px; height:32px; display:block; border-radius:8px; object-fit:contain}
+  .tech b{flex:0 0 32px; height:32px; display:grid; place-items:center; border-radius:9px;
+          background:var(--soft-2); font-size:13px; font-weight:700; letter-spacing:.4px}
+  .tech span{font-size:18px; font-weight:560; letter-spacing:-.4px; white-space:nowrap}
+
+  /* ---------- slide: roles ---------- */
+  .roles{flex:1; display:grid; grid-template-columns:repeat(4,1fr); gap:18px}
+  .role{border-radius:22px; background:var(--soft-1); padding:32px 30px 28px; display:flex; flex-direction:column; position:relative; isolation:isolate; overflow:hidden}
+  .role .icon{display:block; margin-top:40px}
+  .role .icon svg{display:block; width:112px; height:112px}
+  .role h3{margin:34px 0 0; font-size:36px; line-height:.98; letter-spacing:-1.7px; font-weight:570;
+    background:linear-gradient(122deg,#4a67ff 0%,#5b56ff 46%,#6d46ff 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent}
+  .role p{margin:14px 0 0; color:var(--muted); font-size:17px; line-height:1.3; letter-spacing:-.25px}
+  .role .num{margin-top:auto; color:var(--faint); font-size:72px; line-height:.78; letter-spacing:-4.5px; font-weight:390}
+  .role.accent h3{color:#fff} .role.accent p{color:rgba(255,255,255,.74)} .role.accent .num{color:#fff}
+
+  /* ---------- slide: capability list ---------- */
+  .caps{flex:1; display:grid; grid-template-columns:1fr 1fr; gap:20px 26px; grid-auto-rows:1fr}
+  .cap.wide{grid-column:1 / -1}
+  .cap{display:grid; grid-template-columns:64px 1fr; gap:22px; align-items:start; align-content:center; padding:26px 30px; border-radius:20px; background:var(--soft-1)}
+  .cap .n{color:var(--faint); font-size:46px; line-height:.82; letter-spacing:-2.8px; font-weight:390}
+  .cap h4{margin:0; font-size:26px; line-height:1.06; letter-spacing:-1px; font-weight:590}
+  .cap p{margin:9px 0 0; color:var(--muted); font-size:17px; line-height:1.3; letter-spacing:-.25px}
+  .cap.accent .n{color:rgba(255,255,255,.72)} .cap.accent h4{color:#fff} .cap.accent p{color:rgba(255,255,255,.74)}
+
+  /* ---------- slide: workflow steps ---------- */
+  .flow{flex:1; display:flex; flex-direction:column; gap:16px}
+  .flow-row{flex:1; min-height:0; display:grid; gap:34px; align-items:stretch}
+  .step{position:relative; border-radius:20px; background:var(--soft-1); padding:26px 28px 24px; display:flex; flex-direction:column; min-width:0}
+  .step .n{color:var(--muted); font-size:11px; font-weight:680; letter-spacing:.13em; text-transform:uppercase}
+  .step .num{margin-top:auto; padding-top:18px; color:var(--faint); font-size:46px; line-height:.8; letter-spacing:-2.8px; font-weight:390}
+  .step h4{margin:0; font-size:27px; line-height:1.04; letter-spacing:-1.1px; font-weight:570}
+  .step p{margin:13px 0 0; color:var(--muted); font-size:17px; line-height:1.3; letter-spacing:-.2px}
+  .step.accent .n{color:rgba(255,255,255,.74)} .step.accent h4{color:#fff} .step.accent p{color:rgba(255,255,255,.74)}
+  .step .arrow{position:absolute; right:-16px; top:50%; width:16px; height:2px; background:#cfccd5; z-index:3}
+  .step .arrow::after{content:""; position:absolute; right:0; top:-3px; border-left:7px solid #cfccd5; border-top:4px solid transparent; border-bottom:4px solid transparent}
+  .flow-row .step:last-child .arrow{display:none}
+  .flow-caption{display:flex; align-items:baseline; gap:14px; padding:0 3px}
+  .flow-caption span{color:var(--muted); font-size:11px; font-weight:680; letter-spacing:.13em; text-transform:uppercase}
+  .flow-caption em{font-style:normal; color:var(--ink); font-size:20px; font-weight:560; letter-spacing:-.5px}
+
+  /* ---------- slide: outcomes ---------- */
+  .outcomes{flex:1; display:grid; grid-template-columns:repeat(4,1fr); gap:18px}
+  .out{border-radius:22px; background:var(--soft-1); padding:30px 30px 28px; display:flex; flex-direction:column; position:relative; isolation:isolate; overflow:hidden}
+  .out h3{margin:22px 0 0; font-size:30px; line-height:1.02; letter-spacing:-1.3px; font-weight:570}
+  .out ul{margin:22px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:15px}
+  .out li{position:relative; padding-left:20px; color:#3f3d45; font-size:17px; line-height:1.28; letter-spacing:-.25px}
+  .out li::before{content:""; position:absolute; left:0; top:9px; width:7px; height:7px; border-radius:50%; background:var(--purple)}
+  .out .num{margin-top:auto; padding-top:22px; color:var(--faint); font-size:62px; line-height:.78; letter-spacing:-4px; font-weight:390}
+  .out.accent h3{color:#fff}
+  .out.accent li{color:rgba(255,255,255,.86)} .out.accent li::before{background:#d7ff52}
+  .out.accent .num{color:#fff}
+
+  /* ---------- slide: closing ---------- */
+  .closing{flex:1; display:grid; grid-template-columns:1.15fr .85fr; gap:70px; align-items:center}
+  .closing h2{margin:0; font-size:150px; line-height:.84; letter-spacing:-9px; font-weight:560}
+  .closing .lead{margin:34px 0 0 5px; max-width:640px; color:var(--muted); font-size:27px; line-height:1.16; letter-spacing:-1px}
+  .closing .lead strong{color:var(--ink); font-weight:620}
+  .contact{display:grid; gap:14px}
+  .contact .row{display:grid; grid-template-columns:190px 1fr; gap:20px; align-items:baseline; padding:20px 26px; border-radius:18px; background:var(--soft-1)}
+  .contact .row span{color:var(--muted); font-size:11px; font-weight:680; letter-spacing:.13em; text-transform:uppercase}
+  .contact .row b{font-size:23px; font-weight:570; letter-spacing:-.7px}
+
+
+  /* roomy capability grid — used where the reader must take the point from the back of the room */
+  .caps.roomy{gap:22px 26px}
+  .caps.roomy .cap{grid-template-columns:74px 1fr; padding:30px 34px}
+  .caps.roomy .n{font-size:52px; letter-spacing:-3.2px}
+  .caps.roomy h4{font-size:30px; letter-spacing:-1.2px}
+  .caps.roomy p{font-size:19px; line-height:1.32; margin-top:11px}
+
+  /* achievements: two wide columns instead of four narrow ones */
+  .outcomes.two{grid-template-columns:1fr 1fr; grid-auto-rows:1fr}
+  .outcomes.two .out{padding:34px 38px 30px}
+  .outcomes.two h3{font-size:34px; letter-spacing:-1.5px; margin-top:20px}
+  .outcomes.two ul{margin-top:24px; gap:17px}
+  .outcomes.two li{font-size:20px; line-height:1.3; padding-left:24px}
+  .outcomes.two li::before{top:10px; width:8px; height:8px}
+  .outcomes.two .num{font-size:56px; padding-top:20px}
+
+  /* flow sequence: the numeral and the chevron carry the order, at a size that reads when projected */
+  .step .num{color:var(--violet); font-size:62px; letter-spacing:-4px}
+  .step.accent .num{color:#fff}
+  /* earlier cards paint above later ones so their connector is never covered */
+  .flow-row .step:nth-child(1){z-index:6}
+  .flow-row .step:nth-child(2){z-index:5}
+  .flow-row .step:nth-child(3){z-index:4}
+  .step .arrow{position:absolute; right:-40px; top:50%; width:46px; height:4px; margin-top:-2px; background:var(--violet); z-index:7}
+  .step .arrow::after{content:""; position:absolute; right:-3px; top:-9px; border-left:19px solid var(--violet); border-top:11px solid transparent; border-bottom:11px solid transparent}
+
+  /* full-bleed slide in the cover's own palette */
+  .slide.dark{background:#4b5cff; color:#f9f8fb; isolation:isolate}
+  .slide.dark .bg-grad{position:absolute; inset:-120px; z-index:-4; background:
+    radial-gradient(ellipse 760px 420px at 17% 108%, rgba(138,199,255,.72), transparent 68%),
+    radial-gradient(ellipse 680px 500px at 86% 12%, rgba(109,70,255,.74), transparent 70%),
+    radial-gradient(ellipse 720px 420px at 55% 58%, rgba(64,87,255,.76), transparent 72%),
+    linear-gradient(125deg,#6575ef 0%,#4a67ff 46%,#2f3fe8 100%)}
+  .slide.dark .bg-wave{position:absolute; z-index:-3; left:-7%; top:40%; width:118%; height:205px; border-radius:50%; background:linear-gradient(90deg,rgba(184,215,255,.05),rgba(184,222,255,.62),rgba(116,164,255,.18),rgba(93,111,255,0)); filter:blur(38px); transform:rotate(-9deg); opacity:.86}
+  .slide.dark .bg-wave.two{left:24%; top:64%; width:88%; height:170px; transform:rotate(7deg); opacity:.34}
+  .slide.dark .bg-noise{position:absolute; inset:0; z-index:-2; opacity:.31; mix-blend-mode:soft-light; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.9'/%3E%3C/svg%3E")}
+  .slide.dark .meta{color:rgba(255,255,255,.72)} .slide.dark .meta strong{color:#fff}
+  .slide.dark .kicker{color:rgba(255,255,255,.7)}
+  .slide.dark .heading h1{color:#fff}
+  .slide.dark .summary{color:rgba(255,255,255,.74)} .slide.dark .summary strong{color:#fff}
+  .slide.dark .footer-note{color:rgba(255,255,255,.5)}
+  .slide.dark .page{color:rgba(255,255,255,.6)} .slide.dark .page strong{color:#fff}
+
+  .next{flex:1; display:grid; grid-template-columns:repeat(3,1fr); grid-auto-rows:1fr; gap:20px}
+  .nx{position:relative; border-radius:22px; padding:32px 34px 30px; background:rgba(255,255,255,.13); border:1px solid rgba(255,255,255,.2); display:flex; flex-direction:column; backdrop-filter:blur(2px)}
+  .nx .n{color:rgba(255,255,255,.66); font-size:12px; font-weight:680; letter-spacing:.14em; text-transform:uppercase}
+  .nx h4{margin:22px 0 0; font-size:33px; line-height:1.02; letter-spacing:-1.4px; font-weight:570; color:#fff}
+  .nx p{margin:14px 0 0; color:rgba(255,255,255,.8); font-size:18px; line-height:1.32; letter-spacing:-.25px}
+  .nx .num{margin-top:auto; padding-top:20px; color:rgba(255,255,255,.42); font-size:52px; line-height:.8; letter-spacing:-3.2px; font-weight:390}
+
+  /* Q&A closer */
+  .qa{flex:1; display:grid; grid-template-columns:1.1fr .9fr; gap:80px; align-items:center}
+  .qa h2{margin:0; font-size:210px; line-height:.82; letter-spacing:-13px; font-weight:560;
+    background:linear-gradient(100deg,#3a58f7 0%,#4d6bff 26%,#8291ff 46%,#4a63ff 68%,#4353ea 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent}
+  .qa .lead{margin:34px 0 0 6px; max-width:620px; color:var(--muted); font-size:27px; line-height:1.16; letter-spacing:-1px}
+  .qa .lead strong{color:var(--ink); font-weight:620}
+
+  /* ---------- accent surface (declared last so it wins over component backgrounds) ---------- */
+  .accent{color:#fff; background:
+    radial-gradient(ellipse 340px 210px at 8% 106%, rgba(149,211,255,.82), transparent 66%),
+    radial-gradient(ellipse 330px 240px at 100% -6%, rgba(119,67,255,.82), transparent 70%),
+    linear-gradient(140deg,#6576ee 0%,#4565ff 55%,#3545e7 100%)}
+  .accent::before{content:""; position:absolute; inset:0; z-index:0; opacity:.3; mix-blend-mode:soft-light;
+    background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.9'/%3E%3C/svg%3E")}
+  .accent::after{content:""; position:absolute; z-index:1; left:-12%; top:46%; width:126%; height:42px; border-radius:50%; background:rgba(255,255,255,.72); filter:blur(22px); transform:rotate(-7deg); opacity:.34}
+  .accent > *{position:relative; z-index:2}
+  .accent .eyebrow{color:rgba(255,255,255,.78)}
+  .accent .num{color:#fff}
+  .accent h3,.accent h4{color:#fff}
+  /* Slide 08: same treatment as slide 15 — every card on the cover gradient, and one light arc
+     drawn once across the whole 3x2 block rather than a straight band repeated inside each card.
+     Violet titles would vanish on a violet ground, so they go solid white here. */
+  .feat.accent h3{color:#fff}
+  .grid-6 .feat.accent::after{display:none}
+  .grid-6{position:relative}
+  .grid-6::after{content:""; position:absolute; inset:-6% -4%; z-index:3; pointer-events:none; filter:blur(16px);
+    background:radial-gradient(ellipse 2600px 800px at 88% 146%,
+      rgba(255,255,255,0) 64%, rgba(255,255,255,.18) 68%, rgba(255,255,255,.46) 71.5%,
+      rgba(255,255,255,.16) 75%, rgba(255,255,255,0) 80%)}
+
+  /* Slide 15 option B: white titles (gradient-clipped text dies on a gradient ground),
+     and ONE light arc drawn across the whole row instead of a straight band repeated per card.
+     Ellipse centred off-canvas at 92% 172%, so its rim crosses the row as a curve out of the
+     bottom-left corner rising to the right — the direction the beam runs on the cover. */
+  .role.accent h3{background:none; -webkit-background-clip:border-box; background-clip:border-box; color:#fff}
+  .role.accent .icon svg circle[fill="#fff"],.role.accent .icon svg path[fill="#fff"]{fill:rgba(255,255,255,.16)}
+  .roles .role.accent::after{display:none}
+  .roles{position:relative}
+  .roles::after{content:""; position:absolute; inset:-8% -4%; z-index:3; pointer-events:none; filter:blur(11px);
+    background:radial-gradient(ellipse 1650px 980px at 92% 172%,
+      rgba(255,255,255,0) 63%, rgba(255,255,255,.30) 67%, rgba(255,255,255,.74) 70.5%,
+      rgba(255,255,255,.28) 74%, rgba(255,255,255,0) 79%)}
+
+  .accent p,.accent .note{color:rgba(255,255,255,.88)}
+  .accent .n,.accent .idx{color:rgba(255,255,255,.8)}
+  .accent li{color:rgba(255,255,255,.88)}
+  .accent li::before{background:#d7ff52}
+  .accent .chip{background:rgba(255,255,255,.15); border-color:rgba(255,255,255,.26); color:#fff}
+  .accent .chip b{background:rgba(255,255,255,.24); color:#fff}
+</style>
+</head>
+<body>
+
+<!-- =============== 05 · CONTEXT =============== -->
+<main class="slide" data-name="05-context">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Section I · Context</div><h1>Meetings went global.<br />Understanding did not<span class="dot"></span></h1></div>
+    <p class="summary">Distributed teams already meet online every day — the <strong>language gap</strong> is what still stands between a conversation and a decision.</p>
+  </section>
+
+  <section class="body">
+    <div class="duo">
+      <div class="panel">
+        <div class="stage">
+          <svg viewBox="0 0 560 300" width="100%" height="100%" fill="none">
+            <rect x="176" y="52" width="208" height="140" rx="12" stroke="#b9b6c1" stroke-width="2"/>
+            <g fill="#d8d5de">
+              <circle cx="222" cy="92" r="13"/><circle cx="268" cy="92" r="13"/><circle cx="314" cy="92" r="13"/>
+              <circle cx="222" cy="140" r="13"/><circle cx="268" cy="140" r="13"/><circle cx="314" cy="140" r="13"/>
+            </g>
+            <rect x="336" y="72" width="34" height="100" rx="6" fill="#eeecf1"/>
+            <g stroke="#c6c3ce" stroke-width="2">
+              <path d="M176 122H96v-42"/><path d="M176 122H96v58"/><path d="M384 122h80v-42"/><path d="M384 122h80v58"/>
+            </g>
+            <g stroke="#b9b6c1" stroke-width="2" fill="#fff">
+              <rect x="52" y="46" width="88" height="56" rx="9"/><rect x="52" y="152" width="88" height="56" rx="9"/>
+              <rect x="420" y="46" width="88" height="56" rx="9"/><rect x="420" y="152" width="88" height="56" rx="9"/>
+            </g>
+            <g fill="#d8d5de"><circle cx="96" cy="74" r="11"/><circle cx="96" cy="180" r="11"/><circle cx="464" cy="74" r="11"/><circle cx="464" cy="180" r="11"/></g>
+            <path d="M120 250h320" stroke="#e4e2e6" stroke-width="2"/>
+          </svg>
+        </div>
+        <h3>Global teams meet online every day.</h3>
+        <p>Video calls are now the default room. The people in them no longer share a country, a timezone, or a first language.</p>
+      </div>
+
+      <div class="panel accent">
+        <div class="stage">
+          <svg viewBox="0 0 560 300" width="100%" height="100%" fill="none">
+            <rect x="176" y="52" width="208" height="140" rx="12" stroke="rgba(255,255,255,.75)" stroke-width="2"/>
+            <g fill="rgba(255,255,255,.42)">
+              <circle cx="222" cy="92" r="13"/><circle cx="268" cy="92" r="13"/><circle cx="314" cy="92" r="13"/>
+              <circle cx="222" cy="140" r="13"/><circle cx="268" cy="140" r="13"/><circle cx="314" cy="140" r="13"/>
+            </g>
+            <g stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-dasharray="7 6">
+              <path d="M176 122H96v-42"/><path d="M176 122H96v58"/><path d="M384 122h80v-42"/><path d="M384 122h80v58"/>
+            </g>
+            <g stroke="rgba(255,255,255,.75)" stroke-width="2" fill="none">
+              <rect x="52" y="46" width="88" height="56" rx="9"/><rect x="52" y="152" width="88" height="56" rx="9"/>
+              <rect x="420" y="46" width="88" height="56" rx="9"/><rect x="420" y="152" width="88" height="56" rx="9"/>
+            </g>
+            <g stroke="#ff9d9d" stroke-width="3.4" stroke-linecap="round">
+              <path d="M150 66l20 20M170 66l-20 20"/><path d="M390 172l20 20M410 172l-20 20"/>
+            </g>
+            <g fill="rgba(255,255,255,.9)" font="680 15px Avenir Next, Arial">
+              <text x="66" y="80">A B?</text><text x="66" y="186">? ? ?</text>
+              <text x="434" y="80">? ? ?</text><text x="434" y="186">B A?</text>
+            </g>
+          </svg>
+        </div>
+        <h3>Language barriers still slow decisions down.</h3>
+        <p>Meaning is lost in the gap between what is said and what is understood — so the meeting ends without the decision it was called for.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Context <strong>05</strong></span></footer>
+</main>
+
+
+<!-- =============== 06 · PROBLEMS =============== -->
+<main class="slide" data-name="06-problems">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Section I · Problems</div><h1>Two problems, one<br />broken conversation<span class="dot"></span></h1></div>
+    <p class="summary">Teams pay twice: once for the <strong>language gap</strong>, and again for the pile of tools bolted on to close it.</p>
+  </section>
+
+  <section class="body">
+    <div class="duo">
+      <div class="panel">
+        <div class="stage">
+          <svg viewBox="0 0 560 300" width="100%" height="100%" fill="none">
+            <circle cx="76" cy="136" r="31" stroke="#b9b6c1" stroke-width="2"/>
+            <path d="M28 212a48 48 0 0 1 96 0" stroke="#b9b6c1" stroke-width="2"/>
+            <path d="M146 136c11-22 11 22 22 0s11 22 22 0 11 22 22 0" stroke="#9d9aa8" stroke-width="2.8" stroke-linecap="round"/>
+            <g stroke="#e0928f" stroke-width="4.2" stroke-linecap="round"><path d="M256 118l30 30M286 118l-30 30"/></g>
+            <g stroke="#d3d0d9" stroke-width="2.8" stroke-linecap="round"><path d="M330 136h14M356 136h6M374 136h18M404 136h6M422 136h14"/></g>
+            <circle cx="484" cy="136" r="31" stroke="#b9b6c1" stroke-width="2"/>
+            <path d="M436 212a48 48 0 0 1 96 0" stroke="#b9b6c1" stroke-width="2"/>
+            <rect x="446" y="26" width="72" height="50" rx="13" stroke="#b9b6c1" stroke-width="2"/>
+            <path d="M470 76v18l19-18" stroke="#b9b6c1" stroke-width="2" stroke-linejoin="round"/>
+            <text x="482" y="60" font-family="Avenir Next, Arial" font-size="28" font-weight="600" fill="#a9a6b1" text-anchor="middle">?</text>
+            <path d="M120 262h320" stroke="#e4e2e6" stroke-width="2"/>
+          </svg>
+        </div>
+        <h3>Language differences cause communication problems.</h3>
+        <p>Subtitles arrive late, interpreters do not scale, and the speaker's own voice — the part people actually trust — disappears entirely.</p>
+      </div>
+
+      <div class="panel">
+        <div class="stage">
+          <svg viewBox="0 0 560 300" width="100%" height="100%" fill="none">
+            <rect x="212" y="112" width="136" height="76" rx="12" fill="#efedf1" stroke="#b9b6c1" stroke-width="2"/>
+            <g stroke="#b9b6c1" stroke-width="2" fill="#fff">
+              <rect x="44" y="40" width="96" height="60" rx="9"/><rect x="44" y="122" width="96" height="60" rx="9"/><rect x="44" y="204" width="96" height="60" rx="9"/>
+              <rect x="420" y="40" width="96" height="60" rx="9"/><rect x="420" y="122" width="96" height="60" rx="9"/><rect x="420" y="204" width="96" height="60" rx="9"/>
+            </g>
+            <g stroke="#c6c3ce" stroke-width="2" stroke-dasharray="6 5">
+              <path d="M140 70h48v80h24"/><path d="M140 152h72"/><path d="M140 234h48v-84h24"/>
+              <path d="M420 70h-48v80h-24"/><path d="M420 152h-72"/><path d="M420 234h-48v-84h-24"/>
+            </g>
+            <g fill="#d8d5de">
+              <rect x="62" y="58" width="60" height="6" rx="3"/><rect x="62" y="74" width="40" height="6" rx="3"/>
+              <rect x="62" y="140" width="60" height="6" rx="3"/><rect x="62" y="156" width="40" height="6" rx="3"/>
+              <rect x="62" y="222" width="60" height="6" rx="3"/><rect x="62" y="238" width="40" height="6" rx="3"/>
+              <rect x="438" y="58" width="60" height="6" rx="3"/><rect x="438" y="74" width="40" height="6" rx="3"/>
+              <rect x="438" y="140" width="60" height="6" rx="3"/><rect x="438" y="156" width="40" height="6" rx="3"/>
+              <rect x="438" y="222" width="60" height="6" rx="3"/><rect x="438" y="238" width="40" height="6" rx="3"/>
+            </g>
+          </svg>
+        </div>
+        <h3>Multiple tools make collaboration more complicated.</h3>
+        <p>Meeting, captioning, translation, notes and storage each live in a different product — so the record of the conversation is scattered before anyone can use it.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Problems <strong>06</strong></span></footer>
+</main>
+
+
+<!-- =============== 08 · PROPOSED SOLUTION =============== -->
+<main class="slide" data-name="08-solution">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Section II · Proposed solution</div><h1>A B2B platform,<br />six key features<span class="dot"></span></h1></div>
+    <p class="summary">WarpTalk lets an organization join the system as a <strong>workspace</strong> and run multilingual meetings end to end — from live speech to a searchable record.</p>
+  </section>
+
+  <section class="body">
+    <div class="grid-6">
+      <article class="feat accent">
+        <span class="idx">1</span>
+        <h3>Real-time Multilingual Translation Meeting</h3>
+        <p>Everyone speaks their own language; everyone hears the room in theirs, live.</p>
+      </article>
+      <article class="feat accent">
+        <span class="idx">2</span>
+        <h3>Voice Cloning</h3>
+        <p>The translation is delivered in the speaker's own voice, with consent and a safe fallback.</p>
+      </article>
+      <article class="feat accent">
+        <span class="idx">3</span>
+        <h3>Live Transcript &amp; WarpBot Assistant</h3>
+        <p>The conversation is transcribed as it happens and answerable by an in-product AI assistant.</p>
+      </article>
+      <article class="feat accent">
+        <span class="idx">4</span>
+        <h3>Google Meet Integration</h3>
+        <p>Teams keep the meeting platform they already use — WarpTalk joins it as a bridge.</p>
+      </article>
+      <article class="feat accent">
+        <span class="idx">5</span>
+        <h3>AI Summaries &amp; Suggestions</h3>
+        <p>Overview, decisions and action items are generated the moment the meeting ends.</p>
+      </article>
+      <article class="feat accent">
+        <span class="idx">6</span>
+        <h3>Workspace Collaboration &amp; AI Credits</h3>
+        <p>Subscription plans, shared AI credits and usage tracking make it operable by an organization.</p>
+      </article>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Solution <strong>08</strong></span></footer>
+</main>
+
+
+<!-- =============== 10 · SYSTEM ARCHITECTURE =============== -->
+<main class="slide" data-name="10-architecture">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 &middot; 2026</div>
+  </header>
+
+  <section class="body">
+    <div class="figure">
+      <div class="figure-copy">
+        <div class="kicker">Section III &middot; System architecture</div>
+        <h1>How the<br />pieces fit<span class="dot"></span></h1>
+        <p class="summary">One gateway in front, <strong>a database per service</strong> behind, and two AI pipelines that reach the services only through the stream.</p>
+      </div>
+      <div class="figure-img">
+        <img src="assets/warptalk-architecture-sdd.png" alt="WarpTalk system architecture" />
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk &middot; GSU26SE16</span><span class="page">Architecture <strong>10</strong></span></footer>
+</main>
+
+
+<!-- =============== 12 · TECH STACK =============== -->
+<main class="slide" data-name="12-tech-stack">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 &middot; 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Section IV &middot; Tech stack</div><h1>Six layers,<br />one system<span class="dot"></span></h1></div>
+    <p class="summary">A .NET core platform and a Python AI tier over two databases &mdash; plus the parts we <strong>deliberately did not build</strong>.</p>
+  </section>
+
+  <section class="body">
+    <div class="bands">
+      <div class="band">
+        <div class="band-label"><span class="bn">01</span><h3>Backend &amp; AI</h3></div>
+        <div class="band-items">
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#512BD4" aria-hidden="true"><path d="M24 8.77h-2.468v7.565h-1.425V8.77h-2.462V7.53H24zm-6.852 7.565h-4.821V7.53h4.63v1.24h-3.205v2.494h2.953v1.234h-2.953v2.604h3.396zm-6.708 0H8.882L4.78 9.863a2.896 2.896 0 0 1-.258-.51h-.036c.032.189.048.592.048 1.21v5.772H3.157V7.53h1.659l3.965 6.32c.167.261.275.442.323.54h.024c-.04-.233-.06-.629-.06-1.185V7.529h1.372zm-8.703-.693a.868.829 0 0 1-.869.829.868.829 0 0 1-.868-.83.868.829 0 0 1 .868-.828.868.829 0 0 1 .869.829Z"/></svg><span>.NET Core</span></div>
+          <div class="tech"><svg viewBox="0 0 256 255" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid"> <defs> <linearGradient x1="12.9593594%" y1="12.0393928%" x2="79.6388325%" y2="78.2008538%" id="python-linearGradient-1"> <stop stop-color="#387EB8" offset="0%"></stop> <stop stop-color="#366994" offset="100%"></stop> </linearGradient> <linearGradient x1="19.127525%" y1="20.5791813%" x2="90.7415328%" y2="88.4290372%" id="python-linearGradient-2"> <stop stop-color="#FFE052" offset="0%"></stop> <stop stop-color="#FFC331" offset="100%"></stop> </linearGradient> </defs> <g> <path d="M126.915866,0.0722755491 C62.0835831,0.0722801733 66.1321288,28.1874648 66.1321288,28.1874648 L66.2044043,57.3145115 L128.072276,57.3145115 L128.072276,66.0598532 L41.6307171,66.0598532 C41.6307171,66.0598532 0.144551098,61.3549438 0.144551098,126.771315 C0.144546474,192.187673 36.3546019,189.867871 36.3546019,189.867871 L57.9649915,189.867871 L57.9649915,159.51214 C57.9649915,159.51214 56.8001363,123.302089 93.5968379,123.302089 L154.95878,123.302089 C154.95878,123.302089 189.434218,123.859386 189.434218,89.9830604 L189.434218,33.9695088 C189.434218,33.9695041 194.668541,0.0722755491 126.915866,0.0722755491 L126.915866,0.0722755491 L126.915866,0.0722755491 Z M92.8018069,19.6589497 C98.9572068,19.6589452 103.932242,24.6339846 103.932242,30.7893845 C103.932246,36.9447844 98.9572068,41.9198193 92.8018069,41.9198193 C86.646407,41.9198239 81.6713721,36.9447844 81.6713721,30.7893845 C81.6713674,24.6339846 86.646407,19.6589497 92.8018069,19.6589497 L92.8018069,19.6589497 L92.8018069,19.6589497 Z" fill="url(#python-linearGradient-1)"></path> <path d="M128.757101,254.126271 C193.589403,254.126271 189.540839,226.011081 189.540839,226.011081 L189.468564,196.884035 L127.600692,196.884035 L127.600692,188.138693 L214.042251,188.138693 C214.042251,188.138693 255.528417,192.843589 255.528417,127.427208 C255.52844,62.0108566 219.318366,64.3306589 219.318366,64.3306589 L197.707976,64.3306589 L197.707976,94.6863832 C197.707976,94.6863832 198.87285,130.896434 162.07613,130.896434 L100.714182,130.896434 C100.714182,130.896434 66.238745,130.339138 66.238745,164.215486 L66.238745,220.229038 C66.238745,220.229038 61.0044225,254.126271 128.757101,254.126271 L128.757101,254.126271 L128.757101,254.126271 Z M162.87116,234.539597 C156.715759,234.539597 151.740726,229.564564 151.740726,223.409162 C151.740726,217.253759 156.715759,212.278727 162.87116,212.278727 C169.026563,212.278727 174.001595,217.253759 174.001595,223.409162 C174.001618,229.564564 169.026563,234.539597 162.87116,234.539597 L162.87116,234.539597 L162.87116,234.539597 Z" fill="url(#python-linearGradient-2)"></path> </g> </svg><span>Python</span></div>
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#009688" aria-hidden="true"><path d="M12 .0387C5.3729.0384.0003 5.3931 0 11.9988c-.001 6.6066 5.372 11.9628 12 11.9625 6.628.0003 12.001-5.3559 12-11.9625-.0003-6.6057-5.3729-11.9604-12-11.96m-.829 5.4153h7.55l-7.5805 5.3284h5.1828L5.279 18.5436q2.9466-6.5444 5.892-13.0896"/></svg><span>FastAPI</span></div>
+          <div class="tech"><svg viewBox="0 0 256 220" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid"> <g> <path d="M245.969687,168.943256 C232.308259,176.064479 161.536048,205.163388 146.468577,213.017633 C131.402107,220.873879 123.031844,220.797876 111.129473,215.107699 C99.2271007,209.417521 23.9127473,178.99557 10.3463234,172.511368 C3.56511141,169.270267 0,166.535181 0,163.9511 L0,138.075292 C0,138.075292 98.0490639,116.729625 113.878559,111.051447 C129.707053,105.372269 135.199225,105.167264 148.669646,110.101418 C162.141067,115.036572 242.686583,129.569026 256,134.445178 C256,134.445178 255.993999,157.5559 255.993999,159.954975 C255.996,162.513055 252.923904,165.319143 245.969687,168.943256" fill="#912626"></path> <path d="M245.964922,143.220067 C232.303935,150.33806 161.534003,179.438032 146.467017,187.292024 C131.401031,195.149018 123.031039,195.072017 111.12905,189.382023 C99.2260618,183.696028 23.9151336,153.269057 10.3491466,146.788063 C-3.21684053,140.303069 -3.50184026,135.840074 9.82514705,130.622079 C23.1511343,125.402084 98.0490629,96.0171117 113.880047,90.3381172 C129.708033,84.6611226 135.199028,84.4541228 148.669014,89.3901181 C162.140002,94.3241134 232.487935,122.325087 245.799922,127.200082 C259.11491,132.081078 259.625908,136.099073 245.964922,143.220067" fill="#C6302B"></path> <path d="M245.969687,127.074354 C232.308259,134.195577 161.536048,163.294486 146.468577,171.151732 C131.402107,179.004977 123.031844,178.928975 111.129473,173.238797 C99.2261007,167.551619 23.9127473,137.126668 10.3463234,130.642465 C3.56511141,127.401364 0,124.669279 0,122.085199 L0,96.2063895 C0,96.2063895 98.0490639,74.8617226 113.878559,69.182545 C129.707053,63.5043676 135.199225,63.2983612 148.669646,68.2325154 C162.141067,73.1676697 242.686583,87.6971237 256,92.5742761 C256,92.5742761 255.993999,115.684998 255.993999,118.087073 C255.996,120.644153 252.923904,123.450241 245.969687,127.074354" fill="#912626"></path> <path d="M245.964922,101.351164 C232.303935,108.471157 161.534003,137.569129 146.467017,145.426122 C131.401031,153.280114 123.031039,153.203114 111.12905,147.51312 C99.2260618,141.827125 23.9151336,111.401154 10.3491466,104.91916 C-3.21684053,98.4361664 -3.50184026,93.9721706 9.82514705,88.7521756 C23.1511343,83.5351806 98.0490629,54.1482087 113.880047,48.4702141 C129.708033,42.7922195 135.199028,42.5862197 148.669014,47.521215 C162.140002,52.4552102 232.487935,80.4541835 245.799922,85.3311789 C259.11491,90.2101742 259.625908,94.2301704 245.964922,101.350163 L245.964922,101.351164" fill="#C6302B"></path> <path d="M245.969687,83.6525661 C232.308259,90.7737887 161.536048,119.873698 146.468577,127.730944 C131.402107,135.585189 123.031844,135.508187 111.129473,129.818008 C99.2261007,124.130831 23.9127473,93.7048802 10.3463234,87.2226777 C3.56511141,83.9805764 0,81.2474909 0,78.6654102 L0,52.7856015 C0,52.7856015 98.0490639,31.4419345 113.878559,25.7637571 C129.707053,20.0845797 135.199225,19.8795733 148.669646,24.8137275 C162.141067,29.7488817 242.686583,44.2783357 256,49.1554881 C256,49.1554881 255.993999,72.2662103 255.993999,74.6672853 C255.996,77.2223652 252.923904,80.0284528 245.969687,83.6525661" fill="#912626"></path> <path d="M245.964922,57.929387 C232.303935,65.0493802 161.534003,94.1493524 146.467017,102.004345 C131.401031,109.858338 123.031039,109.781338 111.12905,104.093343 C99.2270617,98.4053484 23.9151336,67.9813773 10.3491466,61.4983836 C-3.21684053,55.0153898 -3.50184026,50.550394 9.82514705,45.331399 C23.1511343,40.113404 98.0490629,10.729432 113.880047,5.04943744 C129.708033,-0.629557148 135.199028,-0.833556953 148.669014,4.10143834 C162.140002,9.03643363 232.487935,37.0354069 245.799922,41.9124022 C259.11491,46.7883976 259.625908,50.8093938 245.964922,57.929387" fill="#C6302B"></path> <path d="M159.282977,32.7570853 L137.273922,35.0422326 L132.346419,46.8976124 L124.387597,33.667969 L98.973147,31.383814 L117.936992,24.5452403 L112.247442,14.0472558 L130.001736,20.9910078 L146.739969,15.5108217 L142.21631,26.3660155 L159.282977,32.7570853" fill="#FFFFFF"></path> <path d="M131.03169,90.2747287 L89.9546047,73.2378295 L148.815752,64.2034109 L131.03169,90.2747287" fill="#FFFFFF"></path> <path d="M74.0816124,39.3466047 C91.4568682,39.3466047 105.541829,44.8069457 105.541829,51.5413333 C105.541829,58.2767132 91.4568682,63.736062 74.0816124,63.736062 C56.7073488,63.736062 42.6213953,58.2767132 42.6213953,51.5413333 C42.6213953,44.8069457 56.7073488,39.3466047 74.0816124,39.3466047" fill="#FFFFFF"></path> <path d="M185.29476,35.9977674 L220.130605,49.7642171 L185.324527,63.5167752 L185.29476,35.9977674" fill="#621B1C"></path> <path d="M146.754853,51.2426667 L185.29476,35.9977674 L185.324527,63.5167752 L181.546047,64.9952248 L146.754853,51.2426667" fill="#9A2928"></path> </g> </svg><span>Redis</span></div>
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#FF6600" aria-hidden="true"><path d="M23.035 9.601h-7.677a.956.956 0 01-.962-.962V.962a.956.956 0 00-.962-.956H10.56a.956.956 0 00-.962.956V8.64a.956.956 0 01-.962.962H5.762a.956.956 0 01-.961-.962V.962A.956.956 0 003.839 0H.959a.956.956 0 00-.956.962v22.076A.956.956 0 00.965 24h22.07a.956.956 0 00.962-.962V10.58a.956.956 0 00-.962-.98zm-3.86 8.152a1.437 1.437 0 01-1.437 1.443h-1.924a1.437 1.437 0 01-1.436-1.443v-1.917a1.437 1.437 0 011.436-1.443h1.924a1.437 1.437 0 011.437 1.443z"/></svg><span>RabbitMQ</span></div>
+          <div class="tech"><svg id="a7e39c7a-0f50-4fda-b0dc-8e20d54e1945" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><radialGradient id="bb4c4c3f-f7a9-416e-87c4-f79d59529ddb" cx="9" cy="9" r="8.5" gradientUnits="userSpaceOnUse"><stop offset="0.18" stop-color="#5ea0ef" /><stop offset="1" stop-color="#0078d4" /></radialGradient><clipPath id="bf38dd48-418e-4b19-93f3-eac77c97feef"><path id="a2f8fbdd-34b1-4cd6-8ce3-9f41841a5fd9" d="M14.21,15.72A8.5,8.5,0,0,1,3.79,2.28l.09-.06a8.5,8.5,0,0,1,10.33,13.5" fill="none" /></clipPath></defs><title>Icon-web-52</title><path id="a9e07728-1645-4b38-9a48-dd4b9b350c00" d="M14.21,15.72A8.5,8.5,0,0,1,3.79,2.28l.09-.06a8.5,8.5,0,0,1,10.33,13.5" fill="url(#bb4c4c3f-f7a9-416e-87c4-f79d59529ddb)" /><g clip-path="url(#bf38dd48-418e-4b19-93f3-eac77c97feef)"><path d="M4.13,7.05a.28.28,0,0,0,.2.48h6.12A1.55,1.55,0,0,1,11.6,8a1.61,1.61,0,0,1,.43.92,1.43,1.43,0,0,1-.36,1.15,1.41,1.41,0,0,1-1.12.54H8.44a.08.08,0,0,0-.09.06L7.81,12c-.12.29-.25.59-.37.89a.08.08,0,0,0,0,.09L9,14.48l2.59,2.59.46.49,2.14-1.19L13.72,16l-1.43-1.44L10.74,13l-.07,0,0,0,.52-.07A3.84,3.84,0,0,0,14,10.65a3.85,3.85,0,0,0,0-3.08,3.93,3.93,0,0,0-.73-1.12,3.67,3.67,0,0,0-1.24-.89,4,4,0,0,0-1.66-.34h-3V4.05A.14.14,0,0,0,7.18,4Z" fill="#f2f2f2" /></g></svg><span>SignalR</span></div>
+          <div class="tech"><img src="data:image/png;base64,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" alt="" /><span>YARP</span></div>
+        </div>
+      </div>
+      <div class="band">
+        <div class="band-label"><span class="bn">02</span><h3>Frontend</h3></div>
+        <div class="band-items">
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#61DAFB" aria-hidden="true"><path d="M14.23 12.004a2.236 2.236 0 0 1-2.235 2.236 2.236 2.236 0 0 1-2.236-2.236 2.236 2.236 0 0 1 2.235-2.236 2.236 2.236 0 0 1 2.236 2.236zm2.648-10.69c-1.346 0-3.107.96-4.888 2.622-1.78-1.653-3.542-2.602-4.887-2.602-.41 0-.783.093-1.106.278-1.375.793-1.683 3.264-.973 6.365C1.98 8.917 0 10.42 0 12.004c0 1.59 1.99 3.097 5.043 4.03-.704 3.113-.39 5.588.988 6.38.32.187.69.275 1.102.275 1.345 0 3.107-.96 4.888-2.624 1.78 1.654 3.542 2.603 4.887 2.603.41 0 .783-.09 1.106-.275 1.374-.792 1.683-3.263.973-6.365C22.02 15.096 24 13.59 24 12.004c0-1.59-1.99-3.097-5.043-4.032.704-3.11.39-5.587-.988-6.38-.318-.184-.688-.277-1.092-.278zm-.005 1.09v.006c.225 0 .406.044.558.127.666.382.955 1.835.73 3.704-.054.46-.142.945-.25 1.44-.96-.236-2.006-.417-3.107-.534-.66-.905-1.345-1.727-2.035-2.447 1.592-1.48 3.087-2.292 4.105-2.295zm-9.77.02c1.012 0 2.514.808 4.11 2.28-.686.72-1.37 1.537-2.02 2.442-1.107.117-2.154.298-3.113.538-.112-.49-.195-.964-.254-1.42-.23-1.868.054-3.32.714-3.707.19-.09.4-.127.563-.132zm4.882 3.05c.455.468.91.992 1.36 1.564-.44-.02-.89-.034-1.345-.034-.46 0-.915.01-1.36.034.44-.572.895-1.096 1.345-1.565zM12 8.1c.74 0 1.477.034 2.202.093.406.582.802 1.203 1.183 1.86.372.64.71 1.29 1.018 1.946-.308.655-.646 1.31-1.013 1.95-.38.66-.773 1.288-1.18 1.87-.728.063-1.466.098-2.21.098-.74 0-1.477-.035-2.202-.093-.406-.582-.802-1.204-1.183-1.86-.372-.64-.71-1.29-1.018-1.946.303-.657.646-1.313 1.013-1.954.38-.66.773-1.286 1.18-1.868.728-.064 1.466-.098 2.21-.098zm-3.635.254c-.24.377-.48.763-.704 1.16-.225.39-.435.782-.635 1.174-.265-.656-.49-1.31-.676-1.947.64-.15 1.315-.283 2.015-.386zm7.26 0c.695.103 1.365.23 2.006.387-.18.632-.405 1.282-.66 1.933-.2-.39-.41-.783-.64-1.174-.225-.392-.465-.774-.705-1.146zm3.063.675c.484.15.944.317 1.375.498 1.732.74 2.852 1.708 2.852 2.476-.005.768-1.125 1.74-2.857 2.475-.42.18-.88.342-1.355.493-.28-.958-.646-1.956-1.1-2.98.45-1.017.81-2.01 1.085-2.964zm-13.395.004c.278.96.645 1.957 1.1 2.98-.45 1.017-.812 2.01-1.086 2.964-.484-.15-.944-.318-1.37-.5-1.732-.737-2.852-1.706-2.852-2.474 0-.768 1.12-1.742 2.852-2.476.42-.18.88-.342 1.356-.494zm11.678 4.28c.265.657.49 1.312.676 1.948-.64.157-1.316.29-2.016.39.24-.375.48-.762.705-1.158.225-.39.435-.788.636-1.18zm-9.945.02c.2.392.41.783.64 1.175.23.39.465.772.705 1.143-.695-.102-1.365-.23-2.006-.386.18-.63.406-1.282.66-1.933zM17.92 16.32c.112.493.2.968.254 1.423.23 1.868-.054 3.32-.714 3.708-.147.09-.338.128-.563.128-1.012 0-2.514-.807-4.11-2.28.686-.72 1.37-1.536 2.02-2.44 1.107-.118 2.154-.3 3.113-.54zm-11.83.01c.96.234 2.006.415 3.107.532.66.905 1.345 1.727 2.035 2.446-1.595 1.483-3.092 2.295-4.11 2.295-.22-.005-.406-.05-.553-.132-.666-.38-.955-1.834-.73-3.703.054-.46.142-.944.25-1.438zm4.56.64c.44.02.89.034 1.345.034.46 0 .915-.01 1.36-.034-.44.572-.895 1.095-1.345 1.565-.455-.47-.91-.993-1.36-1.565z"/></svg><span>ReactJS</span></div>
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#000000" aria-hidden="true"><path d="M18.665 21.978C16.758 23.255 14.465 24 12 24 5.377 24 0 18.623 0 12S5.377 0 12 0s12 5.377 12 12c0 3.583-1.574 6.801-4.067 9.001L9.219 7.2H7.2v9.596h1.615V9.251l9.85 12.727Zm-3.332-8.533 1.6 2.061V7.2h-1.6v6.245Z"/></svg><span>Next.js</span></div>
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#47848F" aria-hidden="true"><path d="M12.0111 0c-.85 0-1.5392.6891-1.5392 1.5392 0 .8501.6891 1.5393 1.5392 1.5393.595 0 1.11-.338 1.3662-.832 2.2208 1.2675 3.847 5.4728 3.847 10.3623 0 2.0715-.2891 4.056-.825 5.7685a.3215.3215 0 0 0 .2107.403.322.322 0 0 0 .4033-.2111c.5558-1.7763.8542-3.8251.8542-5.9604 0-5.1927-1.7717-9.686-4.3206-11.0027.001-.0223.0035-.0443.0035-.0669 0-.85-.6891-1.5392-1.5393-1.5392zm0 .6432a.896.896 0 1 1 0 1.792.896.896 0 1 1 0-1.792zm-5.486 4.3052c-2.067.0074-3.6473.6646-4.3885 1.9485-.7375 1.2774-.5267 2.971.5113 4.7813a.3217.3217 0 0 0 .558-.32C2.271 9.7274 2.089 8.266 2.6938 7.2185c.821-1.422 3.033-1.9552 5.9321-1.4271a.3216.3216 0 0 0 .1153-.6329c-.784-.1428-1.5271-.2125-2.216-.21zm11.0522.0176a.3216.3216 0 0 0-.0084.6432c1.8337.0239 3.1556.5956 3.7502 1.6256.8192 1.419.1798 3.5947-1.7182 5.837a.322.322 0 0 0 .0377.4535.3215.3215 0 0 0 .4532-.0377c2.0535-2.426 2.7708-4.8661 1.7845-6.5744-.7257-1.257-2.26-1.9207-4.299-1.9472zm-2.6984.2924a.3225.3225 0 0 0-.0647.0072c-1.8568.3979-3.8333 1.1755-5.7314 2.2714-4.5699 2.6384-7.5924 6.4948-7.3601 9.3717-.4726.2628-.7928.7664-.7928 1.3455 0 .85.6892 1.5392 1.5393 1.5392.85 0 1.5392-.6891 1.5392-1.5392 0-.8501-.6891-1.5393-1.5392-1.5393-.038 0-.0754.003-.1128.0057-.1002-2.5597 2.7434-6.1412 7.048-8.6265 1.8413-1.063 3.7551-1.8163 5.5445-2.1997a.3217.3217 0 0 0-.07-.636zm-2.8787 6.2364a1.1192 1.1192 0 0 0-.2243.0255c-.6012.1301-.983.7225-.8533 1.3238.1302.6012.7226.9832 1.3238.8533.6012-.1302.9832-.7226.8533-1.3238-.1139-.526-.5816-.8844-1.0995-.8788zM4.532 13.341a.321.321 0 0 0-.2318.0835.3214.3214 0 0 0-.0214.4542c1.2682 1.3936 2.9157 2.701 4.7946 3.7857 4.4146 2.5489 9.1056 3.2849 11.5608 1.8392a1.53 1.53 0 0 0 .8966.2899c.8501 0 1.5392-.6891 1.5392-1.5392 0-.8501-.689-1.5393-1.5392-1.5393-.85 0-1.5392.6892-1.5392 1.5393 0 .276.0737.5344.201.7584-2.2448 1.214-6.631.5002-10.7976-1.9054-1.8228-1.0524-3.418-2.3181-4.6404-3.6614a.3206.3206 0 0 0-.2226-.1049zm-2.0628 4.0172a.896.896 0 1 1 0 1.792.896.896 0 1 1 0-1.792zm19.0616 0a.896.896 0 1 1 0 1.792.891.891 0 0 1-.5864-.2194c-.0025-.004-.0039-.0083-.0066-.0123a.3195.3195 0 0 0-.0957-.0914.896.896 0 0 1 .6887-1.4689zm-14.0045 1.368a.3215.3215 0 0 0-.3207.4296C8.2793 22.154 10.036 24 12.0111 24c1.4406 0 2.7735-.9822 3.8128-2.711a.3215.3215 0 0 0-.11-.4413.3219.3219 0 0 0-.4415.11c-.934 1.5537-2.0812 2.399-3.2613 2.399-1.6407 0-3.2075-1.6465-4.2-4.4179a.3216.3216 0 0 0-.2848-.2126z"/></svg><span>ElectronJS</span></div>
+          <div class="tech"><svg viewBox="0 0 256 154" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid"> <defs> <linearGradient x1="-2.77777778%" y1="32%" x2="100%" y2="67.5555556%" id="tailwindcss-linearGradient-1"> <stop stop-color="#2298BD" offset="0%"></stop> <stop stop-color="#0ED7B5" offset="100%"></stop> </linearGradient> </defs> <g> <path d="M128,-1.0658141e-14 C93.8666667,-1.0658141e-14 72.5333333,17.0666667 64,51.2 C76.8,34.1333333 91.7333333,27.7333333 108.8,32 C118.537481,34.4343704 125.497363,41.4985481 133.201067,49.3184 C145.750756,62.0567704 160.275437,76.8 192,76.8 C226.133333,76.8 247.466667,59.7333333 256,25.6 C243.2,42.6666667 228.266667,49.0666667 211.2,44.8 C201.462519,42.3656296 194.502637,35.3014519 186.798933,27.4816 C174.249244,14.7432296 159.724563,-1.0658141e-14 128,-1.0658141e-14 Z M64,76.8 C29.8666667,76.8 8.53333333,93.8666667 0,128 C12.8,110.933333 27.7333333,104.533333 44.8,108.8 C54.5374815,111.23437 61.497363,118.298548 69.2010667,126.1184 C81.7507556,138.85677 96.275437,153.6 128,153.6 C162.133333,153.6 183.466667,136.533333 192,102.4 C179.2,119.466667 164.266667,125.866667 147.2,121.6 C137.462519,119.16563 130.502637,112.101452 122.798933,104.2816 C110.249244,91.5432296 95.724563,76.8 64,76.8 Z" fill="url(#tailwindcss-linearGradient-1)"></path> </g> </svg><span>TailwindCSS</span></div>
+        </div>
+      </div>
+      <div class="band">
+        <div class="band-label"><span class="bn">03</span><h3>Database</h3></div>
+        <div class="band-items">
+          <div class="tech"><svg viewBox="0 0 256 264" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid"> <g> <path d="M255.007926,158.085617 C253.473109,153.437413 249.452194,150.199279 244.251788,149.42182 C241.799982,149.055852 238.991667,149.211935 235.668988,149.897164 C229.877358,151.092028 225.580342,151.546679 222.44449,151.635363 C234.280794,131.650217 243.905921,108.859714 249.446873,87.4065589 C258.406282,52.7182633 253.61855,36.9154365 248.023797,29.7669469 C233.217182,10.8477783 211.614448,0.683454965 185.55152,0.371879908 C171.649478,0.202198614 159.443658,2.94725173 153.077358,4.92075751 C147.149155,3.87547344 140.774577,3.29134411 134.08606,3.18315012 C121.550337,2.9833164 110.473164,5.71595381 101.008259,11.332582 C95.7670577,9.56127483 87.3580785,7.06335335 77.6460416,5.46882217 C54.8035104,1.71868822 36.3939769,4.64110855 22.9282587,14.153903 C6.62230023,25.6721293 -0.937090069,45.6838799 0.461154734,73.6339954 C0.904572748,82.5082679 5.86908083,109.507695 13.6850624,135.114199 C18.1771824,149.831538 22.9672794,162.053912 27.9223279,171.443732 C34.9490254,184.758688 42.4676212,192.600092 50.9085266,195.415501 C55.6400924,196.992296 64.2358984,198.09552 73.2774873,190.566873 C74.4232794,191.953885 75.9515935,193.33321 77.9812656,194.613801 C80.5578199,196.239076 83.7090439,197.566965 86.8555381,198.353885 C98.1969885,201.189395 108.820102,200.479926 117.882975,196.506309 C117.93855,198.117986 117.981709,199.658125 118.018365,200.987788 C118.07867,203.145164 118.137792,205.259972 118.217016,207.237617 C118.753848,220.612286 119.663741,231.011326 122.359723,238.286928 C122.507529,238.687778 122.706771,239.29733 122.917247,239.943538 C124.261691,244.062005 126.511298,250.955677 132.232573,256.355326 C138.158411,261.947714 145.325229,263.663446 151.888998,263.662855 C155.180933,263.662855 158.322106,263.231261 161.076619,262.640628 C170.897441,260.536462 182.050291,257.329663 190.118134,245.84218 C197.745515,234.981986 201.453672,218.625182 202.124711,192.851363 C202.211621,192.122975 202.292028,191.427104 202.369478,190.763751 C202.421506,190.316194 202.474716,189.858587 202.528517,189.402162 L204.325838,189.560018 L204.788767,189.591353 C214.791095,190.047187 227.021155,187.925875 234.532065,184.437062 C240.467363,181.68255 259.485857,171.642383 255.007926,158.085617" fill="#000000"></path> <path d="M237.905589,160.722476 C208.165838,166.857016 206.121386,156.78788 206.121386,156.78788 C237.521885,110.194697 250.64824,51.0516028 239.320388,36.5766651 C208.417109,-2.90823095 154.921977,15.7655797 154.029229,16.2503834 L153.741894,16.3018199 C147.866309,15.0821247 141.290716,14.3555104 133.900416,14.2349007 C120.443566,14.0143741 110.236083,17.7627344 102.490457,23.636545 C102.490457,23.636545 7.06039723,-15.6768961 11.4987159,73.0806097 C12.4429007,91.9631224 38.5625866,215.954032 69.7171363,178.502947 C81.1041109,164.808425 92.1061986,153.229303 92.1061986,153.229303 C97.5708822,156.859418 104.112776,158.711132 110.970975,158.046005 L111.503667,157.593718 C111.338125,159.294079 111.413801,160.957192 111.717099,162.925968 C103.691233,171.893062 106.049626,173.467492 90.0055797,176.770069 C73.7711594,180.115806 83.308194,186.072388 89.5349654,187.629081 C97.0837136,189.516859 114.54788,192.190965 126.34812,175.672166 L125.877506,177.556988 C129.022226,180.075603 131.230448,193.940397 130.860342,206.508637 C130.490236,219.077469 130.243104,227.706383 132.720924,234.446337 C135.198744,241.186291 137.668286,256.351187 158.759612,251.831871 C176.383409,248.055132 185.516046,238.268009 186.786587,221.94254 C187.688203,210.336222 189.728517,212.051954 189.857404,201.675381 L191.493912,196.762901 C193.381099,181.029838 191.793663,175.95418 202.651492,178.314938 L205.290125,178.546697 C213.2817,178.9103 223.741044,177.261376 229.879723,174.408129 C243.098309,168.273589 250.93794,158.031224 237.904406,160.722476 L237.905589,160.722476" fill="#336791"></path> <path d="M108.076342,81.5250624 C105.396915,81.152 102.969349,81.4972748 101.741376,82.426679 C101.050236,82.9499122 100.836804,83.5559169 100.779455,83.973321 C100.625145,85.0783187 101.399649,86.2997875 101.874993,86.9300323 C103.220619,88.7137552 105.18703,89.9399538 107.133339,90.2101432 C107.415353,90.249164 107.695594,90.2680831 107.974651,90.2680831 C111.220471,90.2680831 114.170679,87.7411917 114.430818,85.8758799 C114.755991,83.5399538 111.36473,81.9826697 108.076342,81.5250624" fill="#FFFFFF"></path> <path d="M196.860453,81.5989654 L196.859861,81.5989654 C196.604453,79.7679446 193.345626,79.2458938 190.253524,79.6757136 C187.166152,80.1061247 184.171603,81.4996397 184.421691,83.3347991 C184.622707,84.7620139 187.19867,87.198448 190.249386,87.1978568 C190.506568,87.1978568 190.766707,87.1807113 191.028619,87.1440554 C193.064794,86.8620416 194.558818,85.5690346 195.268286,84.8235012 C196.349635,83.688351 196.974559,82.4219492 196.860453,81.5989654" fill="#FFFFFF"></path> <path d="M247.802088,160.025423 C246.66812,156.596323 243.018494,155.492508 236.954309,156.745312 C218.949173,160.461155 212.501284,157.886965 210.38352,156.327908 C224.378975,135.007187 235.89188,109.236323 242.102688,85.1906513 C245.04521,73.8007206 246.670485,63.2231316 246.802919,54.601903 C246.949543,45.1375889 245.338457,38.1842032 242.014005,33.9362587 C228.611547,16.8108637 208.942115,7.62501617 185.131751,7.37256351 C168.763122,7.18869284 154.93321,11.3781062 152.252009,12.5558245 C146.60582,11.1516674 140.450587,10.2896628 133.750245,10.1796952 C121.461654,9.98104388 110.840314,12.9229746 102.045857,18.9191686 C98.2259584,17.4978661 88.3536998,14.10897 76.2814965,12.1644342 C55.4089238,8.80332564 38.8233164,11.3497275 26.9870115,19.7350577 C12.8638522,29.740933 6.34383372,47.626642 7.60727945,72.8943741 C8.03236952,81.3961755 12.8756767,107.547788 20.5202032,132.593219 C30.5822448,165.556915 41.5192979,184.218309 53.0280647,188.056536 C54.374873,188.505866 55.9286097,188.820397 57.6407945,188.820397 C61.8390762,188.820397 66.9856813,186.927889 72.3409885,180.490051 C81.2359538,169.788896 89.5408776,160.821801 92.6022356,157.563566 C97.1262818,159.992314 102.09552,161.347991 107.179455,161.483972 C107.188323,161.616998 107.201921,161.750023 107.213746,161.882457 C106.193885,163.092102 105.357303,164.152166 104.644286,165.05733 C101.122365,169.528166 100.389247,170.458753 89.0519353,172.793497 C85.8273995,173.458624 77.2611547,175.224018 77.1364065,181.227898 C76.9998337,187.787529 87.2605266,190.542633 88.4299677,190.834697 C92.5040924,191.854559 96.4286374,192.357691 100.171677,192.357691 C109.275344,192.357099 117.285838,189.365506 123.688203,183.576831 C123.490734,206.962697 124.466254,230.006836 127.273977,237.028212 C129.573247,242.775501 135.191649,256.822984 152.93842,256.821801 C155.54158,256.821801 158.408425,256.519095 161.561423,255.843326 C180.082106,251.872074 188.124527,243.686577 191.236139,225.640055 C192.901025,215.995418 195.758411,192.963695 197.101672,180.610069 C199.937774,181.49454 203.589173,181.899529 207.536185,181.898938 C215.768388,181.898938 225.266993,180.150097 231.224166,177.384942 C237.91564,174.277469 249.991982,166.650679 247.802088,160.025423 L247.802088,160.025423 Z M203.696185,76.5445912 C203.634697,80.1918522 203.132748,83.5027067 202.600647,86.9590023 C202.028342,90.6760277 201.435935,94.5189838 201.286947,99.1843326 C201.139732,103.724342 201.706716,108.444674 202.255372,113.008924 C203.363326,122.228471 204.500249,131.720573 200.098587,141.086744 C199.41454,139.871778 198.754143,138.546254 198.14873,137.078245 C197.601848,135.752129 196.414079,133.621949 194.769885,130.673515 C188.370476,119.197857 173.385312,92.3243603 181.056443,81.3583372 C183.340933,78.0935982 189.139658,74.7384018 203.696185,76.5445912 L203.696185,76.5445912 Z M186.052286,14.7581339 C207.386014,15.2293395 224.261321,23.2102725 236.209958,38.4780416 C245.373931,50.1890069 235.282919,103.476028 206.069949,149.446651 C205.781432,149.080092 205.487594,148.709986 205.183704,148.33042 C205.062503,148.178476 204.938938,148.024166 204.814189,147.868083 C212.362938,135.400942 210.886651,123.066236 209.572952,112.129774 C209.033164,107.641792 208.523529,103.402716 208.653007,99.4214134 C208.787215,95.2000739 209.34533,91.5811917 209.884527,88.0811455 C210.548471,83.7675751 211.223058,79.3050162 211.036822,74.0437136 C211.17576,73.4921016 211.231926,72.8399815 211.159206,72.0660693 C210.683861,67.0205635 204.924157,51.9224758 193.18363,38.2551501 C186.762346,30.7808961 177.396767,22.4156674 164.609774,16.7736166 C170.109931,15.6337367 177.631483,14.5707159 186.052286,14.7581339 L186.052286,14.7581339 Z M66.6741062,175.777995 C60.7742818,182.871501 56.6995658,181.512277 55.3598522,181.065903 C46.6292471,178.153533 36.499806,159.702023 27.568776,130.441755 C19.8408868,105.123769 15.3245266,79.6650716 14.9674273,72.5260416 C13.8387806,49.9483788 19.3117413,34.2129515 31.2349561,25.7572656 C50.6389284,11.9965266 82.5413764,20.2328684 95.3602956,24.4104573 C95.1758337,24.591963 94.9842771,24.7622356 94.8015889,24.9466975 C73.7664296,46.1911501 74.2654226,82.4875751 74.3168591,84.7058476 C74.3150855,85.56194 74.3866236,86.7739492 74.485358,88.4412009 C74.8471871,94.5455889 75.5205912,105.907732 73.7214965,118.775132 C72.0489238,130.732046 75.7346143,142.435326 83.8320185,150.883917 C84.6703741,151.758337 85.5453857,152.579547 86.4493672,153.352277 C82.8446744,157.212379 75.0115473,165.74788 66.6741062,175.777995 L66.6741062,175.777995 Z M89.1530346,145.78461 C82.6265127,138.975483 79.6627067,129.503483 81.020157,119.795584 C82.920351,106.202753 82.2185681,94.3646744 81.8419584,88.0048776 C81.7893395,87.1150855 81.7426328,86.335261 81.7148453,85.7197968 C84.7880277,82.9954365 99.0288406,75.3645081 109.184296,77.6915658 C113.819492,78.7534042 116.642587,81.9087667 117.816758,87.3373857 C123.893358,115.440037 118.621413,127.153367 114.385293,136.565654 C113.512055,138.504868 112.687298,140.337663 111.982559,142.234309 L111.436859,143.699954 C110.054577,147.406337 108.768665,150.851991 107.971695,154.124416 C101.034273,154.103132 94.2848591,151.139917 89.1530346,145.78461 L89.1530346,145.78461 Z M90.2178291,183.685025 C88.1922956,183.178938 86.3701432,182.299788 85.3012102,181.570808 C86.1939584,181.150448 87.7831686,180.579326 90.5388637,180.011751 C103.876286,177.265515 105.93552,175.328074 110.433552,169.61685 C111.465238,168.30788 112.634088,166.823316 114.252859,165.015353 C114.25345,165.014171 114.254042,165.01358 114.254633,165.012988 C116.666236,162.31346 117.768868,162.771067 119.768979,163.600554 C121.390115,164.271594 122.968684,166.303039 123.608979,168.539048 C123.911686,169.594975 124.252231,171.599815 123.138956,173.158873 C113.742633,186.31479 100.051067,186.1457 90.2178291,183.685025 L90.2178291,183.685025 Z M160.016554,248.637487 C143.700545,252.133395 137.923695,243.80837 134.116804,234.291436 C131.659677,228.146845 130.452397,200.440314 131.309081,169.84388 C131.320314,169.436527 131.262374,169.043363 131.150042,168.673848 C131.05249,167.96024 130.902319,167.238356 130.694208,166.511741 C129.419529,162.059824 126.315012,158.335704 122.5903,156.792018 C121.110467,156.178919 118.393792,155.05382 115.129644,155.888628 C115.826106,153.0206 117.033386,149.782467 118.341764,146.275326 L118.891012,144.79963 C119.509432,143.136517 120.284527,141.413691 121.105145,139.590356 C125.538143,129.741746 131.609423,116.25297 125.020231,85.7795104 C122.551871,74.3659307 114.310208,68.7924619 101.815871,70.0866513 C94.3250624,70.861746 87.472776,73.8840831 84.0549099,75.6169607 C83.3200185,75.9894319 82.6477968,76.3488961 82.0199169,76.6994919 C82.9735612,65.1990023 86.578254,43.707418 100.060527,30.1098568 C108.54873,21.548933 119.854115,17.3210901 133.628453,17.5487113 C160.768591,17.9933118 178.172453,31.9213672 187.994457,43.5276859 C196.457829,53.5294226 201.040998,63.6038799 202.870245,69.0372286 C189.115418,67.6389838 179.76048,70.3544758 175.017681,77.1340416 C164.700822,91.8815335 180.662097,120.506236 188.333229,134.262836 C189.739751,136.784406 190.954125,138.963067 191.336055,139.888924 C193.833977,145.943058 197.067972,149.984665 199.429321,152.935464 C200.152979,153.839446 200.855353,154.716231 201.389229,155.481866 C197.223464,156.683233 189.740342,159.457848 190.422023,173.328554 C189.872185,180.289035 185.960647,212.874938 183.974134,224.387843 C181.351464,239.597672 175.754346,245.263372 160.016554,248.637487 L160.016554,248.637487 Z M228.120831,170.700564 C223.861062,172.678208 216.732083,174.161589 209.959612,174.479667 C202.479446,174.830263 198.671963,173.641903 197.776259,172.91115 C197.355307,164.267455 200.573339,163.364065 203.978199,162.408055 C204.513256,162.257293 205.035307,162.111261 205.53903,161.935076 C205.852379,162.189894 206.195289,162.442938 206.570716,162.690661 C212.582873,166.658956 223.306494,167.087002 238.444785,163.962383 C238.50036,163.950559 238.555935,163.939917 238.610919,163.928684 C236.569423,165.837746 233.075289,168.400111 228.120831,170.700564 L228.120831,170.700564 Z" fill="#FFFFFF"></path> </g> </svg><span>PostgreSQL</span></div>
+          <div class="tech"><svg viewBox="0 0 256 296" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid"> <defs> <linearGradient x1="81.5619048%" y1="44.8421053%" x2="-18.0857143%" y2="44.8421053%" id="qdrant-linearGradient-1"> <stop stop-color="#FF3364" offset="0%"></stop> <stop stop-color="#C91540" stop-opacity="0" offset="100%"></stop> </linearGradient> </defs> <g> <polygon fill="#24386C" points="201.31705 271.722427 195.422715 109.21267 184.747781 66.3682368 256 73.9112545 256 270.492509 212.474757 295.612626"></polygon> <polygon fill="#7589BE" points="255.995151 73.8998107 212.469908 99.037384 122.649634 79.3346471 17.5160008 122.140288 1.1370484e-14 73.8998107 63.9883137 36.9499053 127.996024 0 191.986277 36.9499053"></polygon> <polyline fill="#B2BFE8" points="0.00310340412 73.8998107 43.5283462 99.037384 68.7590217 174.073816 153.949405 242.236209 128.001067 295.599243 63.9933568 258.647398 0.00310340412 221.697492 0.00310340412 73.897871"></polyline> <polyline fill="#24386C" points="156.856906 202.807459 128.001067 245.347371 128.001067 295.603122 168.946605 271.978458 190.043934 240.475027"></polyline> <polygon fill="#7589BE" points="128.018523 195.107138 87.0555287 124.184656 95.8787005 100.678309 129.42068 84.4156955 168.946411 124.185819"></polygon> <polyline fill="#B2BFE8" points="87.0555287 124.178837 128.001067 147.803501 128.001067 195.091621 90.131778 196.720927 67.2247763 167.471344 87.0555287 124.178856"></polyline> <polygon fill="#24386C" points="128.001067 147.799621 168.946605 124.176897 196.813234 170.576668 163.090869 198.439418 128.001067 195.089293"></polygon> <path d="M168.946605,271.974579 L212.471848,295.601182 L212.471848,99.0393237 L170.226759,74.658205 L128.001067,50.2770864 L85.7559782,74.658205 L43.5302858,99.0393237 L43.5302858,196.581255 L85.7559782,220.962373 L128.001067,245.345432 L168.946605,221.699432 L168.946605,271.974579 Z M168.946605,171.443681 L128.001067,195.087742 L87.0555287,171.443681 L87.0555287,124.174957 L128.001067,100.530897 L168.946605,124.174957 L168.946605,171.443681" fill="#DC244C"></path> <polygon fill="url(#qdrant-linearGradient-1)" points="128.018523 245.362888 128.018523 195.099379 87.2863443 171.657041 87.2863443 221.837146"></polygon> </g> </svg><span>Qdrant</span></div>
+        </div>
+      </div>
+      <div class="band">
+        <div class="band-label"><span class="bn">04</span><h3>Third-party services</h3></div>
+        <div class="band-items">
+          <div class="tech"><?xml version="1.0" encoding="UTF-8"?><svg viewBox="0 0 256 260" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid">    <title>OpenAI</title>    <g>        <path d="M239.183914,106.202783 C245.054304,88.5242096 243.02228,69.1733805 233.607599,53.0998864 C219.451678,28.4588021 190.999703,15.7836129 163.213007,21.739505 C147.554077,4.32145883 123.794909,-3.42398554 100.87901,1.41873898 C77.9631105,6.26146349 59.3690093,22.9572536 52.0959621,45.2214219 C33.8436494,48.9644867 18.0901721,60.392749 8.86672513,76.5818033 C-5.443491,101.182962 -2.19544431,132.215255 16.8986662,153.320094 C11.0060865,170.990656 13.0197283,190.343991 22.4238231,206.422991 C36.5975553,231.072344 65.0680342,243.746566 92.8695738,237.783372 C105.235639,251.708249 123.001113,259.630942 141.623968,259.52692 C170.105359,259.552169 195.337611,241.165718 204.037777,214.045661 C222.28734,210.296356 238.038489,198.869783 247.267014,182.68528 C261.404453,158.127515 258.142494,127.262775 239.183914,106.202783 L239.183914,106.202783 Z M141.623968,242.541207 C130.255682,242.559177 119.243876,238.574642 110.519381,231.286197 L112.054146,230.416496 L163.724595,200.590881 C166.340648,199.056444 167.954321,196.256818 167.970781,193.224005 L167.970781,120.373788 L189.815614,133.010026 C190.034132,133.121423 190.186235,133.330564 190.224885,133.572774 L190.224885,193.940229 C190.168603,220.758427 168.442166,242.484864 141.623968,242.541207 Z M37.1575749,197.93062 C31.456498,188.086359 29.4094818,176.546984 31.3766237,165.342426 L32.9113895,166.263285 L84.6329973,196.088901 C87.2389349,197.618207 90.4682717,197.618207 93.0742093,196.088901 L156.255402,159.663793 L156.255402,184.885111 C156.243557,185.149771 156.111725,185.394602 155.89729,185.550176 L103.561776,215.733903 C80.3054953,229.131632 50.5924954,221.165435 37.1575749,197.93062 Z M23.5493181,85.3811273 C29.2899861,75.4733097 38.3511911,67.9162648 49.1287482,64.0478825 L49.1287482,125.438515 C49.0891492,128.459425 50.6965386,131.262556 53.3237748,132.754232 L116.198014,169.025864 L94.3531808,181.662102 C94.1132325,181.789434 93.8257461,181.789434 93.5857979,181.662102 L41.3526015,151.529534 C18.1419426,138.076098 10.1817681,108.385562 23.5493181,85.125333 L23.5493181,85.3811273 Z M203.0146,127.075598 L139.935725,90.4458545 L161.7294,77.8607748 C161.969348,77.7334434 162.256834,77.7334434 162.496783,77.8607748 L214.729979,108.044502 C231.032329,117.451747 240.437294,135.426109 238.871504,154.182739 C237.305714,172.939368 225.050719,189.105572 207.414262,195.67963 L207.414262,134.288998 C207.322521,131.276867 205.650697,128.535853 203.0146,127.075598 Z M224.757116,94.3850867 L223.22235,93.4642272 L171.60306,63.3828173 C168.981293,61.8443751 165.732456,61.8443751 163.110689,63.3828173 L99.9806554,99.8079259 L99.9806554,74.5866077 C99.9533004,74.3254088 100.071095,74.0701869 100.287609,73.9215426 L152.520805,43.7889738 C168.863098,34.3743518 189.174256,35.2529043 204.642579,46.0434841 C220.110903,56.8340638 227.949269,75.5923959 224.757116,94.1804513 L224.757116,94.3850867 Z M88.0606409,139.097931 L66.2158076,126.512851 C65.9950399,126.379091 65.8450965,126.154176 65.8065367,125.898945 L65.8065367,65.684966 C65.8314495,46.8285367 76.7500605,29.6846032 93.8270852,21.6883055 C110.90411,13.6920079 131.063833,16.2835462 145.5632,28.338998 L144.028434,29.2086986 L92.3579852,59.0343142 C89.7419327,60.5687513 88.1282597,63.3683767 88.1117998,66.4011901 L88.0606409,139.097931 Z M99.9294965,113.5185 L128.06687,97.3011417 L156.255402,113.5185 L156.255402,145.953218 L128.169187,162.170577 L99.9806554,145.953218 L99.9294965,113.5185 Z" fill="#000000"></path>    </g></svg><span>OpenAI</span></div>
+          <div class="tech"><svg viewBox="0 0 416 426" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="415.632" height="425.055" fill="#309D4B"/><path d="M317.301 182.114V237.681H289.766L286.153 232.679L277.49 220.689L271.591 212.526L261.508 198.571L264.557 212.526L268.964 232.679L270.056 237.681L273.37 252.833L277.49 271.685L277.774 272.987L282.178 293.138L286.585 313.292H224.406L219.999 293.138L217.769 282.929L215.595 272.987L211.189 252.833L207.877 237.681L204.565 252.833L200.158 272.987L197.864 283.481L195.754 293.138L191.347 313.292H129.048L133.455 293.138L137.738 273.533V273.53L138.143 273.231L138.475 272.987L158.05 258.489L165.69 252.833L177.957 243.747L186.149 237.681H98.332V182.114H157.722L158.05 180.617L159.887 172.221L164.291 152.067L168.698 131.914L173.102 111.763H242.531L246.935 131.914L247.858 136.131L237.676 143.671L226.336 152.067L217.769 158.413L199.123 172.221L197.864 173.152L185.764 182.114H317.301Z" fill="#F9F9F8"/></svg><span>Cartesia</span></div>
+          <div class="tech"><svg viewBox="0 0 256 256" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid"> <g> <path d="M204.812286,153.603503 L204.81195,204.792256 L256,204.792336 L256,256.00019 L204.792146,256.00019 L204.79181,204.812395 L153.604432,204.812476 L153.604432,153.603503 L204.812286,153.603503 Z M256,0 L256,51.2080465 L204.812286,51.2079347 L204.812286,102.416013 L153.604432,102.416013 L153.604432,153.604622 L102.396242,153.604622 L102.396242,102.396208 L153.604432,102.396208 L153.604432,51.2079347 L204.792146,51.2080465 L204.792146,0 L256,0 Z" fill="#002CF2"></path> <polygon fill="#000000" points="51.2080801 204.792336 51.2080801 153.604622 51.2080801 102.396096 51.2080801 51.2080465 51.2080801 0 0 0 0 51.2080465 0 102.396096 0 153.604622 0 204.792336 0 256.00019 51.2080801 256.00019 102.396018 256.00019 153.604432 256.00019 153.604432 204.792336 102.396018 204.792336"></polygon> </g> </svg><span>LiveKit</span></div>
+          <div class="tech"><?xml version="1.0" encoding="UTF-8" standalone="no"?><svg viewBox="0 0 256 262" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid">	<g>		<path d="M255.878,133.451 C255.878,122.717 255.007,114.884 253.122,106.761 L130.55,106.761 L130.55,155.209 L202.497,155.209 C201.047,167.249 193.214,185.381 175.807,197.565 L175.563,199.187 L214.318,229.21 L217.003,229.478 C241.662,206.704 255.878,173.196 255.878,133.451" fill="#4285F4"></path>		<path d="M130.55,261.1 C165.798,261.1 195.389,249.495 217.003,229.478 L175.807,197.565 C164.783,205.253 149.987,210.62 130.55,210.62 C96.027,210.62 66.726,187.847 56.281,156.37 L54.75,156.5 L14.452,187.687 L13.925,189.152 C35.393,231.798 79.49,261.1 130.55,261.1" fill="#34A853"></path>		<path d="M56.281,156.37 C53.525,148.247 51.93,139.543 51.93,130.55 C51.93,121.556 53.525,112.853 56.136,104.73 L56.063,103 L15.26,71.312 L13.925,71.947 C5.077,89.644 0,109.517 0,130.55 C0,151.583 5.077,171.455 13.925,189.152 L56.281,156.37" fill="#FBBC05"></path>		<path d="M130.55,50.479 C155.064,50.479 171.6,61.068 181.029,69.917 L217.873,33.943 C195.245,12.91 165.798,0 130.55,0 C79.49,0 35.393,29.301 13.925,71.947 L56.136,104.73 C66.726,73.253 96.027,50.479 130.55,50.479" fill="#EB4335"></path>	</g></svg><span>Google</span></div>
+          <div class="tech"><svg viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg"><g clip-path="url(#stripe-clip0_159_20)"><rect width="512" height="512" fill="#533AFD"/><path fill-rule="evenodd" clip-rule="evenodd" d="M120 392L392 334.317V120L120 178.357V392Z" fill="white"/></g><defs><clipPath id="stripe-clip0_159_20"><rect width="512" height="512" rx="64" fill="white"/></clipPath></defs></svg><span>Stripe</span></div>
+          <div class="tech"><svg viewBox="0 0 256 117" version="1.1" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid"> <g> <path d="M205.519951,50.8125742 C204.661781,50.8125742 203.815314,50.8437762 202.968846,50.871078 C202.831721,50.8784556 202.696997,50.9101509 202.570968,50.9646842 C202.115855,51.1195467 201.769635,51.4935902 201.650387,51.9592502 L198.022668,64.6311918 C196.45846,70.0798536 197.039673,75.1111876 199.668794,78.8047329 C202.079471,82.2213599 206.089465,84.226093 210.957627,84.4601084 L230.63702,85.6535877 C231.222135,85.6847899 231.729236,85.9656084 232.037396,86.4297393 C232.364426,86.9319605 232.438017,87.5581091 232.236336,88.1224517 C231.912697,89.0468783 231.078269,89.6966401 230.102615,89.783962 L209.654769,90.9774413 C198.545372,91.4922754 186.593409,100.556477 182.400078,111.609811 L180.925586,115.51007 C180.796838,115.838108 180.834315,116.208105 181.026226,116.503672 C181.218139,116.79924 181.540899,116.984051 181.892978,117 L252.317508,117 C253.159095,117.003367 253.899541,116.444915 254.127466,115.634879 C255.378255,111.139455 256.008217,106.494098 256,101.827962 C256,73.6680919 233.41827,50.8437762 205.551158,50.8437762" fill="#FBAD41"></path> <path d="M174.781871,115.36186 L176.08473,110.779056 C177.652839,105.330394 177.071624,100.29906 174.446405,96.6055149 C172.027927,93.1888881 168.021834,91.184155 163.149771,90.9501394 L70.8380116,89.7566601 C70.2555718,89.7460583 69.7133301,89.4575773 69.379123,88.9805087 C69.0507868,88.4789246 68.97575,87.8527387 69.1762829,87.2877963 C69.502798,86.3573288 70.346548,85.7062594 71.3295088,85.6262859 L164.503339,84.4328067 C175.565927,83.9218728 187.517891,74.8537706 191.71122,63.8004365 L197.024071,49.7595042 C197.238085,49.1642337 197.294308,48.5220696 197.180101,47.8990807 C191.126105,20.511462 166.910115,0 137.958588,0 C111.269509,0 88.62553,17.4029556 80.5002228,41.5962621 C75.0297818,37.4367347 68.1785531,35.5201492 61.3435337,36.2373062 C48.5490029,37.5243917 38.250966,47.9458838 36.9793145,60.8791426 C36.6500607,64.1093172 36.8876784,67.3721713 37.6814534,70.5205828 C16.7733178,71.1446242 0,88.4539736 0,109.725986 C0,111.648814 0.136527005,113.54434 0.413481787,115.393062 C0.527528867,116.290245 1.29161639,116.962286 2.1961344,116.96097 L172.675455,116.96097 C173.661494,116.944738 174.519026,116.281033 174.781871,115.330658" fill="#F6821F"></path> </g> </svg><span>Cloudflare</span></div>
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#000000" aria-hidden="true"><path d="M14.679 0c4.648 0 7.413 2.765 7.413 6.434s-2.765 6.434-7.413 6.434H12.33L24 24h-8.245l-8.88-8.44c-.636-.588-.93-1.273-.93-1.86 0-.831.587-1.565 1.713-1.883l4.574-1.224c1.737-.465 2.936-1.81 2.936-3.572 0-2.153-1.761-3.4-3.939-3.4H0V0z"/></svg><span>Resend</span></div>
+        </div>
+      </div>
+      <div class="band">
+        <div class="band-label"><span class="bn">05</span><h3>Infrastructure &amp; delivery</h3></div>
+        <div class="band-items">
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#181717" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span>GitHub</span></div>
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#2496ED" aria-hidden="true"><path d="M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288Z"/></svg><span>Docker</span></div>
+          <div class="tech"><svg viewBox="0 0 256 291" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid"> <g> <polygon fill="#4040B2" points="176.485057 188.994162 256.000302 143.127442 256.000302 51.2485453 176.485057 97.2122358"></polygon> <path d="M88.2425283,51.2485453 L167.757774,97.2122358 L167.757774,188.994162 L88.2425283,143.078957 M0,91.8304113 L79.5152453,137.745617 L79.5152453,45.9152057 L0,0 M88.2425283,244.994228 L167.757774,290.909434 L167.757774,199.079023 L88.2425283,153.163817" fill="#5C4EE5"></path> </g> </svg><span>Terraform</span></div>
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#FFC61C" aria-hidden="true"><path d="M21.46 2.172H2.54A2.548 2.548 0 0 0 0 4.712v14.575a2.548 2.548 0 0 0 2.54 2.54h18.92a2.548 2.548 0 0 0 2.54-2.54V4.713a2.548 2.548 0 0 0-2.54-2.54ZM10.14 16.465 5.524 19.15a1.235 1.235 0 1 1-1.242-2.137L8.9 14.33a1.235 1.235 0 1 1 1.241 2.136zm1.817-4.088h-.006a1.235 1.235 0 0 1-1.23-1.24l.023-5.32a1.236 1.236 0 0 1 1.236-1.23h.005a1.235 1.235 0 0 1 1.23 1.241l-.023 5.32a1.236 1.236 0 0 1-1.235 1.23zm8.17 6.32a1.235 1.235 0 0 1-1.688.453l-4.624-2.67a1.235 1.235 0 1 1 1.235-2.14l4.624 2.67a1.235 1.235 0 0 1 .452 1.688z"/></svg><span>K3s</span></div>
+          <div class="tech"><img src="data:image/png;base64,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" alt="" /><span>Vietnix</span></div>
+        </div>
+      </div>
+      <div class="band">
+        <div class="band-label"><span class="bn">06</span><h3>Observability</h3></div>
+        <div class="band-items">
+          <div class="tech"><svg viewBox="0 0 24 24" fill="#E6522C" aria-hidden="true"><path d="M12 0C5.373 0 0 5.372 0 12c0 6.627 5.373 12 12 12s12-5.373 12-12c0-6.628-5.373-12-12-12zm0 22.46c-1.885 0-3.414-1.26-3.414-2.814h6.828c0 1.553-1.528 2.813-3.414 2.813zm5.64-3.745H6.36v-2.046h11.28v2.046zm-.04-3.098H6.391c-.037-.043-.075-.086-.111-.13-1.155-1.401-1.427-2.133-1.69-2.879-.005-.025 1.4.287 2.395.511 0 0 .513.119 1.262.255-.72-.843-1.147-1.915-1.147-3.01 0-2.406 1.845-4.508 1.18-6.207.648.053 1.34 1.367 1.387 3.422.689-.951.977-2.69.977-3.755 0-1.103.727-2.385 1.454-2.429-.648 1.069.168 1.984.894 4.256.272.854.237 2.29.447 3.201.07-1.892.395-4.652 1.595-5.605-.529 1.2.079 2.702.494 3.424.671 1.164 1.078 2.047 1.078 3.716a4.642 4.642 0 01-1.11 2.996c.792-.149 1.34-.283 1.34-.283l2.573-.502s-.374 1.538-1.81 3.019z"/></svg><span>Prometheus</span></div>
+          <div class="tech"><svg viewBox="0 0 256 279" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid"> <defs> <linearGradient x1="49.9947839%" y1="122.450358%" x2="49.9947839%" y2="31.1390083%" id="grafana-linearGradient-1"> <stop stop-color="#FFF100" offset="0%"></stop> <stop stop-color="#F05A28" offset="100%"></stop> </linearGradient> </defs> <g> <path d="M255.5901,122.775215 C255.130268,118.100253 254.363881,112.735543 252.831107,106.757724 C251.298332,100.856543 248.999171,94.3422529 245.627068,87.5980463 C242.254965,80.8538398 237.886558,73.8797171 232.215293,67.0588719 C229.992771,64.376517 227.540332,61.7708008 224.934616,59.2417234 C228.84319,43.6840651 220.183016,30.195652 220.183016,30.195652 C205.238467,29.2759875 195.735267,34.8706134 192.209886,37.3996908 C191.596777,37.1697747 191.060306,36.8632199 190.447196,36.6333037 C187.918119,35.6370005 185.312402,34.6406972 182.553409,33.7976714 C179.871054,32.9546456 177.11206,32.1882585 174.276428,31.4985101 C171.440796,30.8087617 168.605164,30.2722907 165.692893,29.8124585 C165.156422,29.7358198 164.696589,29.659181 164.160118,29.5825423 C157.645828,8.73681302 138.945983,0 138.945983,0 C118.023614,13.258497 114.11504,31.8050649 114.11504,31.8050649 C114.11504,31.8050649 114.038402,32.1882585 113.885124,32.8780069 C112.735543,33.1845617 111.585963,33.5677553 110.436382,33.8743101 C108.826969,34.3341424 107.217556,34.9472521 105.684782,35.5603618 C104.075369,36.1734715 102.542595,36.7865811 100.933182,37.4763295 C97.7909949,38.8558263 94.6488077,40.3886005 91.5832593,42.0746522 C88.5943496,43.7607038 85.6820786,45.6000329 82.8464463,47.5160006 C82.4632527,47.3627232 82.0800592,47.2094458 82.0800592,47.2094458 C53.1106265,36.1734715 27.4366584,49.4319684 27.4366584,49.4319684 C25.0608584,80.2407301 39.0091038,99.6303239 41.7680973,103.155705 C41.0783489,105.071672 40.4652393,106.98764 39.8521296,108.903608 C37.7062457,115.877731 36.0968327,123.005131 35.1005295,130.439086 C34.9472521,131.512028 34.7939747,132.58497 34.717336,133.657911 C7.8937872,146.916408 0,173.969873 0,173.969873 C22.3018648,199.643841 48.3590265,201.253254 48.3590265,201.253254 C48.3590265,201.253254 48.4356652,201.176616 48.4356652,201.176616 C51.7311297,207.077796 55.5630653,212.672422 59.8548331,217.960493 C61.6941621,220.183016 63.5334912,222.252261 65.5260977,224.321506 C57.4023943,247.619674 66.6756783,266.932629 66.6756783,266.932629 C91.5066206,267.852294 107.830666,256.049932 111.279408,253.367578 C113.731847,254.210603 116.260924,254.976991 118.790002,255.5901 C126.453873,257.582707 134.271021,258.732287 142.08817,259.038842 C144.004137,259.115481 145.996744,259.19212 147.912712,259.115481 L148.832376,259.115481 L149.445486,259.115481 L150.671705,259.115481 L151.897925,259.038842 L151.897925,259.115481 C163.623647,275.82272 184.162822,278.19852 184.162822,278.19852 C198.800816,262.794139 199.643841,247.466397 199.643841,244.170932 C199.643841,244.170932 199.643841,244.094294 199.643841,243.941016 C199.643841,243.634461 199.643841,243.481184 199.643841,243.481184 C199.643841,243.251268 199.643841,243.021352 199.643841,242.791436 C202.70939,240.645552 205.621661,238.34639 208.380654,235.817313 C214.205196,230.529242 219.33999,224.474784 223.631758,217.960493 C224.014951,217.347384 224.398145,216.734274 224.781339,216.121164 C241.3353,217.040829 253.061023,205.851577 253.061023,205.851577 C250.302029,188.607867 240.492274,180.177609 238.423029,178.568196 C238.423029,178.568196 238.34639,178.491557 238.193113,178.414919 C238.039835,178.33828 238.039835,178.261641 238.039835,178.261641 C238.039835,178.261641 238.039835,178.261641 238.039835,178.261641 C237.963197,178.185002 237.809919,178.108364 237.656642,178.031725 C237.733281,176.958783 237.809919,175.96248 237.886558,174.889538 C238.039835,173.050209 238.039835,171.134241 238.039835,169.294912 L238.039835,167.915415 L238.039835,167.225667 L238.039835,166.842473 C238.039835,166.382641 238.039835,166.535918 238.039835,166.382641 L237.963197,165.23306 L237.886558,163.700286 C237.886558,163.163815 237.809919,162.703983 237.733281,162.244151 C237.656642,161.784318 237.656642,161.247847 237.580003,160.788015 L237.426726,159.33188 L237.19681,157.875744 C236.890255,155.959776 236.5837,154.120447 236.123868,152.204479 C234.361177,144.770525 231.448906,137.719763 227.69361,131.35875 C223.861674,124.997737 219.110074,119.403111 213.668725,114.651511 C208.304016,109.899911 202.249558,106.067976 195.965183,103.232343 C189.60417,100.396711 183.013241,98.557382 176.422312,97.7143562 C173.126847,97.2545239 169.831383,97.1012465 166.535918,97.1778852 L165.309699,97.1778852 L165.003144,97.1778852 C164.926505,97.1778852 164.543312,97.1778852 164.619951,97.1778852 L164.08348,97.1778852 L162.85726,97.2545239 C162.397428,97.2545239 161.937596,97.3311626 161.554402,97.3311626 C159.868351,97.48444 158.182299,97.7143562 156.572886,98.020911 C149.981957,99.2471304 143.774221,101.62293 138.332873,104.918395 C132.891524,108.21386 128.139924,112.275711 124.307989,116.874034 C120.476053,121.472356 117.487144,126.60715 115.417898,131.895221 C113.348653,137.183292 112.199072,142.701279 111.892518,147.98935 C111.815879,149.292208 111.815879,150.671705 111.815879,151.974563 C111.815879,152.281118 111.815879,152.664312 111.815879,152.970867 L111.892518,154.043809 C111.969156,154.656918 111.969156,155.346667 112.045795,155.959776 C112.275711,158.642131 112.812182,161.247847 113.501931,163.700286 C114.958066,168.681802 117.257227,173.203486 120.09286,177.035422 C122.928492,180.867357 126.377234,184.009544 129.979253,186.538622 C133.581273,188.991061 137.489847,190.753751 141.321783,191.903332 C145.153718,193.052912 148.985654,193.512745 152.587673,193.512745 C153.047505,193.512745 153.507338,193.512745 153.890531,193.512745 C154.120447,193.512745 154.350363,193.512745 154.580279,193.512745 C154.810196,193.512745 155.040112,193.512745 155.270028,193.436106 C155.653221,193.436106 156.036415,193.359467 156.419609,193.359467 C156.496247,193.359467 156.649525,193.359467 156.726163,193.282828 L157.109357,193.20619 C157.339273,193.20619 157.569189,193.129551 157.799105,193.129551 C158.258938,193.052912 158.642131,192.976274 159.101963,192.899635 C159.561796,192.822996 159.944989,192.746357 160.328183,192.59308 C161.171209,192.439803 161.937596,192.133248 162.703983,191.903332 C164.236757,191.366861 165.769531,190.753751 167.072389,190.064003 C168.451886,189.374254 169.678106,188.531228 170.904325,187.764841 C171.21088,187.534925 171.594073,187.305009 171.900628,186.998454 C173.126847,186.002151 173.356764,184.162822 172.36046,182.936602 C171.517435,181.863661 169.98466,181.557106 168.758441,182.246854 C168.451886,182.400131 168.145331,182.553409 167.838776,182.706686 C166.765835,183.243157 165.692893,183.70299 164.543312,184.086183 C163.393731,184.469377 162.167512,184.775932 160.941292,185.005848 C160.328183,185.082486 159.715073,185.159125 159.025325,185.235764 C158.71877,185.235764 158.412215,185.312402 158.029021,185.312402 C157.722467,185.312402 157.339273,185.312402 157.109357,185.312402 C156.802802,185.312402 156.496247,185.312402 156.189692,185.312402 C155.806499,185.312402 155.423305,185.312402 155.040112,185.235764 C155.040112,185.235764 154.810196,185.235764 154.963473,185.235764 L154.810196,185.235764 L154.580279,185.235764 C154.427002,185.235764 154.197086,185.235764 154.043809,185.159125 C153.660615,185.082486 153.35406,185.082486 152.970867,185.005848 C150.135234,184.622654 147.299602,183.779628 144.617247,182.553409 C141.858254,181.32719 139.252537,179.641138 136.876737,177.495254 C134.500937,175.34937 132.431692,172.820293 130.822279,169.908022 C129.212866,166.995751 128.063286,163.776925 127.526815,160.404822 C127.296898,158.71877 127.143621,156.95608 127.22026,155.270028 C127.22026,154.810196 127.296898,154.350363 127.296898,153.890531 C127.296898,154.043809 127.296898,153.813892 127.296898,153.813892 L127.296898,153.660615 L127.296898,153.277421 C127.296898,153.047505 127.373537,152.817589 127.373537,152.587673 C127.450176,151.668008 127.603453,150.748344 127.756731,149.828679 C129.059589,142.471363 132.738247,135.267324 138.409512,129.825976 C139.865647,128.446479 141.398421,127.22026 143.007834,126.070679 C144.617247,124.921098 146.379937,123.924795 148.219267,123.081769 C150.058596,122.238744 151.897925,121.548995 153.890531,121.012524 C155.806499,120.476053 157.799105,120.169498 159.868351,119.939582 C160.864654,119.862944 161.860957,119.786305 162.933899,119.786305 C163.240454,119.786305 163.393731,119.786305 163.623647,119.786305 L164.466673,119.786305 L165.003144,119.786305 C165.23306,119.786305 165.003144,119.786305 165.079783,119.786305 L165.309699,119.786305 L166.152725,119.862944 C168.375247,120.016221 170.521131,120.322776 172.667015,120.859247 C176.958783,121.778911 181.173912,123.388324 185.082486,125.534208 C192.899635,129.902615 199.567203,136.646821 203.629054,144.770525 C205.6983,148.832376 207.154435,153.200783 207.844183,157.722467 C207.997461,158.872047 208.150738,160.021628 208.227377,161.171209 L208.304016,162.014234 L208.380654,162.85726 C208.380654,163.163815 208.380654,163.47037 208.380654,163.700286 C208.380654,164.006841 208.380654,164.313396 208.380654,164.543312 L208.380654,165.309699 L208.380654,166.152725 C208.380654,166.689196 208.304016,167.60886 208.304016,168.145331 C208.227377,169.371551 208.0741,170.674409 207.920822,171.900628 C207.767545,173.126847 207.537629,174.353067 207.307712,175.579286 C207.077796,176.805506 206.771241,178.031725 206.464687,179.181306 C205.851577,181.557106 205.08519,183.932906 204.165525,186.308706 C202.326196,190.907028 199.873758,195.352074 196.961487,199.413925 C191.060306,207.537629 183.013241,214.128558 173.816596,218.343687 C169.218273,220.412932 164.390034,221.945706 159.408518,222.712093 C156.95608,223.171926 154.427002,223.401842 151.897925,223.47848 L151.438092,223.47848 L151.054899,223.47848 L150.211873,223.47848 L148.985654,223.47848 L148.372544,223.47848 C148.679099,223.47848 148.295905,223.47848 148.295905,223.47848 L148.065989,223.47848 C146.686492,223.47848 145.383634,223.401842 144.004137,223.248564 C138.639428,222.865371 133.351357,221.869068 128.139924,220.412932 C123.005131,218.956796 118.023614,216.887551 113.272014,214.435113 C103.845453,209.376958 95.3385561,202.479474 88.747627,194.125854 C85.4521624,189.987364 82.5398914,185.46568 80.1640914,180.790719 C77.7882914,176.115757 75.8723236,171.134241 74.4928268,166.152725 C73.11333,161.09457 72.2703042,155.959776 71.8871106,150.748344 L71.8104719,149.752041 L71.8104719,149.522125 L71.8104719,149.292208 L71.8104719,148.832376 L71.8104719,147.98935 L71.8104719,147.759434 L71.8104719,147.452879 L71.8104719,146.83977 L71.8104719,145.61355 L71.8104719,145.383634 C71.8104719,145.383634 71.8104719,145.460273 71.8104719,145.306996 L71.8104719,144.847163 C71.8104719,144.234054 71.8104719,143.544305 71.8104719,142.931195 C71.8871106,140.402118 72.1170268,137.719763 72.4235816,135.114047 C72.7301365,132.508331 73.1899687,129.825976 73.7264397,127.22026 C74.2629107,124.614544 74.8760204,122.008827 75.6424075,119.403111 C77.098543,114.268318 78.937872,109.286801 81.0837559,104.61184 C85.4521624,95.2619174 91.123427,86.9082979 97.9442723,80.2407301 C99.6303239,78.5546785 101.393014,77.0219043 103.232343,75.48913 C105.071672,74.0329945 106.98764,72.6534978 108.980247,71.3506397 C110.896214,70.0477816 112.96546,68.8982009 115.034705,67.825259 C116.031008,67.288788 117.10395,66.752317 118.176892,66.2924848 C118.713363,66.0625686 119.249834,65.8326525 119.786305,65.6027364 C120.322776,65.3728202 120.859247,65.1429041 121.395718,64.912988 C123.541602,63.9933234 125.764124,63.2269363 128.063286,62.5371879 C128.599757,62.3839105 129.212866,62.2306331 129.749337,62.000717 C130.285808,61.8474395 130.898918,61.6941621 131.435389,61.5408847 C132.58497,61.2343299 133.73455,60.927775 134.884131,60.6978589 C135.420602,60.5445815 136.033712,60.4679427 136.646821,60.3146653 C137.259931,60.1613879 137.796402,60.0847492 138.409512,59.9314718 C139.022621,59.8548331 139.559092,59.7015556 140.172202,59.6249169 L141.015228,59.4716395 L141.934892,59.3183621 C142.548002,59.2417234 143.084473,59.1650847 143.697583,59.088446 C144.387331,59.0118072 145.000441,58.9351685 145.690189,58.8585298 C146.22666,58.7818911 147.146325,58.7052524 147.682796,58.6286137 C148.065989,58.551975 148.525821,58.551975 148.909015,58.4753363 L149.752041,58.3986976 L150.135234,58.3220588 L150.595067,58.3220588 C151.284815,58.2454201 151.897925,58.2454201 152.587673,58.1687814 L153.583976,58.0921427 C153.583976,58.0921427 153.96717,58.0921427 153.660615,58.0921427 L153.890531,58.0921427 L154.350363,58.0921427 C154.886834,58.0921427 155.499944,58.015504 156.036415,58.015504 C158.258938,57.9388653 160.558099,57.9388653 162.780622,58.015504 C167.225667,58.1687814 171.594073,58.7052524 175.809202,59.4716395 C184.316099,61.0810524 192.286525,63.7634073 199.567203,67.3654267 C206.84788,70.8908074 213.285532,75.2592139 218.956796,80.010814 C219.33999,80.3173688 219.646545,80.6239237 220.029738,80.9304785 C220.336293,81.2370334 220.719487,81.5435882 221.026042,81.850143 C221.71579,82.4632527 222.3289,83.0763624 223.018648,83.6894721 C223.708397,84.3025818 224.321506,84.9156915 224.934616,85.5288012 C225.547726,86.1419108 226.160835,86.7550205 226.773945,87.4447689 C229.149745,89.9738464 231.372268,92.5029238 233.364874,95.10864 C237.350087,100.243434 240.568913,105.454866 243.09799,110.359743 C243.251268,110.666298 243.404545,110.972853 243.557823,111.279408 C243.7111,111.585963 243.864377,111.892518 244.017655,112.199072 C244.32421,112.812182 244.630765,113.425292 244.860681,114.038402 C245.167236,114.651511 245.397152,115.187982 245.703707,115.801092 C245.933623,116.414202 246.240178,116.950673 246.470094,117.563782 C247.389758,119.862944 248.309423,122.085466 248.999171,124.154711 C250.148752,127.526815 250.991778,130.515724 251.681526,133.121441 C251.911442,134.194382 252.907745,134.884131 253.980687,134.730853 C255.130268,134.654215 255.973294,133.73455 255.973294,132.58497 C256.049932,129.825976 255.973294,126.530511 255.5901,122.775215 Z" fill="url(#grafana-linearGradient-1)" fill-rule="nonzero"></path> </g> </svg><span>Grafana</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk &middot; GSU26SE16</span><span class="page">Tech stack <strong>12</strong></span></footer>
+</main>
+
+
+<!-- =============== 14 · ACTORS =============== -->
+<main class="slide" data-name="14-actors">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Section V · Functional requirements</div><h1>Four actors,<br />four surfaces<span class="dot"></span></h1></div>
+    <p class="summary">Every requirement in the system belongs to exactly one of these roles — and each role gets <strong>its own screen</strong>.</p>
+  </section>
+
+  <section class="body">
+    <div class="roles">
+      <article class="role accent">
+        <span class="eyebrow">Role I</span>
+        <span class="icon"><svg viewBox="0 0 96 96" fill="none" stroke="rgba(255,255,255,.88)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="42" r="10"/><path d="M10 72a14 14 0 0 1 28 0"/>
+              <circle cx="72" cy="42" r="10"/><path d="M58 72a14 14 0 0 1 28 0"/>
+              <circle cx="48" cy="34" r="13" fill="#fff"/><path d="M30 74a18 18 0 0 1 36 0" fill="#fff"/></svg></span>
+        <h3>Participants</h3>
+        <p>Anyone in the room. Joins, picks a language, listens and reads.</p>
+        <span class="num">01</span>
+      </article>
+      <article class="role accent">
+        <span class="eyebrow">Role II</span>
+        <span class="icon"><svg viewBox="0 0 96 96" fill="none" stroke="rgba(255,255,255,.88)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="40" cy="32" r="13"/><path d="M16 74a24 24 0 0 1 48 0"/>
+              <circle cx="73" cy="63" r="16" fill="#fff"/><path d="M69 56l11 7-11 7z" fill="#9d9aa8" stroke="none"/></svg></span>
+        <h3>Host</h3>
+        <p>Owns the meeting. Creates it, runs translation, and signs off the record.</p>
+        <span class="num">02</span>
+      </article>
+      <article class="role accent">
+        <span class="eyebrow">Role III</span>
+        <span class="icon"><svg viewBox="0 0 96 96" fill="none" stroke="rgba(255,255,255,.88)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="36" y="14" width="24" height="20" rx="5"/>
+              <path d="M48 34v10M20 62V52h56v10M48 44v18"/>
+              <rect x="8" y="62" width="24" height="20" rx="5"/>
+              <rect x="36" y="62" width="24" height="20" rx="5"/>
+              <rect x="64" y="62" width="24" height="20" rx="5"/></svg></span>
+        <h3>Workspace Owner</h3>
+        <p>Owns the organization. Buys the plan, sets policy, adds people and knowledge.</p>
+        <span class="num">03</span>
+      </article>
+      <article class="role accent">
+        <span class="eyebrow">Role IV</span>
+        <span class="icon"><svg viewBox="0 0 96 96" fill="none" stroke="rgba(255,255,255,.88)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M48 10l27 10v23c0 19-13 31-27 37-14-6-27-18-27-37V20z"/>
+              <circle cx="48" cy="45" r="9"/><path d="M48 29v7M48 54v7M32 45h7M57 45h7"/></svg></span>
+        <h3>WarpTalk Administrator</h3>
+        <p>Owns the platform. Manages every workspace, plan and audit trail.</p>
+        <span class="num">04</span>
+      </article>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Requirements <strong>14</strong></span></footer>
+</main>
+
+
+<!-- =============== 15 · PARTICIPANTS =============== -->
+<main class="slide" data-name="15-participants">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Role I of IV</div><h1>Participants</h1></div>
+    <p class="summary">The lightest role in the product: <strong>join, choose a language, be understood.</strong> Nothing else is required of them.</p>
+  </section>
+
+  <section class="body">
+    <div class="caplist">
+      <div class="caprow"><span class="n">01</span><h4>Join meetings</h4><p>Open an invite or a room code and enter — as a workspace member or an external guest.</p></div>
+      <div class="caprow"><span class="n">02</span><h4>Set device &amp; language</h4><p>Pick microphone, speaker and the language they will speak and hear before joining.</p></div>
+      <div class="caprow"><span class="n">03</span><h4>Use real-time translation</h4><p>Hear the room in their own language, in the speaker's cloned voice, with live captions.</p></div>
+      <div class="caprow"><span class="n">04</span><h4>View transcript &amp; artifacts</h4><p>Read the running transcript during the meeting and open the retained outputs after it.</p></div>
+      <div class="caprow"><span class="n">05</span><h4>Chat with WarpBot AI</h4><p>Ask the assistant about the meeting they are in, or the documents their workspace holds.</p></div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Requirements <strong>15</strong></span></footer>
+</main>
+
+
+<!-- =============== 16 · HOST =============== -->
+<main class="slide" data-name="16-host">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Role II of IV</div><h1>Host</h1></div>
+    <p class="summary">The host owns the room from creation to record: <strong>schedule, run, translate, record, publish.</strong></p>
+  </section>
+
+  <section class="body">
+    <div class="caplist">
+      <div class="caprow"><span class="n">01</span><h4>Create &amp; schedule a meeting</h4><p>Title, description, meeting type, participants, time and tags — including recurring series.</p></div>
+      <div class="caprow"><span class="n">02</span><h4>Configure the room</h4><p>Set the room's language set, seat limit, approval and mute-on-entry behaviour.</p></div>
+      <div class="caprow"><span class="n">03</span><h4>Start / stop translation</h4><p>Turn the live pipeline on and off; every run is a numbered translation session in the record.</p></div>
+      <div class="caprow"><span class="n">04</span><h4>Control the room</h4><p>Invite, approve join requests, manage participants and start or stop recording.</p></div>
+      <div class="caprow"><span class="n">05</span><h4>Edit transcript &amp; finalize</h4><p>Correct any line while the transcript is open, then lock it so downstream outputs are stable.</p></div>
+      <div class="caprow"><span class="n">06</span><h4>Publish &amp; share artifacts</h4><p>Release the transcript, AI summary and recording under the workspace's retention policy.</p></div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Requirements <strong>16</strong></span></footer>
+</main>
+
+
+<!-- =============== 17 · WORKSPACE OWNER =============== -->
+<main class="slide" data-name="17-workspace-owner">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Role III of IV</div><h1>Workspace Owner</h1></div>
+    <p class="summary">This is the role that makes WarpTalk a <strong>B2B product</strong> rather than a meeting feature: money, people, policy and knowledge.</p>
+  </section>
+
+  <section class="body">
+    <div class="caplist">
+      <div class="caprow"><span class="n">01</span><h4>Create a workspace</h4><p>Choose a plan, pay, and stand up the organization's own tenant with its slug and settings.</p></div>
+      <div class="caprow"><span class="n">02</span><h4>Billing &amp; AI credits</h4><p>Subscription, shared credit balance, usage per service and the invoice history behind it.</p></div>
+      <div class="caprow"><span class="n">03</span><h4>Members</h4><p>Invite, approve and remove people; assign workspace roles and hand over ownership.</p></div>
+      <div class="caprow"><span class="n">04</span><h4>Policies</h4><p>Language policy, membership rules, artifact retention and consent requirements.</p></div>
+      <div class="caprow"><span class="n">05</span><h4>Documents</h4><p>Upload the organization's material so the assistant answers from its own knowledge.</p></div>
+      <div class="caprow"><span class="n">06</span><h4>Glossary</h4><p>Pin the terms that must never be mistranslated — names, products, internal vocabulary.</p></div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Requirements <strong>17</strong></span></footer>
+</main>
+
+
+<!-- =============== 18 · ADMINISTRATOR =============== -->
+<main class="slide" data-name="18-administrator">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Role IV of IV</div><h1>WarpTalk Administrator</h1></div>
+    <p class="summary">The platform side of the product — <strong>one portal</strong> across every workspace on the system.</p>
+  </section>
+
+  <section class="body">
+    <div class="caplist">
+      <div class="caprow"><span class="n">01</span><h4>Workspaces</h4><p>Every tenant on the platform: status, plan, owner, members and lifecycle actions.</p></div>
+      <div class="caprow"><span class="n">02</span><h4>Users</h4><p>Accounts across all workspaces, with suspension and role management.</p></div>
+      <div class="caprow"><span class="n">03</span><h4>Plans &amp; billing</h4><p>Define subscription plans, entitlements, credit economics and settle usage charges.</p></div>
+      <div class="caprow"><span class="n">04</span><h4>Platform policies</h4><p>System-wide defaults that a workspace inherits when it has not overridden them.</p></div>
+      <div class="caprow"><span class="n">05</span><h4>Dashboard &amp; audit</h4><p>Platform usage, revenue and an audit trail of every privileged action taken.</p></div>
+      <div class="caprow"><span class="n">06</span><h4>Glossary &amp; notices</h4><p>Platform-level terminology and the notices pushed to every workspace.</p></div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Requirements <strong>18</strong></span></footer>
+</main>
+
+
+<!-- =============== 20 · SETUP WORKSPACE =============== -->
+<main class="slide" data-name="20-flow-setup">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Workflow 01 of 04</div><h1>Setup workspace</h1></div>
+    <p class="summary">From a payment to a workspace that <strong>already knows the organization</strong> — its people, its words, its voices.</p>
+  </section>
+
+  <section class="body">
+    <div class="flow">
+      <div class="flow-row" style="grid-template-columns:repeat(3,1fr)">
+        <article class="step accent"><h4>Select plan</h4><p>Pick the subscription tier and the credit allowance that comes with it.</p><span class="num">01</span><span class="arrow"></span></article>
+        <article class="step"><h4>Payment</h4><p>Checkout through the payment provider in the workspace's own currency.</p><span class="num">02</span><span class="arrow"></span></article>
+        <article class="step"><h4>Verify payment</h4><p>The webhook confirms the charge and activates the subscription.</p><span class="num">03</span></article>
+      </div>
+      <div class="flow-row" style="grid-template-columns:repeat(3,1fr)">
+        <article class="step"><h4>Create workspace</h4><p>The tenant is provisioned with its slug, owner and entitlement snapshot.</p><span class="num">04</span><span class="arrow"></span></article>
+        <article class="step"><h4>Configure workspace</h4><p>Language policy, membership rules and retention are set once, up front.</p><span class="num">05</span><span class="arrow"></span></article>
+        <article class="step"><h4>Invite members</h4><p>Send invitations, approve join requests and assign workspace roles.</p><span class="num">06</span></article>
+      </div>
+      <div class="flow-row" style="grid-template-columns:repeat(3,1fr)">
+        <article class="step"><h4>Setup glossary</h4><p>Pin the terms translation must preserve exactly, across every language.</p><span class="num">07</span><span class="arrow"></span></article>
+        <article class="step"><h4>Upload documents</h4><p>Index the organization's material so the assistant can answer from it.</p><span class="num">08</span><span class="arrow"></span></article>
+        <article class="step accent"><h4>Upload voice</h4><p>Record a consented voice sample so translation can speak in the member's own voice.</p><span class="num">09</span></article>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Workflow <strong>20</strong></span></footer>
+</main>
+
+
+<!-- =============== 21 · REALTIME TRANSLATION MEETING =============== -->
+<main class="slide" data-name="21-flow-meeting">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Workflow 02 of 04</div><h1>Realtime translation<br />meeting</h1></div>
+    <p class="summary">What the host does — from opening a room to watching the <strong>credits it consumed</strong>.</p>
+  </section>
+
+  <section class="body">
+    <div class="flow">
+      <div class="flow-row" style="grid-template-columns:repeat(3,1fr)">
+        <article class="step accent"><h4>Open meeting</h4><p>The host opens a scheduled room, or creates one on the spot from the meetings list.</p><span class="num">01</span><span class="arrow"></span></article>
+        <article class="step"><h4>Start &amp; invite</h4><p>Start the room and bring people in by invitation, room code or external link.</p><span class="num">02</span><span class="arrow"></span></article>
+        <article class="step"><h4>Set device &amp; language</h4><p>Each participant declares the language they speak and the one they want to hear.</p><span class="num">03</span></article>
+      </div>
+      <div class="flow-row" style="grid-template-columns:repeat(3,1fr)">
+        <article class="step"><h4>Start translation</h4><p>The host turns the pipeline on; audio routes are built for every language pair in the room.</p><span class="num">04</span><span class="arrow"></span></article>
+        <article class="step"><h4>Speak &amp; be heard</h4><p>Live captions and translated audio play back in each listener's own language.</p><span class="num">05</span><span class="arrow"></span></article>
+        <article class="step accent"><h4>Credit dashboard</h4><p>Usage is metered per service and settled against the workspace's shared credit balance.</p><span class="num">06</span></article>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Workflow <strong>21</strong></span></footer>
+</main>
+
+
+<!-- =============== 22 · MULTILINGUAL LIVE MEETING =============== -->
+<main class="slide" data-name="22-flow-pipeline">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Workflow 03 of 04</div><h1>Multilingual live<br />meeting</h1></div>
+    <p class="summary">The same six seconds of speech, seen from inside the pipeline: <strong>capture → text → meaning → voice.</strong></p>
+  </section>
+
+  <section class="body">
+    <div class="flow">
+      <div class="flow-row" style="grid-template-columns:repeat(3,1fr)">
+        <article class="step accent"><h4>Capture</h4><p>The speaker's microphone is published into the room and chunked for the pipeline.</p><span class="num">01</span><span class="arrow"></span></article>
+        <article class="step"><h4>Speech to text</h4><p>Each chunk is transcribed with its speaker, timestamp and detected source language.</p><span class="num">02</span><span class="arrow"></span></article>
+        <article class="step"><h4>Translation</h4><p>The text is translated into every target language in the room, honouring the glossary.</p><span class="num">03</span></article>
+      </div>
+      <div class="flow-row" style="grid-template-columns:repeat(3,1fr)">
+        <article class="step"><h4>Voice synthesis</h4><p>Speech is generated in the target language using the speaker's cloned voice, or a fallback.</p><span class="num">04</span><span class="arrow"></span></article>
+        <article class="step"><h4>Routed playback</h4><p>Each listener receives only the track for the language they asked to hear.</p><span class="num">05</span><span class="arrow"></span></article>
+        <article class="step accent"><h4>Persisted</h4><p>Every segment and translation is written to the transcript as it happens, not afterwards.</p><span class="num">06</span></article>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Workflow <strong>22</strong></span></footer>
+</main>
+
+
+<!-- =============== 23 · REVIEW TRANSCRIPT & SUMMARY =============== -->
+<main class="slide" data-name="23-flow-record">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Workflow 04 of 04</div><h1>Review transcript<br />&amp; summary</h1></div>
+    <p class="summary">The meeting does not end when the call does — it becomes a <strong>record you can question</strong>.</p>
+  </section>
+
+  <section class="body">
+    <div class="flow">
+      <div class="flow-row" style="grid-template-columns:repeat(3,1fr)">
+        <article class="step accent"><h4>Open the meeting record</h4><p>The ended room carries its own record section: transcript, summary and artifacts.</p><span class="num">01</span><span class="arrow"></span></article>
+        <article class="step"><h4>Read the transcript</h4><p>Every line carries a speaker and a timestamp, grouped by translation session.</p><span class="num">02</span><span class="arrow"></span></article>
+        <article class="step"><h4>Correct &amp; finalize</h4><p>The host fixes any line the model misheard, then locks the transcript.</p><span class="num">03</span></article>
+      </div>
+      <div class="flow-row" style="grid-template-columns:repeat(3,1fr)">
+        <article class="step"><h4>AI summary</h4><p>Overview, decisions and action items with owners — regenerated after a correction.</p><span class="num">04</span><span class="arrow"></span></article>
+        <article class="step"><h4>Share artifacts</h4><p>Publish transcript, summary and recording under the workspace retention policy.</p><span class="num">05</span><span class="arrow"></span></article>
+        <article class="step accent"><h4>Ask WarpBot</h4><p>Question the meeting in natural language — the assistant answers from its own transcript.</p><span class="num">06</span></article>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Workflow <strong>23</strong></span></footer>
+</main>
+
+
+<!-- =============== 25 · LIMITATIONS =============== -->
+<main class="slide" data-name="25-limitations">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 &middot; 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Section VII &middot; Limitations</div><h1>What this release<br />does not do</h1></div>
+    <p class="summary">Stated before the results, so the results are read for what they are: <strong>a scoped system</strong>, not an unbounded claim.</p>
+  </section>
+
+  <section class="body">
+    <div class="caps roomy">
+      <article class="cap"><span class="n">01</span><div><h4>A latency floor we cannot remove</h4><p>Translated speech lands a few seconds behind the speaker: the audio has to be buffered before it can be transcribed at all.</p></div></article>
+      <article class="cap"><span class="n">02</span><div><h4>A validated language set, not every language</h4><p>The pipeline is proven on the languages we tested end to end. The picker is deliberately not a promise about the rest.</p></div></article>
+      <article class="cap"><span class="n">03</span><div><h4>No translation-quality score</h4><p>We show no confidence badge, because the only number we have measures speech recognition, not translation. Showing it would be a false signal.</p></div></article>
+      <article class="cap"><span class="n">04</span><div><h4>One mixed recording, not one track per speaker</h4><p>The room is captured as a single composite, so a recording cannot be cleanly re-transcribed afterwards.</p></div></article>
+      <article class="cap"><span class="n">05</span><div><h4>Voice cloning needs consent and a clean sample</h4><p>A clip below the quality bar is refused and the meeting falls back to a default voice rather than a bad imitation.</p></div></article>
+      <article class="cap"><span class="n">06</span><div><h4>Web and desktop only</h4><p>Participants join from a browser or the desktop app. There is no mobile client in this release.</p></div></article>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk &middot; GSU26SE16</span><span class="page">Limitations <strong>25</strong></span></footer>
+</main>
+
+
+<!-- =============== 26 · WHAT WE ACHIEVED =============== -->
+<main class="slide" data-name="26-achievements">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 &middot; 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Section VII &middot; Achievements</div><h1>What we achieved</h1></div>
+    <p class="summary">Four kinds of outcome &mdash; <strong>a product, a pipeline, an organization model, and the evidence</strong> that all three work.</p>
+  </section>
+
+  <section class="body">
+    <div class="outcomes two">
+      <article class="out">
+        <span class="eyebrow">Outcome 01</span>
+        <h3>Product</h3>
+        <ul>
+          <li>Built a B2B workspace-based AI meeting platform</li>
+          <li>Supported multilingual meetings with voice and transcript</li>
+          <li>Turned meetings into searchable records, summaries and action items</li>
+        </ul>
+        <span class="num">01</span>
+      </article>
+      <article class="out">
+        <span class="eyebrow">Outcome 02</span>
+        <h3>AI &amp; realtime</h3>
+        <ul>
+          <li>Designed the speech &rarr; text &rarr; translation &rarr; voice pipeline</li>
+          <li>Added voice-clone translation with consent and fallback</li>
+          <li>Connected realtime audio, transcript stream and AI assistant flow</li>
+        </ul>
+        <span class="num">02</span>
+      </article>
+      <article class="out">
+        <span class="eyebrow">Outcome 03</span>
+        <h3>Enterprise</h3>
+        <ul>
+          <li>Added workspace roles, language policy and governance</li>
+          <li>Added subscription, shared AI credits, usage tracking and audit</li>
+          <li>Prepared admin and billing flows for organization-level operation</li>
+        </ul>
+        <span class="num">03</span>
+      </article>
+      <article class="out">
+        <span class="eyebrow">Outcome 04</span>
+        <h3>Engineering evidence</h3>
+        <ul>
+          <li>Requirements, design, test documents and user guides</li>
+          <li>End-to-end demo flow across workspace, voice, meeting, record and admin</li>
+          <li>Unit, integration, system and UAT testing evidence</li>
+        </ul>
+        <span class="num">04</span>
+      </article>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk &middot; GSU26SE16</span><span class="page">Achievements <strong>26</strong></span></footer>
+</main>
+
+
+<!-- =============== 27 · FUTURE WORK =============== -->
+<main class="slide dark" data-name="27-future-work">
+  <div class="bg-grad"></div><div class="bg-wave"></div><div class="bg-wave two"></div><div class="bg-noise"></div>
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo-light.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo-light.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 &middot; 2026</div>
+  </header>
+
+  <section class="heading">
+    <div><div class="kicker">Section VII &middot; Future work</div><h1>Where this<br />goes next</h1></div>
+    <p class="summary">Every limit on the last slide is a <strong>roadmap item</strong>, and we already know which one we would take first.</p>
+  </section>
+
+  <section class="body">
+    <div class="next">
+      <article class="nx"><span class="n">Next 01</span><h4>Sub-second delivery</h4><p>Shrink the buffer so a translated sentence lands while the speaker is still in the room, not after the point has passed.</p><span class="num">01</span></article>
+      <article class="nx"><span class="n">Next 02</span><h4>Every language we can prove</h4><p>Grow the validated set language by language, each one earning its place with measured quality.</p><span class="num">02</span></article>
+      <article class="nx"><span class="n">Next 03</span><h4>A track for every voice</h4><p>Record each speaker separately, so any meeting can be re-transcribed, re-translated and re-dubbed later.</p><span class="num">03</span></article>
+      <article class="nx"><span class="n">Next 04</span><h4>Minutes a human can sign</h4><p>A standard-format record with a named recorder on top of the AI summary &mdash; something an organization can file.</p><span class="num">04</span></article>
+      <article class="nx"><span class="n">Next 05</span><h4>Wherever the meeting already is</h4><p>Extend the bridge past Google Meet to the other platforms teams live in.</p><span class="num">05</span></article>
+      <article class="nx"><span class="n">Next 06</span><h4>In your pocket</h4><p>Bring the participant experience to mobile, alongside web and desktop.</p><span class="num">06</span></article>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk &middot; GSU26SE16</span><span class="page">Future work <strong>27</strong></span></footer>
+</main>
+
+
+<!-- =============== 29 · THANK YOU =============== -->
+<main class="slide" data-name="29-thank-you">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+  </header>
+
+  <section class="body">
+    <div class="closing">
+      <div>
+        <div class="kicker">End of presentation</div>
+        <h2>Thank<br />you<span class="dot"></span></h2>
+        <p class="lead">Speak once. <strong>Be understood everywhere.</strong><br />We are ready for the committee's questions.</p>
+      </div>
+      <div class="contact">
+        <div class="row"><span>Project</span><b>WarpTalk</b></div>
+        <div class="row"><span>Team</span><b>GSU26SE16</b></div>
+        <div class="row"><span>Supervisor</span><b>Ms. Thân Thị Ngọc Vân</b></div>
+        <div class="row"><span>Demo script</span><b>Warptalk — Tab 8</b></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk · GSU26SE16</span><span class="page">Closing <strong>29</strong></span></footer>
+</main>
+
+
+<!-- =============== 30 · Q&A =============== -->
+<main class="slide" data-name="30-qa">
+  <header class="top">
+    <div class="brands"><img class="wt" src="assets/warptalk-logo.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo.png" alt="FPT University" /></div>
+    <div class="meta"><strong>Capstone Project</strong>GSU26SE16 &middot; 2026</div>
+  </header>
+
+  <section class="body">
+    <div class="qa">
+      <div>
+        <div class="kicker">Section VIII &middot; Discussion</div>
+        <h2>Q&amp;A</h2>
+        <p class="lead">The floor is <strong>yours</strong>.<br />We are ready for the committee&rsquo;s questions.</p>
+      </div>
+      <div class="contact">
+        <div class="row"><span>Live demo</span><b>warptalk.vn</b></div>
+        <div class="row"><span>Demo script</span><b>Warptalk &mdash; Tab 8</b></div>
+        <div class="row"><span>Team</span><b>GSU26SE16</b></div>
+        <div class="row"><span>Supervisor</span><b>Ms. Th&acirc;n Th&#7883; Ng&#7885;c V&acirc;n</b></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer"><span class="footer-note">WarpTalk &middot; GSU26SE16</span><span class="page">Questions <strong>30</strong></span></footer>
+</main>
+
+
+</body>
+</html>

@@ -9,10 +9,15 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 processors:
+  # Kept ~20% under the container memory limit (telemetry.resources.limits.memory, 384Mi in
+  # values.yaml): the limiter starts refusing data at limit_mib and forces GC at
+  # limit_mib - spike_limit_mib, so the process never reaches the cgroup limit and gets OOM-killed
+  # with a batch in flight. It used to be 384 MiB against a 256Mi production limit - a limiter
+  # that could never trigger before the kernel did.
   memory_limiter:
     check_interval: 1s
-    limit_mib: 384
-    spike_limit_mib: 64
+    limit_mib: 300
+    spike_limit_mib: 60
   batch:
     timeout: 5s
     send_batch_size: 1024
@@ -20,10 +25,18 @@ exporters:
   prometheus:
     endpoint: 0.0.0.0:8889
     namespace: warptalk
-  debug:
-    verbosity: basic
-    sampling_initial: 2
-    sampling_thereafter: 500
+  # Logs and traces go to Seq, as they do under compose (observability/otel-collector.yml). They
+  # used to end in the `debug` exporter, which keeps nothing.
+  otlp_http/seq:
+    endpoint: http://seq:80/ingest/otlp
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 2000
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 5m
 service:
   extensions: [health_check]
   pipelines:
@@ -34,8 +47,8 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [debug]
+      exporters: [otlp_http/seq]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [debug]
+      exporters: [otlp_http/seq]

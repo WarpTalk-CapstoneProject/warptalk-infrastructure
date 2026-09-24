@@ -9,7 +9,27 @@ metadata:
     helm.sh/hook-weight: "-30"
     helm.sh/hook-delete-policy: before-hook-creation
 data:
-  AllowedOrigins__0: {{ printf "https://%s" .Values.global.domain | quote }}
+  {{- /*
+  CORS, as compose sets it (ALLOWED_ORIGINS=https://<APP_DOMAIN>,https://<apex>): the browser
+  origins that load the frontend. The API host is not one - nothing is served to a browser from
+  it. One array element per origin: ASP.NET binds AllowedOrigins__N as string[] and WithOrigins
+  compares whole strings, so a comma-joined single element would match no origin at all.
+  */}}
+  {{- $origins := list .Values.global.domain }}
+  {{- with .Values.ingress.apexDomain }}{{ $origins = append $origins . }}{{ end }}
+  {{- range $index, $host := $origins }}
+  AllowedOrigins__{{ $index }}: {{ printf "https://%s" $host | quote }}
+  {{- end }}
+  {{- /*
+  The gateway only believes X-Forwarded-For from a known proxy (Program.cs ForwardedHeaders). In
+  this cluster the proxy is a Traefik pod, whose address is in the pod CIDR - so without this the
+  gateway saw every client as the same Traefik IP and one user's burst spent everybody's per-IP
+  rate-limit budget. Traefik itself discards X-Forwarded-For from the Internet (no trustedIPs),
+  so trusting the pod network does not let a client choose its own address.
+  */}}
+  {{- range $index, $network := .Values.network.podCidrs }}
+  ForwardedHeaders__KnownNetworks__{{ $index }}: {{ $network | quote }}
+  {{- end }}
   AppBaseUrl: {{ printf "https://%s" .Values.global.domain | quote }}
   App__FrontendBaseUrl: {{ printf "https://%s" .Values.global.domain | quote }}
   # WT-644: the page LiveKit's recorder opens instead of its built-in grid layout. Without it

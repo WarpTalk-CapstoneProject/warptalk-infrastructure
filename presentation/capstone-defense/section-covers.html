@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WarpTalk Section Cover</title>
+  <style>
+    :root{--white:#f9f8fb;--quiet:rgba(255,255,255,.58)}
+    *{box-sizing:border-box}
+    html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#202020;font-family:"Avenir Next","Helvetica Neue",Arial,sans-serif}
+    .slide{position:relative;isolation:isolate;width:1920px;height:1080px;overflow:hidden;padding:58px 78px 62px;color:var(--white);background:#4b5cff}
+    .gradient{position:absolute;inset:-120px;z-index:-4;background:radial-gradient(ellipse 760px 420px at 17% 108%,rgba(138,199,255,.72),transparent 68%),radial-gradient(ellipse 680px 500px at 86% 12%,rgba(109,70,255,.74),transparent 70%),radial-gradient(ellipse 720px 420px at 55% 58%,rgba(64,87,255,.76),transparent 72%),linear-gradient(125deg,#6575ef 0%,#4a67ff 46%,#2f3fe8 100%)}
+    .blur-wave{position:absolute;z-index:-3;left:-7%;top:40%;width:118%;height:205px;border-radius:50%;background:linear-gradient(90deg,rgba(184,215,255,.05),rgba(184,222,255,.62),rgba(116,164,255,.18),rgba(93,111,255,0));filter:blur(38px);transform:rotate(-9deg);opacity:.86}
+    .blur-wave.two{left:24%;top:64%;width:88%;height:170px;transform:rotate(7deg);opacity:.34}
+    .noise{position:absolute;inset:0;z-index:-2;opacity:.31;mix-blend-mode:soft-light;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.9'/%3E%3C/svg%3E")}
+    .top{height:66px;display:flex;justify-content:space-between;align-items:flex-start}
+    .brands{display:flex;align-items:center;gap:30px;height:54px}.brands img{display:block;object-fit:contain}.wt{width:194px;height:47px}.fpt{width:112px;height:49px;opacity:.96}
+    .meta{text-align:right;color:rgba(255,255,255,.68);font-size:12px;line-height:1.35;letter-spacing:.09em;text-transform:uppercase}.meta strong{display:block;color:#fff;font-size:13px;font-weight:680}
+    .stage{position:relative;height:786px;display:grid;grid-template-columns:1.18fr .82fr;gap:70px;align-items:center}
+    .copy{position:relative;z-index:2;max-width:1110px}.section-label{margin-bottom:26px;color:rgba(255,255,255,.7);font-size:14px;font-weight:700;letter-spacing:.16em;text-transform:uppercase}
+    h1{margin:0;max-width:1100px;font-size:124px;line-height:.84;letter-spacing:-7.5px;font-weight:520;text-transform:uppercase}
+    .subtitle{margin:35px 0 0 3px;max-width:720px;color:var(--quiet);font-size:29px;line-height:1.16;letter-spacing:-.8px;font-weight:470}
+    .section-number{align-self:center;justify-self:end;margin-top:38px;color:rgba(255,255,255,.16);font-size:360px;line-height:.72;letter-spacing:-28px;font-weight:580}
+    .bottom{height:108px;display:flex;justify-content:space-between;align-items:end;color:rgba(255,255,255,.5);font-size:11px;letter-spacing:.13em;text-transform:uppercase}
+    .bottom strong{display:block;margin-top:9px;color:#fff;font-size:21px;letter-spacing:-.5px;text-transform:none;font-weight:570}.page{color:rgba(255,255,255,.6);font-size:12px;text-align:right}.page b{display:block;color:#fff;font-size:58px;line-height:.86;letter-spacing:-3px;font-weight:430}
+  </style>
+</head>
+<body>
+  <main class="slide">
+    <div class="gradient"></div><div class="blur-wave"></div><div class="blur-wave two"></div><div class="noise"></div>
+    <header class="top">
+      <div class="brands"><img class="wt" src="assets/warptalk-logo-light.png" alt="WarpTalk" /><img class="fpt" src="assets/fpt-university-logo-light.png" alt="FPT University" /></div>
+      <div class="meta"><strong>Capstone Defense</strong>GSU26SE16 · 2026</div>
+    </header>
+    <section class="stage">
+      <div class="copy"><div class="section-label" id="label"></div><h1 id="title"></h1><p class="subtitle" id="subtitle"></p></div>
+      <div class="section-number" id="number"></div>
+    </section>
+    <footer class="bottom"><div>WarpTalk Capstone Project<strong id="footerTitle"></strong></div><div class="page">Section cover<b id="page"></b></div></footer>
+  </main>
+  <script>
+    const sections={
+      context:{number:'01',page:'04',title:'Context & Problems',subtitle:'Why language barriers still disrupt live communication.'},
+      solution:{number:'02',page:'07',title:'Proposed Solution',subtitle:'How WarpTalk translates speech while preserving voice identity.'},
+      architecture:{number:'03',page:'09',title:'System Architecture',subtitle:'The services and data flow behind the platform.'},
+      tech:{number:'04',page:'11',title:'Tech Stack',subtitle:'Technologies selected for latency, reliability and scale.'},
+      requirements:{number:'05',page:'13',title:'Functional Requirements',subtitle:'Capabilities required across each user role.'},
+      workflows:{number:'06',page:'19',title:'Core Workflows',subtitle:'Primary flows across workspace and meeting operations.'},
+      achievements:{number:'07',page:'24',title:'Project Achievements',subtitle:'What we did not do, what we achieved, and where it goes next.'},
+      qa:{number:'08',page:'28',title:'Questions & Answers',subtitle:'Discussion with the review committee.'}
+    };
+    const key=new URLSearchParams(location.search).get('section')||'context';const s=sections[key]||sections.context;
+    label.textContent=`Section ${s.number} of 08`;title.textContent=s.title;subtitle.textContent=s.subtitle;number.textContent=s.number;footerTitle.textContent=s.title;page.textContent=s.page;
+  </script>
+</body>
+</html>

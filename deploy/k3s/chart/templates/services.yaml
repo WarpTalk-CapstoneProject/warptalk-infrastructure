@@ -8,6 +8,24 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ $name }}
     {{- include "warptalk.labels" $ | nindent 4 }}
+  {{- with $app.stickySession }}
+  {{- /*
+  Traefik reads stickiness from the SERVICE it load-balances, never from the Ingress: the
+  `traefik.ingress.kubernetes.io/service.sticky.*` keys are Service annotations. On the Ingress
+  they were silently ignored, so there was no affinity at all.
+
+  Only the gateway gets one. It terminates the SignalR hubs, and a SignalR connection that
+  negotiates on one pod and upgrades on another fails; the frontend is stateless and must not
+  pin a browser to a pod. The cookie name is per Service so two sticky services can never
+  overwrite each other's routing decision.
+  */}}
+  annotations:
+    traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.name: {{ required (printf "workloads.%s.stickySession.cookieName is required" $name) .cookieName | quote }}
+    traefik.ingress.kubernetes.io/service.sticky.cookie.secure: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.httponly: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.samesite: {{ .sameSite | default "none" | quote }}
+  {{- end }}
 spec:
   type: ClusterIP
   selector:

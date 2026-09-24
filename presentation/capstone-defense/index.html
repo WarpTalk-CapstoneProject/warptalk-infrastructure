@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WarpTalk — Capstone Defense</title>
+  <style>
+    :root { --white:#f9f8fb; --quiet:rgba(255,255,255,.62); --lime:#d7ff52; }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; background:#202020; font-family:"Avenir Next","Helvetica Neue",Arial,sans-serif; }
+    .slide { position:relative; width:1920px; height:1080px; overflow:hidden; padding:58px 78px 62px; color:var(--white); background:#4b5cff; isolation:isolate; }
+    .gradient { position:absolute; inset:-120px; z-index:-3; background:
+      radial-gradient(ellipse 760px 420px at 17% 108%, rgba(138,199,255,.72), transparent 68%),
+      radial-gradient(ellipse 680px 500px at 86% 12%, rgba(109,70,255,.74), transparent 70%),
+      radial-gradient(ellipse 720px 420px at 55% 58%, rgba(64,87,255,.76), transparent 72%),
+      linear-gradient(125deg,#6575ef 0%,#4a67ff 46%,#2f3fe8 100%); }
+    .blur-wave { position:absolute; z-index:-2; left:-7%; top:40%; width:118%; height:205px; border-radius:50%; background:linear-gradient(90deg,rgba(184,215,255,.05),rgba(184,222,255,.62),rgba(116,164,255,.18),rgba(93,111,255,0)); filter:blur(38px); transform:rotate(-9deg); opacity:.86; }
+    .blur-wave.two { left:24%; top:64%; width:88%; height:170px; transform:rotate(7deg); opacity:.34; }
+    .noise { position:absolute; inset:0; z-index:-1; opacity:.31; mix-blend-mode:soft-light; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.9'/%3E%3C/svg%3E"); }
+    .top { height:66px; display:flex; justify-content:space-between; align-items:flex-start; }
+    .logo-cluster { display:flex; align-items:center; gap:30px; height:54px; }
+    .logo-cluster img { display:block; object-fit:contain; }
+    .warptalk-light { width:194px; height:47px; object-position:left center; }
+    .fpt-light { width:112px; height:49px; object-position:left center; opacity:.96; }
+    .top-meta { text-align:right; color:rgba(255,255,255,.72); font-size:12px; line-height:1.35; letter-spacing:.09em; text-transform:uppercase; }
+    .top-meta strong { display:block; color:#fff; font-size:13px; font-weight:680; }
+    .hero { height:705px; display:grid; grid-template-columns:.98fr 1.02fr; gap:92px; align-items:center; }
+    .title-block { align-self:center; }
+    h1 { margin:0; font-size:139px; line-height:.9; letter-spacing:-8.5px; font-weight:520; }
+    .title-note { margin:25px 0 0 4px; color:rgba(255,255,255,.62); font-size:27px; line-height:1.08; letter-spacing:-1px; font-weight:470; }
+    .statement { align-self:center; max-width:720px; margin-top:132px; }
+    .statement p { margin:0; font-size:47px; line-height:1.02; letter-spacing:-2.5px; font-weight:470; }
+    .statement .quiet { color:var(--quiet); }
+    .statement .focus { position:relative; color:#fff; font-weight:660; white-space:nowrap; }
+    .statement .focus::after { content:""; position:absolute; left:-5px; right:-5px; bottom:-9px; height:8px; border-radius:50%; border-top:3px solid var(--lime); transform:rotate(-2deg); opacity:.9; }
+    .bottom { height:189px; display:grid; grid-template-columns:1.15fr .66fr 1fr .2fr; gap:70px; align-items:end; }
+    .bottom > div { padding-top:18px; }
+    .label { display:block; margin-bottom:12px; color:rgba(255,255,255,.54); font-size:11px; font-weight:680; letter-spacing:.12em; text-transform:uppercase; }
+    .project { font-size:24px; line-height:1.14; letter-spacing:-.7px; font-weight:530; }
+    .value { font-size:25px; line-height:1.12; letter-spacing:-.8px; font-weight:570; }
+    .page { text-align:right; color:rgba(255,255,255,.62); font-size:12px; letter-spacing:.12em; text-transform:uppercase; }
+    .page strong { display:block; color:#fff; font-size:58px; line-height:.86; font-weight:430; letter-spacing:-3px; }
+  </style>
+</head>
+<body>
+  <main class="slide">
+    <div class="gradient"></div><div class="blur-wave"></div><div class="blur-wave two"></div><div class="noise"></div>
+    <header class="top">
+      <div class="logo-cluster"><img class="warptalk-light" src="assets/warptalk-logo-light.png" alt="WarpTalk" /><img class="fpt-light" src="assets/fpt-university-logo-light.png" alt="FPT University" /></div>
+      <div class="top-meta"><strong>Capstone Project</strong>GSU26SE16 · 2026</div>
+    </header>
+    <section class="hero">
+      <div class="title-block"><h1>WarpTalk</h1><p class="title-note">Speak once.<br />Be understood everywhere.</p></div>
+      <div class="statement"><p>An AI Speech Translation Platform for <span class="focus">Real-Time</span> Multilingual Communication <span class="quiet">with Voice Cloning.</span></p></div>
+    </section>
+    <footer class="bottom">
+      <div><span class="label">Project focus</span><div class="project">Communication without<br />language barriers.</div></div>
+      <div><span class="label">Presented by</span><div class="value">GSU26SE16</div></div>
+      <div><span class="label">Supervisor</span><div class="value">Ms. Thân Thị Ngọc Vân</div></div>
+      <div class="page"><span>Cover</span><strong>01</strong></div>
+    </footer>
+  </main>
+</body>
+</html>

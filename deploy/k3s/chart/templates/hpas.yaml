@@ -1,5 +1,5 @@
 {{- range $name, $app := .Values.workloads }}
-{{- if $app.autoscaling.enabled }}
+{{- if and (not $app.singleton) $app.autoscaling.enabled }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

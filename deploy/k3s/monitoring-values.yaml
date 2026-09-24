@@ -1,0 +1,86 @@
+# kube-prometheus-stack for the WarpTalk cluster (version locked in addons.lock.env).
+#
+# Placement mirrors production compose, where Prometheus, Alertmanager and Grafana run on the
+# Infra VM (deploy/production/infra.compose.yml): here that VM is the control plane, so these pods
+# select node.warptalk.io/role=infra and tolerate the control-plane taint. That keeps ~1.4 GiB of
+# requests off the App node (deploy/k3s/README.md "Capacity plan").
+
+x-infra-placement: &infra-placement
+  nodeSelector:
+    node.warptalk.io/role: infra
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+
+alertmanager:
+  alertmanagerSpec:
+    <<: *infra-placement
+    # Real receivers. The secret holds alertmanager.yaml rendered from
+    # observability/alertmanager.yml.example by scripts/render-alertmanager-config.sh - the same
+    # Resend SMTP route and the same dead-letter mute production compose uses - with credentials
+    # from the GitHub `production` runtime env (RESEND_API_KEY, RESEND_FROM_EMAIL, ALERT_EMAIL_TO).
+    # scripts/materialize-k8s-runtime-secrets.sh writes it; the chart's own default config has a
+    # single "null" receiver, which is how every alert was evaluated and then dropped.
+    configSecret: warptalk-alertmanager
+    resources:
+      requests: {cpu: 25m, memory: 48Mi}
+      limits: {cpu: 100m, memory: 128Mi}
+
+prometheus:
+  prometheusSpec:
+    <<: *infra-placement
+    retention: 7d
+    retentionSize: 4GB
+    # Select every ServiceMonitor/PodMonitor/PrometheusRule in the cluster, not only the ones
+    # labelled release=monitoring: the Redis, Qdrant and CloudNativePG monitors come from other
+    # charts and would otherwise be silently ignored.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests: {cpu: 200m, memory: 768Mi}
+      limits: {cpu: "1", memory: 1536Mi}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 5Gi
+
+grafana:
+  <<: *infra-placement
+  admin:
+    # Written from GRAFANA_ADMIN_PASSWORD (GitHub `production`), as compose reads it; the chart
+    # default is the public string "prom-operator".
+    existingSecret: warptalk-grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  resources:
+    requests: {cpu: 50m, memory: 160Mi}
+    limits: {cpu: 200m, memory: 320Mi}
+
+prometheusOperator:
+  <<: *infra-placement
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 192Mi}
+  admissionWebhooks:
+    patch:
+      <<: *infra-placement
+
+kube-state-metrics:
+  <<: *infra-placement
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 192Mi}
+
+prometheus-node-exporter:
+  # Every node, including the tainted Data VM and the control plane.
+  tolerations:
+    - operator: Exists
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 100m, memory: 64Mi}

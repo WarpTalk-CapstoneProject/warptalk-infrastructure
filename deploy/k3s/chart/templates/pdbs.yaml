@@ -1,5 +1,10 @@
+{{- /*
+A PDB only for a workload that keeps two or more pods. With one pod, "maxUnavailable: 1" allows
+everything and "minAvailable: 1" allows nothing - the second is how a single-replica PDB blocks
+`kubectl drain` on the node forever. So a one-pod workload gets no PDB at all.
+*/ -}}
 {{- range $name, $app := .Values.workloads }}
-{{- if ge (int $app.replicas) 2 }}
+{{- if ge (include "warptalk.minReplicas" (dict "name" $name "app" $app "root" $) | int) 2 }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
