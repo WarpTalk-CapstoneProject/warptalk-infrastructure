@@ -145,7 +145,7 @@ MATRIX_FILE="$tmp_dir/matrix.json" FORCE_FULL_DEPLOY=true \
   "$planner" "$tmp_dir/current.json" "$tmp_dir/desired.json" >"$tmp_dir/forced-plan.json"
 jq -e 'all(.roles[]; .deploy == true and .fullDeploy == true)' \
   "$tmp_dir/forced-plan.json" >/dev/null ||
-  fail "force-full deployment escape hatch is missing"
+  fail "the planner's force-full escape hatch (manual compose recovery) is missing"
 
 grep -Eq -- '--cache-from.*type=registry' "$builder" ||
   fail "BuildKit registry cache import is missing"
@@ -232,8 +232,12 @@ grep -Eq 'plan-release-deployment\.sh' "$workflow" ||
   fail "workflow does not calculate a deployment diff"
 grep -Fq 'warptalk-infrastructure/deploy/production/image-matrix.json' "$workflow" ||
   fail "release artifact omits the deployment planner image matrix"
-grep -Eq 'force_full_deploy:' "$workflow" ||
-  fail "workflow lacks an explicit full-deploy path for runtime config changes"
+# force_full_deploy only steered the removed compose job's per-role plan. On Kubernetes every
+# release is a full helm upgrade and secrets are re-materialized each run, so the input would be a
+# required no-op. FORCE_FULL_DEPLOY stays on the planner above for a manual compose recovery.
+if grep -Fq 'force_full_deploy' "$workflow"; then
+  fail "workflow still declares or reads force_full_deploy, which no deploy job uses"
+fi
 grep -Eq 'timeout:[[:space:]]*["'\'']?45s' "$workflow" ||
   fail "Tailscale connection attempts are not bounded below the previous two-minute timeout"
 grep -Eq 'retry:[[:space:]]*["'\'']?3["'\'']?' "$workflow" ||

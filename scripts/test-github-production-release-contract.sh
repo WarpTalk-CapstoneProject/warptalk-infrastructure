@@ -17,7 +17,7 @@ fail() {
 jobs="$(awk '/^jobs:$/ { inside = 1; next } inside && /^  [A-Za-z0-9_-]+:$/ { sub(/:$/, ""); sub(/^  /, ""); print }' "$workflow" | tr '\n' ' ')"
 [[ "$jobs" == "build-scan-sign production-k8s " ]] ||
   fail "the release must have exactly build-scan-sign and production-k8s, found: $jobs"
-for removed in deploy_target k8s_bootstrap k8s-bootstrap K8S_BOOTSTRAP_KUBECONFIG STAGING_ STAGING_ENABLED; do
+for removed in deploy_target k8s_bootstrap k8s-bootstrap force_full_deploy K8S_BOOTSTRAP_KUBECONFIG STAGING_ STAGING_ENABLED; do
   if grep -Fq "$removed" "$workflow"; then
     fail "the release still references $removed (removed with the always-skipped jobs)"
   fi
