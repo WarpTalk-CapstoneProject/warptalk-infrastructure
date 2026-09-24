@@ -9,7 +9,7 @@ config:
     snapshots_config:
       snapshots_storage: s3
       s3_config:
-        bucket: warptalk-backups
+        bucket: warptalk-recordings
         region: auto
 env:
   - name: QDRANT__STORAGE__SNAPSHOTS_CONFIG__S3_CONFIG__ACCESS_KEY

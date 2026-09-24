@@ -191,6 +191,11 @@ metadata:
     {{- include "warptalk.labels" $ | nindent 4 }}
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ $.Values.rollout.singleReplica.maxUnavailable }}
+      maxSurge: {{ $.Values.rollout.singleReplica.maxSurge }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}

@@ -42,6 +42,17 @@ secret:
 migrator:
   imageRef: ""
 
+# How the database migrations run.
+#   hook     - a pre-install/pre-upgrade Helm hook (kind, local and contract installs).
+#   external - the chart renders NO migration Job. scripts/deploy-k3s-release.sh renders it with
+#              mode=job and runs it as its own step BEFORE `helm upgrade`, waits for it, and stops
+#              the release with nothing rolled if it fails. Production uses this: a failed hook
+#              under `helm --atomic` once left the new images running on an unmigrated schema.
+#   job      - render the migration ServiceAccount + Job as plain objects (what the deploy script
+#              asks for with --show-only templates/migration-job.yaml). Never set in a values file.
+migrations:
+  mode: hook
+
 config:
   ASPNETCORE_ENVIRONMENT: Production
   Jwt__Issuer: WarpTalk.AuthService
@@ -74,6 +85,12 @@ config:
   VectorDb__Url: http://warptalk-qdrant.warptalk-data.svc.cluster.local:6333
   # kube-prometheus-stack is installed into the `monitoring` namespace (install-k3s-addons.sh).
   Monitoring__PrometheusUrl: http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+  # Firing alerts on the admin System Health page come from Alertmanager, the only place silences
+  # and inhibitions exist (Prometheus rule state lists silenced alerts as firing).
+  Monitoring__AlertmanagerUrl: http://monitoring-kube-prometheus-alertmanager.monitoring.svc.cluster.local:9093
+  # Same-origin path the admin-only Grafana is published under (monitoring-values.yaml grafana.ingress,
+  # behind the gateway ForwardAuth). The System Health page embeds its dashboards from here.
+  Monitoring__GrafanaEmbedPath: /grafana
   VECTOR_DB_PROVIDER: qdrant
   EMBEDDING_PROVIDER: openai
   EMBEDDING_MODEL: text-embedding-3-small
@@ -627,6 +644,20 @@ workloads:
     secretEnv:
       REDIS_PASSWORD: REDIS_PASSWORD
 
+# Exec probes of the Python workers (every workload with workerHealthName). Each run starts a new
+# interpreter and imports the Redis client before it reads the heartbeat; on a CPU-pressed node
+# that took longer than the old 5s timeout, and the kubelet killed healthy workers into
+# CrashLoopBackOff. 15s is a realistic ceiling; startup allows 15s x 12 = 3 min; liveness needs
+# 3 misses 30s apart (~1.5 min) before a restart. scripts/check-k3s-deployment.sh pins the floors.
+workerProbe:
+  timeoutSeconds: 15
+  startup:
+    periodSeconds: 15
+    failureThreshold: 12
+  liveness:
+    periodSeconds: 30
+    failureThreshold: 3
+
 # DOCX -> PDF for the exported biên bản. A third-party image, so it is pinned by digest and
 # locked in deploy/k3s/addons.lock.env like the collector and the SQL exporter, rather than
 # living in .Values.workloads — nothing in a WarpTalk release rewrites this tag.
@@ -722,9 +753,23 @@ keda:
       stream: translate:results
       consumerGroup: tts-workers
 
-# Rolling-update shape for workloads with two or more replicas. The default surges (new pod first,
-# zero unavailable); a cluster whose App node has no spare memory overrides it to replace in place.
+# Rolling-update shape. The default surges (new pod first, zero unavailable) for every workload,
+# which is what makes a rollout invisible: the old pod keeps serving until its replacement is
+# Ready. scripts/deploy-k3s-release.sh measures the App node before each release and, only when
+# it cannot fit one more pod of the largest workload, overrides both to replace in place for that
+# one release (and says so). Values files do not override these.
 rollout:
   multiReplica:
     maxSurge: 1
     maxUnavailable: 0
+  singleReplica:
+    maxSurge: 1
+    maxUnavailable: 0
+  # Drain. On SIGTERM a pod is removed from the Service endpoints at the same moment the kubelet
+  # signals it, and Traefik / kube-proxy learn about it a few seconds later; the preStop sleep keeps
+  # the pod answering until they have. The grace period then covers the sleep plus the process's
+  # own graceful shutdown (ASP.NET Core's HostOptions.ShutdownTimeout is 30s).
+  preStopSleepSeconds: 10
+  terminationGracePeriodSeconds: 45
+  # Kept below every probe window so a Ready pod has proven itself before the next one is replaced.
+  minReadySeconds: 5

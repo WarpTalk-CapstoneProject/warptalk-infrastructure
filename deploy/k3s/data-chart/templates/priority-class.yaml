@@ -1,0 +1,31 @@
+{{- /*
+The data tier outranks the application tier at scheduling time, never the reverse.
+
+A data pod (Postgres, Redis, RabbitMQ, Qdrant) that has to be rescheduled onto a full node PREEMPTS
+application pods to make room: an app pod is one replica of several and comes back on its own,
+while a missing Redis master stops every meeting (24 Sep: redis-node-0 sat Pending on the full App
+node, there was no master, and every AI worker crash-looped).
+
+The reverse cannot happen: application pods carry no priority class (priority 0), and a pod can
+only preempt pods of LOWER priority. scripts/check-k3s-deployment.sh fails the build if the app
+chart ever sets a priorityClassName.
+
+Cluster-scoped, so the deployer needs the scheduling.k8s.io rule in
+deploy/k3s/cluster/deployer-rbac.yaml; scripts/deploy-k3s-data.sh checks for it before it deploys.
+Kept on uninstall: a pod that references a missing class is rejected at admission.
+*/ -}}
+{{- if .Values.priorityClass.create }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ .Values.priorityClass.name }}
+  labels:
+    app.kubernetes.io/part-of: warptalk
+    warptalk.io/tier: data
+  annotations:
+    helm.sh/resource-policy: keep
+value: {{ .Values.priorityClass.value | int }}
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "WarpTalk data tier (Postgres, Redis, RabbitMQ, Qdrant). Preempts application pods when a data pod cannot otherwise schedule."
+{{- end }}

@@ -193,6 +193,17 @@ for crd in \
   kubectl get crd "$crd" >/dev/null || fail "missing required CRD: $crd"
 done
 
+# The data tier's PriorityClass is cluster-scoped. Checked here, before anything is applied, so a
+# deployer RBAC that predates it fails the release in its first minute with the fix in the message,
+# not halfway through a Helm upgrade.
+if grep -Fq "kind: PriorityClass" "$render_dir/data.yaml"; then
+  for verb in create patch; do
+    kubectl auth can-i "$verb" priorityclasses.scheduling.k8s.io/warptalk-data-critical |
+      grep -Fxq yes ||
+      fail "the deployer cannot $verb the warptalk-data-critical PriorityClass; apply deploy/k3s/cluster/deployer-rbac.yaml once (server-side) with a cluster-admin kubeconfig"
+  done
+fi
+
 require_secret_keys() {
   # $1 namespace, $2 secret, remaining: keys that must be non-empty
   namespace="$1"
