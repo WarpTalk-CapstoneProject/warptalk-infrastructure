@@ -268,3 +268,12 @@ workloads:
     cpuLimit: 300m
     memoryLimit: 768Mi
     autoscaling: {enabled: true, min: 1, max: 3, cpu: 80}
+
+# Production has ONE App node, and its memory requests sit at ~99% (2026-09-24: 15.7 of 16 GiB).
+# A surge pod cannot schedule there, so every multi-replica rollout stalled and release v220 timed
+# out. Replace one pod at a time instead: the other replica keeps serving, and the freed memory is
+# what the new pod schedules into. Single-replica workloads still surge (they would otherwise go down).
+rollout:
+  multiReplica:
+    maxSurge: 0
+    maxUnavailable: 1

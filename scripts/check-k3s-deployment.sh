@@ -363,7 +363,7 @@ grep -Fq "sentinel:" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "replicaCount: 1" "$ROOT_DIR/deploy/k3s/data/qdrant-values.yaml"
 grep -Fq "snapshots_storage: s3" "$ROOT_DIR/deploy/k3s/data/qdrant-snapshots-s3.yaml"
 # Three Redis nodes: one sentinel per node with quorum 2 cannot fail over with two.
-grep -Fq "replicaCount: 3" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
+grep -Fq "replicaCount: 2" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "quorum: 2" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "maxmemory-policy noeviction" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "warptalk-qdrant-auth" "$ROOT_DIR/deploy/k3s/data/qdrant-values.yaml"

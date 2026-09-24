@@ -721,3 +721,10 @@ keda:
       max: 12
       stream: translate:results
       consumerGroup: tts-workers
+
+# Rolling-update shape for workloads with two or more replicas. The default surges (new pod first,
+# zero unavailable); a cluster whose App node has no spare memory overrides it to replace in place.
+rollout:
+  multiReplica:
+    maxSurge: 1
+    maxUnavailable: 0
