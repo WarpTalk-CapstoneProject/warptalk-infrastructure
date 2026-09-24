@@ -532,6 +532,8 @@ services:
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:?}
       GrpcUrls__AuthServiceUrl: http://auth-service:50051
       GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
+      # Admin Providers page: LiveKit usage (translation-room GetMediaUsage).
+      GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
       Stripe__SecretKey: ${STRIPE_SECRET_KEY:?}
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:?}
       Stripe__SuccessUrl: https://${APP_DOMAIN:?}/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}

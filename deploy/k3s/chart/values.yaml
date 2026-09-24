@@ -432,6 +432,13 @@ workloads:
     optionalSecretEnv:
       Cartesia__AdminApiKey: CARTESIA_ADMIN_API_KEY
       Cartesia__UsageApiKeyId: CARTESIA_USAGE_API_KEY_ID
+    # Admin Providers page: public status pages polled for the 90-day uptime row (statuspage.io v2
+    # API, verified 2026-09-25; Stripe's page has none). Public URLs, not secrets. Remove a line to
+    # stop polling that provider; ProviderStatus__PollIntervalMinutes: "0" stops all of them.
+    env:
+      ProviderStatus__Pages__openai: https://status.openai.com
+      ProviderStatus__Pages__cartesia: https://status.cartesia.ai
+      ProviderStatus__Pages__livekit: https://status.livekit.io
   assistant-service:
     image: assistant-service
     replicas: 2

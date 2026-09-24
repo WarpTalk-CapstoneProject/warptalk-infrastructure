@@ -643,6 +643,8 @@ services:
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
+      # Admin Providers page: LiveKit usage (translation-room GetMediaUsage).
+      GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
       Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
       # Optional: a Cartesia ADMIN key turns on billing's usage sync (admin Insights, measured dubbing cost).
