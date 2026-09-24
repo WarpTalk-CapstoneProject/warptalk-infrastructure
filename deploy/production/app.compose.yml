@@ -542,7 +542,8 @@ services:
       # CartesiaUsageSyncWorker: measured Cartesia credits for admin Insights' dubbing cost.
       # OPTIONAL on purpose (`:-`, not `:?`): with no admin key the worker logs once that it is
       # disabled and Insights keep the rate-card estimate, so a host without the GitHub secret
-      # still deploys. Both values arrive through release.yml's add_runtime_secret; the key id
+      # still deploys. On a compose host both values come from the host env file (release.yml
+      # deploys only to Kubernetes now); the key id
       # limits usage to the production TTS key (empty = every key on the Cartesia account).
       Cartesia__AdminApiKey: ${CARTESIA_ADMIN_API_KEY:-}
       Cartesia__UsageApiKeyId: ${CARTESIA_USAGE_API_KEY_ID:-}
