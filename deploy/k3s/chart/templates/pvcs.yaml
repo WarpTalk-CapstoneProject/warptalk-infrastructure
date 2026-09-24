@@ -14,7 +14,17 @@ for you, so both guards below run before the first install rather than after the
 {{- if and $app.autoscaling $app.autoscaling.enabled }}
 {{- $peak = max $peak (int $app.autoscaling.max) }}
 {{- end }}
-{{- if and (gt $peak 1) (ne .accessMode "ReadWriteMany") }}
+{{- /*
+`nodeLocal: true` is the one exception, and it is a statement about the storage class, not a
+wish: a node-local provisioner (local-path) gives the volume node affinity, so the scheduler can
+only place EVERY pod of the workload - replicas and surge pods alike - on the node that holds it,
+and ReadWriteOnce means one node, not one pod. All replicas then mount the same directory and read
+the same ring. It is refused together with ReadWriteOncePod, which really is one pod.
+*/}}
+{{- if and .nodeLocal (eq .accessMode "ReadWriteOncePod") (gt $peak 1) }}
+{{- fail (printf "workloads.%s.persistence.nodeLocal cannot share a ReadWriteOncePod volume between %d pods" $name $peak) }}
+{{- end }}
+{{- if and (gt $peak 1) (ne .accessMode "ReadWriteMany") (not .nodeLocal) }}
 {{- fail (printf "workloads.%s can run %d pods at once and mounts a persistent volume, so persistence.accessMode must be ReadWriteMany — with ReadWriteOnce the second pod either cannot attach the volume or quietly gets a ring the first one is not reading. Either point persistence.storageClass at an RWX class, or drop both replicas and autoscaling.max to 1." $name $peak) }}
 {{- end }}
 {{- if and $.Values.global.production (not .storageClass) }}

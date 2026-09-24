@@ -87,8 +87,9 @@ if [ -L "$CURRENT_LINK" ]; then
   current_release="$(basename "$(readlink -f "$CURRENT_LINK")")"
 fi
 
-# Order releases newest-first by mtime. The staging step in release.yml creates
-# each directory at deploy time, so mtime is the deployment order.
+# Order releases newest-first by mtime. The compose release (formerly the staging step in
+# release.yml, now a manual recovery path) creates each directory at deploy time, so mtime is
+# the deployment order.
 find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' 2>/dev/null |
   sort -rn | awk '{print $2}' >"$work/all"
 

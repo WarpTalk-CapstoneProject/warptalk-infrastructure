@@ -46,6 +46,9 @@ required_files=(
   "$ROOT_DIR/scripts/test-k3s-runtime-secret-contract.sh"
   "$ROOT_DIR/deploy/k3s/runtime-secret-contract.json"
   "$ROOT_DIR/scripts/test-k3s-release-contract.sh"
+  "$ROOT_DIR/scripts/test-k3s-release-gate.sh"
+  "$DATA_CHART_DIR/templates/priority-class.yaml"
+  "$ROOT_DIR/deploy/k3s/DATA-PLACEMENT-RUNBOOK.md"
   "$ROOT_DIR/scripts/pin-qdrant-images.sh"
   "$ROOT_DIR/deploy/k3s/migrator.Dockerfile"
   "$ROOT_DIR/scripts/run-k3s-migrations.sh"
@@ -363,7 +366,7 @@ grep -Fq "sentinel:" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "replicaCount: 1" "$ROOT_DIR/deploy/k3s/data/qdrant-values.yaml"
 grep -Fq "snapshots_storage: s3" "$ROOT_DIR/deploy/k3s/data/qdrant-snapshots-s3.yaml"
 # Three Redis nodes: one sentinel per node with quorum 2 cannot fail over with two.
-grep -Fq "replicaCount: 3" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
+grep -Fq "replicaCount: 2" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "quorum: 2" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "maxmemory-policy noeviction" "$ROOT_DIR/deploy/k3s/data/redis-values.yaml"
 grep -Fq "warptalk-qdrant-auth" "$ROOT_DIR/deploy/k3s/data/qdrant-values.yaml"
@@ -385,7 +388,8 @@ grep -Fq 'QDRANT_IMAGE_DIGEST' "$ROOT_DIR/scripts/pin-qdrant-images.sh"
 PROD_RENDERED="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prod.XXXXXX")"
 PROD_DATA_RENDERED="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prod-data.XXXXXX")"
 PROD_IMAGES="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prod-images.XXXXXX")"
-trap 'rm -f "$deployment_documents" "$PROD_RENDERED" "$PROD_DATA_RENDERED" "$PROD_IMAGES"' EXIT
+PROD_MIGRATION_RENDERED="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prod-migration.XXXXXX")"
+trap 'rm -f "$deployment_documents" "$PROD_RENDERED" "$PROD_DATA_RENDERED" "$PROD_IMAGES" "$PROD_MIGRATION_RENDERED"' EXIT
 
 # Nothing release-specific may live in a values file: no digests, no image refs, no release id.
 for values_file in "$ROOT_DIR/deploy/k3s/k8s-app-values.yaml" "$ROOT_DIR/deploy/k3s/k8s-data-values.yaml"; do
@@ -409,6 +413,10 @@ jq '{
 }' "$ROOT_DIR/deploy/production/image-matrix.json" >"$PROD_IMAGES"
 "$HELM" template warptalk "$CHART_DIR" --namespace warptalk \
   -f "$ROOT_DIR/deploy/k3s/k8s-app-values.yaml" -f "$PROD_IMAGES" >"$PROD_RENDERED"
+# The migration gate exactly as scripts/deploy-k3s-release.sh renders it for run_migration_gate.
+"$HELM" template warptalk "$CHART_DIR" --namespace warptalk \
+  -f "$ROOT_DIR/deploy/k3s/k8s-app-values.yaml" -f "$PROD_IMAGES" \
+  --set migrations.mode=job --show-only templates/migration-job.yaml >"$PROD_MIGRATION_RENDERED"
 # As the release job renders it with GitHub-sourced secrets (which enables the Qdrant snapshots).
 "$HELM" template warptalk-data "$DATA_CHART_DIR" --namespace warptalk-data \
   -f "$ROOT_DIR/deploy/k3s/k8s-data-values.yaml" \
@@ -418,6 +426,8 @@ docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0-alpine \
   -strict -summary -ignore-missing-schemas <"$PROD_RENDERED"
 docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0-alpine \
   -strict -summary -ignore-missing-schemas <"$PROD_DATA_RENDERED"
+docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0-alpine \
+  -strict -summary -ignore-missing-schemas <"$PROD_MIGRATION_RENDERED"
 
 prod_fail() {
   echo "K3s production contract: $*" >&2
@@ -429,11 +439,11 @@ if grep -Fq "kind: ExternalSecret" "$PROD_RENDERED" "$PROD_DATA_RENDERED"; then
   prod_fail "production must not render ExternalSecrets; runtime secrets come from GitHub production"
 fi
 
-python3 - "$PROD_RENDERED" "$PROD_DATA_RENDERED" "$ROOT_DIR" <<'PY'
+python3 - "$PROD_RENDERED" "$PROD_DATA_RENDERED" "$ROOT_DIR" "$PROD_MIGRATION_RENDERED" <<'PY'
 import re
 import sys
 
-prod_path, data_path, root = sys.argv[1:4]
+prod_path, data_path, root, migration_path = sys.argv[1:5]
 
 
 def documents(path):
@@ -471,15 +481,29 @@ for doc in docs:
     kind, name = kind_name(doc)
     by_kind.setdefault(kind, {})[name] = doc
 
-# 2. ServiceAccounts: warptalk is a release resource, warptalk-migrator is the hook identity.
+# 2. ServiceAccounts and the migration gate. warptalk is a release resource. The migrations are
+# NOT in the release: scripts/deploy-k3s-release.sh runs them as a plain Job before `helm upgrade`
+# and stops the release with nothing rolled if it fails. A migration hook inside the upgrade is
+# how new images ended up running on an unmigrated schema (24 Sep).
 sas = by_kind.get("ServiceAccount", {})
 if "warptalk" not in sas or "helm.sh/hook" in sas["warptalk"]:
     fail("ServiceAccount warptalk must exist and must not be a Helm hook")
-if "warptalk-migrator" not in sas or "pre-install,pre-upgrade" not in sas["warptalk-migrator"]:
-    fail("ServiceAccount warptalk-migrator must be the pre-install/pre-upgrade hook identity")
-job = next((d for n, d in by_kind.get("Job", {}).items() if n.startswith("warptalk-migrations-")), "")
-if "serviceAccountName: warptalk-migrator" not in job:
+if "warptalk-migrator" in sas or any(n.startswith("warptalk-migrations-") for n in by_kind.get("Job", {})):
+    fail("production must render no migration hook; migrations run as the gate before the upgrade (migrations.mode: external)")
+migration_docs = {kind_name(d): d for d in documents(migration_path)}
+gate_job = next((d for (k, n), d in migration_docs.items() if k == "Job" and n.startswith("warptalk-migrations-")), "")
+if ("ServiceAccount", "warptalk-migrator") not in migration_docs or not gate_job:
+    fail("the migration gate must render the warptalk-migrator ServiceAccount and a warptalk-migrations-<release> Job")
+if any("helm.sh/hook" in d for d in migration_docs.values()):
+    fail("the migration gate objects must be plain objects, not Helm hooks")
+if "serviceAccountName: warptalk-migrator" not in gate_job:
     fail("the migration Job must run as warptalk-migrator")
+if "name: warptalk-migrations-contract01" not in gate_job:
+    fail("the migration Job must be named after the release id, so each release keeps its own evidence")
+if "optional: true" not in gate_job or "name: PGHOST" not in gate_job:
+    fail("the gate runs before the release's ConfigMap exists or changes: PGHOST must be explicit and the ConfigMap optional")
+if "activeDeadlineSeconds:" not in gate_job:
+    fail("the migration Job needs a deadline, or a hung migration holds the release forever")
 
 # 3. Stickiness on the gateway Service only, with a cookie name of its own; none on the Ingress.
 sticky = [n for n, d in by_kind.get("Service", {}).items() if "service.sticky.cookie:" in d]
@@ -529,6 +553,21 @@ scaled = by_kind.get("ScaledObject", {})
 pdbs = by_kind.get("PodDisruptionBudget", {})
 total_cpu = 0.0
 total_mem = 0.0
+largest_pod_mem = 0.0
+minimums = {}
+
+
+# Scrape targets and the log/trace pipeline: nothing user-facing waits on them, so the drain and
+# spread rules below do not apply (the rollout shape still does).
+INTERNAL_ONLY = {"billing-cost-exporter", "livekit-cost-exporter", "workspace-storage-exporter",
+                 "warptalk-otel-collector", "seq"}
+
+
+def int_field(doc, field):
+    match = re.search(rf"(?m)^\s+{field}: (\d+)", doc)
+    return int(match.group(1)) if match else None
+
+
 for name, doc in deployments.items():
     if "node.warptalk.io/role: app" not in doc:
         fail(f"{name} is not pinned to the App node")
@@ -547,25 +586,127 @@ for name, doc in deployments.items():
         minimum = int(re.search(r"minReplicaCount: (\d+)", scaled[f"{name}-queue-lag"]).group(1))
     else:
         minimum = int(replicas.group(1))
+    minimums[name] = minimum
     if minimum < 2 and name in pdbs:
         fail(f"{name} runs one pod and must not have a PDB")
     for request in re.findall(r"requests:\n\s+cpu: (\S+)\n\s+memory: (\S+)", doc):
         total_cpu += cpu(request[0]) * minimum
         total_mem += mem(request[1]) * minimum
+        largest_pod_mem = max(largest_pod_mem, mem(request[1]))
+
+    # Zero-downtime rollout. Every RollingUpdate surges: the new pod must be Ready before an old
+    # one goes. (#216 set surge 0 / unavailable 1 in the production values because the App node
+    # was full; deploy-k3s-release.sh now decides that per release from measured headroom.)
+    if "type: Recreate" not in doc:
+        if int_field(doc, "maxSurge") != 1 or int_field(doc, "maxUnavailable") != 0:
+            fail(f"{name} must roll out with maxSurge 1 / maxUnavailable 0")
+    # Exec probes (the Python workers expose no port): a new interpreter per run, so a 5s
+    # timeout killed healthy workers on a busy node. Pin a realistic timeout and a startup
+    # window of at least 2 minutes.
+    for probe in ("startupProbe", "livenessProbe", "readinessProbe"):
+        block = re.search(rf"(?m)^(\s+){probe}:\n((?:\1\s+.*\n)+)", doc)
+        if not block or "exec:" not in block.group(2):
+            continue
+        timeout = re.search(r"timeoutSeconds: (\d+)", block.group(2))
+        if not timeout or int(timeout.group(1)) < 15:
+            fail(f"{name} {probe} is an exec probe (python start-up included) and needs timeoutSeconds >= 15")
+        if probe == "startupProbe":
+            period = int(re.search(r"periodSeconds: (\d+)", block.group(2)).group(1))
+            threshold = int(re.search(r"failureThreshold: (\d+)", block.group(2)).group(1))
+            if period * threshold < 120:
+                fail(f"{name} startup probe allows {period * threshold}s; a worker needs at least 2 minutes on a busy node")
+    if "containerPort:" in doc and "exec:\n" in doc.split("readinessProbe:", 1)[-1][:120]:
+        fail(f"{name} exposes a port; probe it over HTTP or TCP, not exec")
+    if name in INTERNAL_ONLY:
+        continue
+    # Drain: preStop sleep so Traefik and kube-proxy stop routing before SIGTERM, and a grace
+    # period that covers the sleep plus the process's own shutdown.
+    sleep = re.search(r"preStop:\n\s+sleep:\n\s+seconds: (\d+)", doc)
+    grace = int_field(doc, "terminationGracePeriodSeconds")
+    if not sleep or int(sleep.group(1)) < 5:
+        fail(f"{name} needs a preStop sleep (>= 5s) so in-flight requests drain")
+    if grace is None or grace < int(sleep.group(1)) + 30:
+        fail(f"{name} terminationGracePeriodSeconds must cover the preStop sleep plus 30s of shutdown")
+    # Readiness gates traffic: anything with a Service port must have a readiness probe, and a
+    # startup probe so liveness cannot kill a slow start.
+    if "containerPort:" in doc and ("readinessProbe:" not in doc or "startupProbe:" not in doc):
+        fail(f"{name} serves traffic and needs readiness and startup probes")
+    if "readinessProbe:" in doc and "timeoutSeconds: 1\n" in doc.split("readinessProbe:", 1)[1][:300]:
+        fail(f"{name} readiness probe timeout must be above the 1s default")
+    # Spread replicas across hosts where there is capacity - softly, so one App node still works.
+    if re.search(r"topologyKey: kubernetes.io/hostname\n\s+whenUnsatisfiable: ScheduleAnyway", doc) is None:
+        fail(f"{name} must spread over kubernetes.io/hostname with whenUnsatisfiable: ScheduleAnyway")
+    if "whenUnsatisfiable: DoNotSchedule" in doc or "requiredDuringScheduling" in doc:
+        fail(f"{name} must not hard-require spreading; one App node has to stay schedulable")
+
+# The data tier outranks the application tier, never the reverse: no application pod carries a
+# priority class (so it stays at 0 and can preempt nothing that has one).
+if "priorityClassName" in open(prod_path, encoding="utf-8").read():
+    fail("the application chart sets a priorityClassName; application pods must never outrank (or preempt) data pods")
+
 for name, doc in pdbs.items():
     if "minAvailable" in doc:
         fail(f"PDB {name} uses minAvailable; use maxUnavailable")
+    if "maxUnavailable: 1" not in doc:
+        fail(f"PDB {name} must allow exactly one voluntary disruption (maxUnavailable: 1)")
 for singleton in ("suggestion-worker", "metrics-exporter"):
     if "type: Recreate" not in deployments[singleton] or "replicas: 1" not in deployments[singleton]:
         fail(f"{singleton} is a singleton: one replica and a Recreate rollout")
 
-# 5. Capacity: the App node is 8 vCPU / 16 GiB. After kubelet/system reservations (~7.6 CPU /
-# ~14.8 GiB) and the add-ons that land there (Traefik, KEDA, cert-manager, operators, CNI, ~0.9 CPU
-# / ~1.4 GiB; monitoring runs on the Infra node) the WarpTalk requests at minimum replicas must
-# leave room for autoscaling. deploy/k3s/README.md "Capacity plan" has the per-workload table.
-if total_cpu > 5000 or total_mem > 11 * 1024:
-    fail(f"App-node requests at minimum replicas are {total_cpu:.0f}m / {total_mem:.0f}Mi; budget is 5000m / 11264Mi")
-print(f"K3s production contract: App-node requests at minimum replicas {total_cpu:.0f}m CPU / {total_mem:.0f}Mi")
+# Every user-facing service (behind the Ingress or the gateway) keeps two pods and a PDB, so a
+# rollout, a drain or one crashed pod never takes it away.
+USER_FACING = ("frontend", "gateway", "auth-service", "translation-room-service", "transcript-service",
+               "notification-service", "meeting-service", "workspace-service", "billing-service",
+               "assistant-service")
+for name in USER_FACING:
+    if minimums.get(name, 0) < 2:
+        fail(f"{name} is user-facing and must keep at least 2 replicas (found {minimums.get(name)})")
+    if name not in pdbs:
+        fail(f"{name} is user-facing and needs a PodDisruptionBudget")
+
+# 5. Capacity: the WHOLE App node, not just this chart. Allocatable is the live value (kubelet
+# reports 16273348Ki = 15892Mi; the cluster was built without kubelet reservations). Everything
+# else that requests memory there is listed below, measured on 2026-09-24; when a data pod moves
+# to the Data node (deploy/k3s/DATA-PLACEMENT-RUNBOOK.md) take it out of APP_NODE_DATA_PODS.
+#
+# Target: at minimum replicas the node keeps >= 25% of its memory unrequested, and that free
+# space holds one surge pod of the largest workload PLUS redis-node-0 (so Redis can always be
+# rescheduled, and a release can always surge).
+APP_ALLOCATABLE_MI = 15892
+ADDONS_ON_APP_NODE_MI = {  # requests of the add-ons that run on the App node (live, 2026-09-24)
+    "keda (3 pods)": 300,
+    "metrics-server": 200,
+    "alertmanager": 200,
+    "rabbitmq-cluster-operator": 500,
+}
+data_values = open(f"{root}/deploy/k3s/k8s-data-values.yaml", encoding="utf-8").read()
+redis_values_text = open(f"{root}/deploy/k3s/data/redis-values.yaml", encoding="utf-8").read()
+postgres_request = mem(re.search(r"(?s)postgres:.*?requests: \{cpu: \S+, memory: (\S+)\}", data_values).group(1))
+rabbit_request = mem(re.search(r"(?s)rabbitmq:.*?requests: \{cpu: \S+, memory: (\S+)\}", data_values).group(1))
+redis_pod = sum(mem(m) for m in re.findall(r"requests: \{cpu: \S+, memory: (\S+)\}", redis_values_text))
+APP_NODE_DATA_PODS = {  # data pods whose local-path volumes are still on the App node
+    "warptalk-postgres-1": postgres_request,
+    "warptalk-postgres-2": postgres_request,
+    "warptalk-redis-node-0": redis_pod,
+    "warptalk-rabbitmq-server-0": rabbit_request,
+}
+app_node_mem = total_mem + sum(ADDONS_ON_APP_NODE_MI.values()) + sum(APP_NODE_DATA_PODS.values())
+free_mem = APP_ALLOCATABLE_MI - app_node_mem
+if free_mem < 0.25 * APP_ALLOCATABLE_MI:
+    fail(f"App-node memory requests at minimum replicas are {app_node_mem:.0f}Mi of {APP_ALLOCATABLE_MI}Mi "
+         f"({app_node_mem / APP_ALLOCATABLE_MI:.0%}); at least 25% must stay free")
+if free_mem < largest_pod_mem + redis_pod:
+    fail(f"App-node free memory {free_mem:.0f}Mi cannot hold one surge pod of the largest workload "
+         f"({largest_pod_mem:.0f}Mi) plus redis-node-0 ({redis_pod:.0f}Mi)")
+if total_cpu > 5000:
+    fail(f"WarpTalk CPU requests at minimum replicas are {total_cpu:.0f}m; budget is 5000m")
+print(f"K3s production contract: WarpTalk requests at minimum replicas {total_cpu:.0f}m CPU / {total_mem:.0f}Mi; "
+      f"App node {app_node_mem:.0f}Mi of {APP_ALLOCATABLE_MI}Mi requested ({app_node_mem / APP_ALLOCATABLE_MI:.1%}), "
+      f"{free_mem:.0f}Mi free >= largest pod {largest_pod_mem:.0f}Mi + redis-node-0 {redis_pod:.0f}Mi")
+
+# Production values must not pin the rollout shape: the deploy script decides it per release.
+if re.search(r"(?m)^rollout:", open(f"{root}/deploy/k3s/k8s-app-values.yaml", encoding="utf-8").read()):
+    fail("k8s-app-values.yaml must not override rollout.*; deploy-k3s-release.sh chooses surge or in-place per release")
 
 # 5. Collector: container memory limit ~20% above the memory_limiter.
 collector = deployments["warptalk-otel-collector"]
@@ -600,8 +741,23 @@ for needle, message in (
         fail(message)
 if "minSyncReplicas" in data:
     fail("minSyncReplicas conflicts with the synchronous stanza")
-if "containers: []" in data:
-    fail("dead `containers: []` override is back in the RabbitMQ template")
+# The data tier's PriorityClass: preempts app pods, and the app chart carries none (checked above).
+data_docs = {kind_name(d): d for d in documents(data_path)}
+priority = data_docs.get(("PriorityClass", "warptalk-data-critical"), "")
+if not priority or "preemptionPolicy: PreemptLowerPriority" not in priority or "globalDefault: false" not in priority:
+    fail("the data chart must ship the warptalk-data-critical PriorityClass (PreemptLowerPriority, not global default)")
+if int(re.search(r"(?m)^value: (\d+)", priority).group(1)) <= 0:
+    fail("warptalk-data-critical must rank above the application tier (priority 0)")
+cluster = data_docs.get(("Cluster", "warptalk-postgres"), "")
+if "priorityClassName: warptalk-data-critical" not in cluster:
+    fail("Postgres must run under warptalk-data-critical")
+if "primaryUpdateMethod: switchover" not in cluster:
+    fail("a Postgres rolling update must switch over, never restart the primary in place")
+if "containers: []" not in data:
+    # Not dead: the RabbitmqCluster CRD requires `containers` whenever the override pod template
+    # has a spec, and the live object carries `containers: []`. Dropping it made Helm's patch
+    # remove a required field and failed the first k8s release (run 35946575671).
+    fail("the RabbitMQ override pod template must keep `containers: []` (required by the CRD)")
 
 # 6. Storage. The live claims were created at these sizes and a PVC cannot shrink (CloudNativePG
 # rejects it, and StatefulSet volumeClaimTemplates are immutable), so the values must never go

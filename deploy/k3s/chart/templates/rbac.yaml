@@ -7,10 +7,12 @@ existed - but Helm does not own hook resources the way it owns the release: it d
 the next hook run (before-hook-creation) and never re-creates them as part of the manifest, so
 every Deployment pointing at it failed with "serviceaccount not found" on the next rollout.
 
-`warptalk-migrator` is the hook identity. It exists only so the pre-install/pre-upgrade migration
-Job has an account on the very first install, before any release resource is created, and it is
-recreated alongside that Job on every upgrade. Neither account mounts a token: nothing here talks
-to the Kubernetes API, so neither needs a Role.
+`warptalk-migrator` is the migration identity, separate so it exists before any release resource
+does. In hook mode it is a pre-install/pre-upgrade hook here, recreated alongside the Job on every
+upgrade. In production (migrations.mode: external) this template does not render it: the release
+gate in scripts/deploy-k3s-release.sh applies it together with the Job from
+templates/migration-job.yaml, before `helm upgrade`. Neither account mounts a token: nothing here
+talks to the Kubernetes API, so neither needs a Role.
 */ -}}
 apiVersion: v1
 kind: ServiceAccount
@@ -19,6 +21,7 @@ metadata:
   labels:
     {{- include "warptalk.labels" . | nindent 4 }}
 automountServiceAccountToken: false
+{{- if eq (.Values.migrations.mode | default "hook") "hook" }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -32,3 +35,4 @@ metadata:
     helm.sh/hook-weight: "-30"
     helm.sh/hook-delete-policy: before-hook-creation
 automountServiceAccountToken: false
+{{- end }}

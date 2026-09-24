@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cluster add-ons at the versions and digests locked in deploy/k3s/addons.lock.env. Idempotent
-# (every step is an upgrade --install or a server-side apply), so the k8s-bootstrap job in
-# release.yml can re-run it safely. Every Helm call goes through scripts/helm-locked.sh.
+# (every step is an upgrade --install or a server-side apply), so the manual cluster bootstrap
+# in deploy/k3s/README.md can re-run it safely. Every Helm call goes through scripts/helm-locked.sh.
 set -euo pipefail
 
 : "${K3S_STORAGE_CLASS:?K3S_STORAGE_CLASS is required}"
@@ -16,7 +16,7 @@ INSTALL_METRICS_SERVER="${INSTALL_METRICS_SERVER:-false}"
 INSTALL_EXTERNAL_SECRETS="${INSTALL_EXTERNAL_SECRETS:-false}"
 # kubeadm kubelets serve self-signed certificates unless serverTLSBootstrap is on and the CSRs are
 # approved. k8s-cluster-bootstrap.sh does both for a new cluster; the live cluster's kubelets were
-# joined without it, so the k8s-bootstrap job passes true until they are re-bootstrapped
+# joined without it, so the manual cluster bootstrap passes true until they are re-bootstrapped
 # (metrics-server -> kubelet traffic stays on the node network either way).
 METRICS_SERVER_KUBELET_INSECURE_TLS="${METRICS_SERVER_KUBELET_INSECURE_TLS:-false}"
 
