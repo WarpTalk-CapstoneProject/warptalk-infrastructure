@@ -69,7 +69,11 @@ postgres:
       requests: {cpu: 50m, memory: 64Mi}
       limits: {cpu: 200m, memory: 128Mi}
   backup:
-    destinationPath: s3://warptalk-backups/postgres
+    # The R2 token in warptalk-backup-credentials is scoped to the warptalk-recordings bucket only
+    # (verified 2026-09-24: warptalk-backups answered AccessDenied, so WAL archiving failed from
+    # 2026-09-19 and 9.8 GB of WAL piled up on the App node). Backups live under a _backups/ prefix
+    # of the bucket the token can write; move them back if a dedicated backups token is issued.
+    destinationPath: s3://warptalk-recordings/_backups/postgres
     # endpointURL is deliberately absent: it carries the object-store account id, so the release
     # job passes it from BACKUP_S3_ENDPOINT_URL in the GitHub `production` runtime env
     # (scripts/deploy-k3s-data.sh K3S_BACKUP_ENDPOINT_URL).
