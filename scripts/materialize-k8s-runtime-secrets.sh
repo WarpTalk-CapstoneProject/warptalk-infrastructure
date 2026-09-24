@@ -121,6 +121,19 @@ secret_of() {
     }" "$env_json"
 }
 
+live_secret_type() {
+  # $1 namespace, $2 name, $3 type to use when the Secret does not exist yet.
+  # A Secret's type is immutable: the cluster was bootstrapped by hand before this script
+  # existed, and its CloudNativePG superuser Secret is Opaque. Applying basic-auth over it is
+  # rejected ("field is immutable") and stops the release, so an existing Secret keeps its type.
+  # CloudNativePG reads username/password from either type.
+  local existing=""
+  if [ "$K8S_RENDER_ONLY" != "true" ]; then
+    existing="$(kubectl get secret "$2" --namespace "$1" -o jsonpath='{.type}' 2>/dev/null || true)"
+  fi
+  printf '%s' "${existing:-$3}"
+}
+
 runtime_secret="$work_dir/runtime-secret.json"
 secret_of "$NAMESPACE" "$SECRET_NAME" Opaque '.' >"$runtime_secret"
 K3S_RUNTIME_SECRET_FILE="$runtime_secret" "$runtime_secret_check" >/dev/null ||
@@ -144,7 +157,8 @@ alertmanager_secret="$(jq -n \
 
 {
   cat "$runtime_secret"
-  secret_of "$DATA_NAMESPACE" warptalk-postgres-superuser kubernetes.io/basic-auth \
+  secret_of "$DATA_NAMESPACE" warptalk-postgres-superuser \
+    "$(live_secret_type "$DATA_NAMESPACE" warptalk-postgres-superuser kubernetes.io/basic-auth)" \
     '{username: .PGUSER, password: .PGPASSWORD}'
   secret_of "$DATA_NAMESPACE" warptalk-backup-credentials Opaque \
     '{ACCESS_KEY_ID: .BACKUP_S3_ACCESS_KEY_ID, SECRET_ACCESS_KEY: .BACKUP_S3_SECRET_ACCESS_KEY, ENDPOINT_URL: .BACKUP_S3_ENDPOINT_URL}'
