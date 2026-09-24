@@ -67,6 +67,10 @@ ingress:
 
 costObservability:
   enabled: true
+  # Each of the three exporters: p95 14Mi / 1m.
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 200m, memory: 128Mi}
   rates:
     sttUsdPerMinute: "0.006"
     translationUsdPerMinute: "0.02"
@@ -82,23 +86,29 @@ costObservability:
     objectStorageGb: "500"
 
 gotenberg:
+  # Internal (called by translation-room-service for the PDF export only), so one replica; its
+  # rollout still surges, so the PDF export is not interrupted by a release.
   replicas: 1
   resources:
-    # The CPU limit stays at 1: see the load-bearing note in chart/values.yaml.
-    requests: {cpu: 100m, memory: 128Mi}
+    # Right-sized 2026-09-24 from 4.8 days of Prometheus (p95 170Mi, max 171Mi working set):
+    # the old 128Mi request was BELOW what it uses. The CPU limit stays at 1: see the
+    # load-bearing note in chart/values.yaml.
+    requests: {cpu: 100m, memory: 224Mi}
     limits: {cpu: "1", memory: 512Mi}
 
 telemetry:
   replicas: 1
   resources:
-    requests: {cpu: 100m, memory: 256Mi}
+    # p95 88Mi. The limit is paired with memory_limiter (limit_mib 300); keep it >= 1.2x that.
+    requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 200m, memory: 384Mi}
 
 seq:
   storageClass: local-path
   storageSize: 10Gi
   resources:
-    requests: {cpu: 100m, memory: 384Mi}
+    # p95 132Mi, max 146Mi.
+    requests: {cpu: 50m, memory: 176Mi}
     limits: {cpu: 200m, memory: 640Mi}
 
 # KEDA owns stt/translation/tts. One replica each at rest, as compose runs them; queue lag
@@ -109,171 +119,176 @@ keda:
     translation-worker: {min: 1, max: 3}
     tts-worker: {min: 1, max: 3}
 
-# Requests are what the scheduler reserves, limits are the ceiling compose already runs each
-# service under (deploy/production/app.compose.yml). Memory limit is ~2x the request, CPU limit
-# 2x. HPA targets are a share of the REQUEST, so they were raised with it: at the old 30m
-# request a 75% target meant "scale out above 22 millicores", i.e. always.
+# Database migrations run as their own gated step before `helm upgrade`
+# (scripts/deploy-k3s-release.sh), never as a Helm hook inside it.
+migrations:
+  mode: external
+
+# Requests are right-sized from evidence, not from compose. Source: Prometheus on the production
+# cluster, 2026-09-24, `container_memory_working_set_bytes` and `rate(container_cpu_usage_seconds_total[5m])`
+# over [7d] (the cluster is 4.8 days old, so that is its whole life, including the first releases).
+# Rule: request ~= p95 x 1.3, rounded up to 16Mi / 10m, floors 128Mi / 50m (HPA-managed CPU >= 100m
+# and high enough that p95 sits below the HPA target, or the HPA pins the workload at its max:
+# assistant-worker and livekit-ingress-worker ran at 3/3 for days on a 150m/200m request).
+# Limits keep their compose headroom (>= ~1.5x the request). The per-workload table (observed,
+# old -> new) and the App-node arithmetic are in deploy/k3s/README.md "Capacity plan";
+# scripts/check-k3s-deployment.sh pins the budget.
 workloads:
-  frontend:
+  frontend:            # p95 121Mi / 25m
     replicas: 2
     cpu: 100m
-    memory: 256Mi
+    memory: 160Mi
     cpuLimit: 200m
     memoryLimit: 512Mi
     autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
-  gateway:
+  gateway:             # p95 148Mi / 60m
     replicas: 2
-    cpu: 250m
-    memory: 256Mi
+    cpu: 100m
+    memory: 208Mi
     cpuLimit: 500m
     memoryLimit: 512Mi
     autoscaling: {enabled: true, min: 2, max: 4, cpu: 70}
 
-  auth-service:
+  auth-service:        # p95 233Mi / 38m
     replicas: 2
     cpu: 100m
-    memory: 256Mi
+    memory: 304Mi
     cpuLimit: 200m
     memoryLimit: 512Mi
     autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
-  translation-room-service:
-    replicas: 2
-    cpu: 150m
-    memory: 320Mi
-    cpuLimit: 300m
-    memoryLimit: 640Mi
-    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
-
-  transcript-service:
-    replicas: 2
-    cpu: 150m
-    memory: 320Mi
-    cpuLimit: 300m
-    memoryLimit: 640Mi
-    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
-
-  notification-service:
+  translation-room-service:  # p95 215Mi / 44m
     replicas: 2
     cpu: 100m
-    memory: 192Mi
+    memory: 288Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
+
+  transcript-service:  # p95 182Mi / 42m
+    replicas: 2
+    cpu: 100m
+    memory: 240Mi
+    cpuLimit: 300m
+    memoryLimit: 640Mi
+    autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
+
+  notification-service:  # p95 169Mi / 29m
+    replicas: 2
+    cpu: 100m
+    memory: 224Mi
     cpuLimit: 200m
     memoryLimit: 384Mi
     autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
-  meeting-service:
+  meeting-service:     # p95 184Mi / 29m
     replicas: 2
-    cpu: 200m
-    memory: 384Mi
+    cpu: 100m
+    memory: 240Mi
     cpuLimit: 400m
     memoryLimit: 768Mi
     autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
-  workspace-service:
+  workspace-service:   # p95 253Mi / 48m
     replicas: 2
-    cpu: 150m
-    memory: 320Mi
+    cpu: 100m
+    memory: 336Mi
     cpuLimit: 300m
     memoryLimit: 640Mi
     autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
-  billing-service:
+  billing-service:     # p95 223Mi / 48m
     replicas: 2
-    cpu: 150m
-    memory: 320Mi
+    cpu: 100m
+    memory: 304Mi
     cpuLimit: 300m
     memoryLimit: 640Mi
     autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
-  # One replica: the data-protection key ring sits on a node-local ReadWriteOnce volume, and
-  # pvcs.yaml refuses RWO for anything that can run two pods.
-  assistant-service:
-    replicas: 1
-    cpu: 150m
-    memory: 320Mi
+  # Two replicas like every other user-facing service. The key ring is a node-local (local-path)
+  # ReadWriteOnce volume: its node affinity puts both pods, and every surge pod, on the node that
+  # holds it, and RWO is per node, so both mount the same ring (see templates/pvcs.yaml). The claim
+  # itself is unchanged - a PVC spec is immutable.
+  assistant-service:   # p95 193Mi / 31m
+    replicas: 2
+    cpu: 50m
+    memory: 256Mi
     cpuLimit: 300m
     memoryLimit: 640Mi
     autoscaling: {enabled: false}
     persistence:
       storageClass: local-path
       accessMode: ReadWriteOnce
+      nodeLocal: true
 
-  # Worker requests follow measured production usage (24h peak working set 110-280Mi, p95 CPU
-  # ~60m, 2026-09-23); limits keep compose's headroom for bursts.
-  stt-worker:
-    cpu: 150m
-    memory: 384Mi
+  stt-worker:          # p95 122Mi / 93m (max 160Mi)
+    cpu: 130m
+    memory: 160Mi
     cpuLimit: 600m
     memoryLimit: 1Gi
 
-  translation-worker:
-    cpu: 150m
-    memory: 384Mi
+  translation-worker:  # p95 124Mi / 73m
+    cpu: 100m
+    memory: 176Mi
     cpuLimit: 300m
     memoryLimit: 768Mi
 
-  tts-worker:
-    cpu: 150m
-    memory: 384Mi
+  tts-worker:          # p95 112Mi / 65m (max 157Mi)
+    cpu: 90m
+    memory: 160Mi
     cpuLimit: 500m
     memoryLimit: 1Gi
 
-  suggestion-worker:
-    cpu: 100m
-    memory: 256Mi
+  suggestion-worker:   # p95 113Mi / 90m
+    cpu: 120m
+    memory: 160Mi
     cpuLimit: 200m
     memoryLimit: 512Mi
 
-  embedding-worker:
+  embedding-worker:    # p95 116Mi / 93m (max 152Mi)
     replicas: 1
-    cpu: 150m
-    memory: 512Mi
+    cpu: 130m
+    memory: 160Mi
     cpuLimit: 300m
     memoryLimit: 1Gi
     autoscaling: {enabled: false}
 
-  security-worker:
+  security-worker:     # p95 112Mi / 86m
     replicas: 1
-    cpu: 100m
-    memory: 192Mi
+    cpu: 120m
+    memory: 160Mi
     cpuLimit: 200m
     memoryLimit: 384Mi
 
-  billing-worker:
+  billing-worker:      # p95 90Mi / 91m
     replicas: 1
-    cpu: 100m
-    memory: 192Mi
+    cpu: 120m
+    memory: 128Mi
     cpuLimit: 200m
     memoryLimit: 384Mi
 
-  metrics-exporter:
-    cpu: 50m
-    memory: 96Mi
+  metrics-exporter:    # p95 58Mi / 10m
+    cpu: 25m
+    memory: 80Mi
     cpuLimit: 100m
     memoryLimit: 192Mi
 
-  livekit-ingress-worker:
+  # The one workload that was UNDER-requested: p95 629Mi (max 649Mi) against a 512Mi request, and
+  # p95 CPU 205m against a 200m request with a 75% HPA target, so it sat at 3/3 replicas. The
+  # limit moves up with the request so a burst is not an OOM kill.
+  livekit-ingress-worker:  # p95 629Mi / 205m
     replicas: 1
-    cpu: 200m
-    memory: 512Mi
-    cpuLimit: 500m
-    memoryLimit: 1Gi
+    cpu: 320m
+    memory: 832Mi
+    cpuLimit: 600m
+    memoryLimit: 1536Mi
     autoscaling: {enabled: true, min: 1, max: 3, cpu: 75}
 
-  assistant-worker:
+  assistant-worker:    # p95 115Mi / 119m (max 154Mi)
     replicas: 1
-    cpu: 150m
-    memory: 384Mi
+    cpu: 180m
+    memory: 160Mi
     cpuLimit: 300m
     memoryLimit: 768Mi
     autoscaling: {enabled: true, min: 1, max: 3, cpu: 80}
-
-# Production has ONE App node, and its memory requests sit at ~99% (2026-09-24: 15.7 of 16 GiB).
-# A surge pod cannot schedule there, so every multi-replica rollout stalled and release v220 timed
-# out. Replace one pod at a time instead: the other replica keeps serving, and the freed memory is
-# what the new pod schedules into. Single-replica workloads still surge (they would otherwise go down).
-rollout:
-  multiReplica:
-    maxSurge: 0
-    maxUnavailable: 1

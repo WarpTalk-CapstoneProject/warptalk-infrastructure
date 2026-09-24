@@ -30,6 +30,10 @@ metadata:
 spec:
   instances: {{ .Values.postgres.instances }}
   primaryUpdateStrategy: unsupervised
+  primaryUpdateMethod: {{ .Values.postgres.primaryUpdateMethod | default "switchover" }}
+  {{- with .Values.postgres.priorityClassName }}
+  priorityClassName: {{ . }}
+  {{- end }}
   failoverDelay: 30
   switchoverDelay: 60
   smartShutdownTimeout: 30

@@ -23,7 +23,7 @@ compose is a fallback for a rebuilt Docker host, not the running system.
 | --- | --- | --- |
 | `build-scan-sign` | release env | Builds, SBOMs, Trivy HIGH/CRITICAL gate, Cosign signing, uploads `release-manifest.json`. Unchanged. |
 | `k8s-bootstrap` (opt-in `k8s_bootstrap=true`) | `K8S_BOOTSTRAP_KUBECONFIG` (cluster-admin) | Applies `deploy/k3s/cluster/deployer-rbac.yaml`, materializes secrets, labels/taints nodes, installs the locked add-ons (`install-k3s-addons.sh`). Idempotent. |
-| `production-k8s` | `K8S_KUBECONFIG` (the `warptalk-deployer` ServiceAccount; the job refuses a cluster-admin credential) | Materializes secrets from GitHub `production`, labels/taints nodes, `deploy-k3s-data.sh`, `deploy-k3s-release.sh` (image refs and `releaseId` from the signed manifest; migrations as the pre-upgrade hook; `accept-k3s-release.sh`; automatic `helm rollback` on failed acceptance), `smoke-production.sh`, then a Kubernetes-mode health inspection into the run summary. |
+| `production-k8s` | `K8S_KUBECONFIG` (the `warptalk-deployer` ServiceAccount; the job refuses a cluster-admin credential) | Materializes secrets from GitHub `production`, labels/taints nodes, `deploy-k3s-data.sh`, `deploy-k3s-release.sh` (image refs and `releaseId` from the signed manifest; migrations as a gated Job BEFORE the upgrade; `helm upgrade --wait`, surge or in-place by measured headroom; `accept-k3s-release.sh`; on any failure `helm rollback` to the last DEPLOYED revision), `smoke-production.sh`, then a Kubernetes-mode health inspection into the run summary. |
 
 `k8s_dry_run=true` runs every `production-k8s` step server-side (`kubectl apply
 --dry-run=server`, `helm upgrade --dry-run=server`) plus all contract checks and changes
@@ -31,6 +31,27 @@ nothing. The bootstrap is not affected by it: it only installs add-ons, RBAC, no
 secrets idempotently, and a server-side dry run of the release needs the add-on CRDs to exist.
 It is also how Traefik and kube-prometheus-stack pick up the locked values in this directory:
 a release never touches the `traefik` or `monitoring` namespaces.
+
+`deploy-k3s-release.sh` runs in this order, and each step is a gate for the next
+(`scripts/test-k3s-release-gate.sh` pins it with kubectl and Helm stubbed):
+
+1. **Rollback target.** The last revision Helm marked `deployed`, read before anything changes.
+   A release whose latest revision is `pending-*` (an interrupted run) is refused, with the
+   rollback command in the message. Never "the previous revision": after a failed upgrade that is
+   a failed one, which is what `--atomic` rolled back to on 24 Sep (and hit PDBs that revision
+   had never created).
+2. **Migrations.** The chart renders the migrator ServiceAccount and a
+   `warptalk-migrations-<release>` Job (`migrations.mode=job`); the script applies it and waits.
+   If it fails, the release stops with nothing rolled and the running pods keep the schema they
+   were built for. The runner skips already-applied files, so a re-run is harmless. The release
+   itself carries no migration hook (`migrations.mode: external`).
+3. **Rollout shape.** Surge (`maxSurge 1 / maxUnavailable 0`) when the App node can fit one more
+   pod of the release's largest workload, measured from live requests; otherwise this one
+   release replaces pods in place (surge 0 / unavailable 1) and says so with a `::warning::`.
+   `K3S_ROLLOUT_MODE=surge|in-place` forces either.
+4. **Upgrade.** `helm upgrade --wait --timeout 15m`, no `--atomic`. On failure, and on failed
+   acceptance afterwards, `helm rollback <last deployed> --wait`. Migrations stay applied: they
+   are additive, and the previous images run against the new schema.
 
 Every Helm call goes through `scripts/helm-locked.sh`, i.e. `HELM_IMAGE` from
 `addons.lock.env` (3.18.6), never the runner's `helm`. Every script requires an explicit
@@ -64,48 +85,63 @@ turns it off and `install-k3s-addons.sh` no longer installs the operator unless
 
 ### Capacity plan
 
-Allocatable after the kubelet reservations set by `k8s-cluster-bootstrap.sh`
-(system 200m/512Mi, kube 200m/512Mi, eviction 200Mi): App ~7.6 CPU / ~14.8 GiB, Data
-~1.6 CPU / ~6.8 GiB, Infra ~1.6 CPU / ~2.8 GiB.
+Right-sized on 2026-09-24 from Prometheus on the production cluster
+(`container_memory_working_set_bytes` and `rate(container_cpu_usage_seconds_total[5m])`, `[7d]`
+range, which is the cluster's whole 4.8-day life including the first releases and live meetings).
+Rule: request ~= p95 x 1.3, rounded up to 16Mi / 10m, floors 128Mi / 50m; HPA-managed workloads
+get CPU >= 100m and high enough that p95 sits below the HPA target (at 150m/200m requests
+assistant-worker and livekit-ingress-worker sat at 3/3 replicas for days). Limits keep compose's
+headroom (>= ~1.5x the request).
 
-App node, WarpTalk requests at minimum replicas (`k8s-app-values.yaml`; limits are the
-compose ceilings, ~2x the request):
+The App node's allocatable is **15892Mi / 8 CPU** (kubelet reports 16273348Ki; the cluster was
+built without kubelet reservations). On 24 Sep its requests were at 99% (15872Mi) while pods used
+~8.6 GiB.
 
-| Workload | Replicas (min-max) | Request CPU / mem | Limit CPU / mem | At minimum |
-| --- | --- | --- | --- | --- |
-| gateway | 2-4 | 250m / 256Mi | 500m / 512Mi | 500m / 512Mi |
-| frontend | 2-3 | 100m / 256Mi | 200m / 512Mi | 200m / 512Mi |
-| auth-service | 2-3 | 100m / 256Mi | 200m / 512Mi | 200m / 512Mi |
-| translation-room-service | 2-3 | 150m / 320Mi | 300m / 640Mi | 300m / 640Mi |
-| transcript-service | 2-3 | 150m / 320Mi | 300m / 640Mi | 300m / 640Mi |
-| notification-service | 2-3 | 100m / 192Mi | 200m / 384Mi | 200m / 384Mi |
-| meeting-service | 2-3 | 200m / 384Mi | 400m / 768Mi | 400m / 768Mi |
-| workspace-service | 2-3 | 150m / 320Mi | 300m / 640Mi | 300m / 640Mi |
-| billing-service | 2-3 | 150m / 320Mi | 300m / 640Mi | 300m / 640Mi |
-| assistant-service | 1 (RWO key ring) | 150m / 320Mi | 300m / 640Mi | 150m / 320Mi |
-| stt-worker (KEDA) | 1-3 | 300m / 1Gi | 600m / 2Gi | 300m / 1024Mi |
-| translation-worker (KEDA) | 1-3 | 150m / 384Mi | 300m / 768Mi | 150m / 384Mi |
-| tts-worker (KEDA) | 1-3 | 250m / 768Mi | 500m / 1536Mi | 250m / 768Mi |
-| livekit-ingress-worker | 1-3 | 250m / 768Mi | 500m / 1536Mi | 250m / 768Mi |
-| assistant-worker | 1-3 | 150m / 384Mi | 300m / 768Mi | 150m / 384Mi |
-| embedding-worker | 1 | 150m / 512Mi | 300m / 1Gi | 150m / 512Mi |
-| suggestion-worker (singleton) | 1 | 100m / 256Mi | 200m / 512Mi | 100m / 256Mi |
-| security-worker | 1 | 100m / 192Mi | 200m / 384Mi | 100m / 192Mi |
-| billing-worker | 1 | 100m / 192Mi | 200m / 384Mi | 100m / 192Mi |
-| metrics-exporter (singleton) | 1 | 50m / 96Mi | 100m / 192Mi | 50m / 96Mi |
-| otel collector | 1 | 100m / 256Mi | 200m / 384Mi | 100m / 256Mi |
-| seq | 1 | 100m / 384Mi | 200m / 640Mi | 100m / 384Mi |
-| gotenberg | 1 | 100m / 128Mi | 1 / 512Mi | 100m / 128Mi |
-| 3 cost exporters | 1 each | 25m / 48Mi | 200m / 128Mi | 75m / 144Mi |
-| **WarpTalk total** | | | | **4825m / 11056Mi (10.8 GiB)** |
+| Workload | Min replicas | Observed p95 / max memory | Observed p95 CPU | Memory request old -> new | CPU request old -> new |
+| --- | --- | --- | --- | --- | --- |
+| frontend | 2 | 121 / 154Mi | 25m | 256 -> 160Mi | 100 -> 100m |
+| gateway | 2 | 148 / 160Mi | 60m | 256 -> 208Mi | 250 -> 100m |
+| auth-service | 2 | 233 / 241Mi | 38m | 256 -> 304Mi | 100 -> 100m |
+| translation-room-service | 2 | 215 / 219Mi | 44m | 320 -> 288Mi | 150 -> 100m |
+| transcript-service | 2 | 182 / 192Mi | 42m | 320 -> 240Mi | 150 -> 100m |
+| notification-service | 2 | 169 / 182Mi | 29m | 192 -> 224Mi | 100 -> 100m |
+| meeting-service | 2 | 184 / 193Mi | 29m | 384 -> 240Mi | 200 -> 100m |
+| workspace-service | 2 | 253 / 265Mi | 48m | 320 -> 336Mi | 150 -> 100m |
+| billing-service | 2 | 223 / 229Mi | 48m | 320 -> 304Mi | 150 -> 100m |
+| assistant-service | 1 -> **2** | 193 / 196Mi | 31m | 320 -> 256Mi | 150 -> 50m |
+| stt-worker (KEDA) | 1 | 122 / 160Mi | 93m | 384 -> 160Mi | 150 -> 130m |
+| translation-worker (KEDA) | 1 | 124 / 132Mi | 73m | 384 -> 176Mi | 150 -> 100m |
+| tts-worker (KEDA) | 1 | 112 / 157Mi | 65m | 384 -> 160Mi | 150 -> 90m |
+| livekit-ingress-worker (HPA) | 1 | 629 / 649Mi | 205m | **512 -> 832Mi** | 200 -> 320m |
+| assistant-worker (HPA) | 1 | 115 / 154Mi | 119m | 384 -> 160Mi | 150 -> 180m |
+| embedding-worker | 1 | 116 / 152Mi | 93m | 512 -> 160Mi | 150 -> 130m |
+| suggestion-worker (singleton) | 1 | 113 / 125Mi | 90m | 256 -> 160Mi | 100 -> 120m |
+| security-worker | 1 | 112 / 115Mi | 86m | 192 -> 160Mi | 100 -> 120m |
+| billing-worker | 1 | 90 / 92Mi | 91m | 192 -> 128Mi | 100 -> 120m |
+| metrics-exporter (singleton) | 1 | 58 / 58Mi | 10m | 96 -> 80Mi | 50 -> 25m |
+| gotenberg | 1 | 170 / 171Mi | 3m | **128 -> 224Mi** | 100 -> 100m |
+| otel collector | 1 | 88 / 90Mi | 15m | 256 -> 128Mi | 100 -> 50m |
+| seq | 1 | 132 / 146Mi | 13m | 384 -> 176Mi | 100 -> 50m |
+| 3 cost exporters | 1 each | 14 / 14Mi | 1m | 48 -> 32Mi each | 25 -> 10m each |
+| **WarpTalk chart at minimum replicas** | | | | **10096 -> 7920Mi** | **4675 -> 3465m** |
+| Postgres x2 (data chart, App node) | 2 | 315 / 402Mi, 259 / 263Mi | 18m | 1Gi -> 512Mi each | 300 -> 100m each |
 
-Add-ons on the App node (Traefik 2x100m/128Mi, KEDA, cert-manager, CNPG/Barman/RabbitMQ
-operators, metrics-server, Calico, node-exporter) request roughly 0.9 CPU / 1.4 GiB, for
-~5.7 CPU (75%) / ~12.2 GiB (82%) at rest. The remainder (~1.9 CPU / ~2.6 GiB) is HPA/KEDA
-headroom: every scale-out step is at most 300m / 1 GiB, so roughly four simultaneous
-scale-outs fit; beyond that pods stay Pending and `WarpTalkDeploymentReplicasUnavailable`
-fires. `check-k3s-deployment.sh` fails the build if the WarpTalk total exceeds
-5000m / 11 GiB.
+Everything else requesting memory on the App node, unchanged here: add-ons 1200Mi (KEDA 3 x
+100Mi, metrics-server 200Mi, Alertmanager 200Mi, RabbitMQ operator 500Mi - its p95 is 23Mi, a
+follow-up for `install-k3s-addons.sh`), redis-node-0 800Mi and RabbitMQ 512Mi (both changed only
+in their runbook steps, because a change restarts them).
+
+**App node at minimum replicas: 11456Mi of 15892Mi requested (72.1%), 4436Mi (27.9%) free** -
+room for one surge pod of the largest workload (livekit-ingress-worker, 832Mi) plus
+redis-node-0 (800Mi) with 2.8 GiB to spare. `check-k3s-deployment.sh` computes this from the
+rendered chart and the data values and fails the build below 25% free or below that headroom.
+After `DATA-PLACEMENT-RUNBOOK.md` moves Postgres, redis-node-0 and RabbitMQ to the Data node,
+another ~2.3 GiB comes back.
+
+Two things the requests do not cover: Prometheus and Grafana run on the App node with **no**
+requests (~1.1 GiB and ~0.4 GiB working set), and a live meeting raises the workers' working
+set. The limits, not the requests, are the ceiling for both; `WarpTalkDeploymentReplicasUnavailable`
+fires if a scale-out cannot schedule.
 
 HPA targets are a share of the request (80% for .NET/Python, 70% gateway, 75% LiveKit
 ingress). With the previous 30m requests a 75% target meant "scale above 22 millicores".
@@ -113,7 +149,8 @@ ingress). With the previous 30m requests a 75% target meant "scale above 22 mill
 Data node requests: Postgres 2 x 300m/1Gi (limit 600m/2Gi, `shared_buffers` 512MB),
 PgBouncer 50m/64Mi, Redis 3 x (75m/704Mi + sentinel 25m/64Mi + exporter 10m/32Mi),
 Qdrant 100m/768Mi, RabbitMQ 200m/512Mi, node-exporter 25m/32Mi: ~1.3 CPU (81%) /
-~5.8 GiB (85%).
+~5.8 GiB (85%) - the plan for when everything is on it. Today it carries Qdrant, PgBouncer,
+MinIO and redis-node-1 (15% requested).
 
 Infra node: control plane ~0.65 CPU, monitoring 350m / ~1.1 GiB requests.
 
@@ -122,19 +159,37 @@ and RabbitMQ 5Gi, and a claim cannot shrink (CloudNativePG rejects it; StatefulS
 templates are immutable), so the values keep those sizes and CI refuses anything smaller. On
 paper that exceeds the Data VM's 35 GB volume, and **a bigger volume is required before the
 claims could ever fill**: local-path does not enforce sizes, actual use on 2026-09-23 was under
-1 GiB, and `WarpTalkPersistentVolumeFilling` alerts at 15% free. Measured peaks the requests were
-checked against (24h working set): Postgres 350Mi, Redis 32Mi, Qdrant 19Mi, services 140-280Mi,
-workers 90-280Mi; p95 CPU 0-60m.
+1 GiB, and `WarpTalkPersistentVolumeFilling` alerts at 15% free.
+
+### Zero-downtime rollouts
+
+- Every Deployment surges (`maxSurge 1 / maxUnavailable 0`, chart default; production values do
+  not override it). The deploy script falls back to in-place for one release only when the App
+  node cannot fit the extra pod.
+- Readiness gates traffic (5s period, 3s timeout); a startup probe (up to 3 min) keeps liveness
+  from killing a slow start while two dozen pods start at once.
+- Drain: `preStop` is the kubelet's own `sleep` action (10s, no binary needed in the image), so
+  Traefik and kube-proxy stop routing before SIGTERM; `terminationGracePeriodSeconds: 45` covers
+  that plus ASP.NET Core's 30s shutdown (gotenberg 75s for a conversion in flight).
+- Every user-facing service keeps >= 2 replicas and a PDB with `maxUnavailable: 1`
+  (assistant-service included: its RWO local-path key ring is node-local, so both pods mount it on
+  the node that holds it; see `templates/pvcs.yaml`, `persistence.nodeLocal`).
+- Replicas spread softly over `kubernetes.io/hostname` (and zone): `ScheduleAnyway`, so one App
+  node still schedules everything, and a second App node gets one replica of each automatically.
+- Data pods run under the `warptalk-data-critical` PriorityClass (data chart): a data pod that
+  cannot schedule preempts application pods; application pods carry no class and can never
+  preempt a data pod.
 
 ### Data layer on one VM
 
 As found live: both Postgres instances, `warptalk-redis-node-0` and RabbitMQ run on the **App**
 node, because their local-path volumes were first bound there. Placement is therefore soft
 (prefer `node.warptalk.io/role=data`, tolerate its taint); a hard selector would leave those pods
-Pending next to volumes they cannot leave. Moving them is deliberate work: for Postgres add a
-third instance (it schedules on the Data node), switch over to it, then remove an App-node
-instance; for Redis delete the App-node pod's PVC while two healthy nodes remain; RabbitMQ
-needs a maintenance window.
+Pending next to volumes they cannot leave. Moving them is deliberate work, step by step with
+verification and rollback in [`DATA-PLACEMENT-RUNBOOK.md`](DATA-PLACEMENT-RUNBOOK.md): Postgres
+via a third CloudNativePG instance on the Data node and a switchover; Redis by promoting
+redis-node-1 (already on the Data node) and re-creating node-0's volume there; RabbitMQ in a short
+maintenance window.
 
 Postgres runs 2 instances with `synchronous.dataDurability: preferred`: a third instance on
 the same VM adds no protection against losing the VM, and with `required` a restarting
@@ -211,7 +266,9 @@ NOT installed: it is another webhook + controller (~200Mi) on an App node that i
 
 ### Before the next release
 
-1. Deployer identity, once, with the admin kubeconfig you already have:
+1. Deployer identity, with the admin kubeconfig you already have (again after any change to the
+   file - it now also grants the `warptalk-data-critical` PriorityClass, without which
+   `deploy-k3s-data.sh` stops in its preflight):
    `kubectl --kubeconfig ~/.kube/config-warptalk-prod apply --server-side -f deploy/k3s/cluster/deployer-rbac.yaml`
 2. `K8S_KUBECONFIG` in the GitHub `production` environment, from that ServiceAccount:
    `KUBECONFIG=~/.kube/config-warptalk-prod K8S_API_SERVER=https://100.70.83.108:6443 scripts/render-k8s-deployer-kubeconfig.sh | gh secret set K8S_KUBECONFIG --env production --repo WarpTalk-CapstoneProject/warptalk-infrastructure`
@@ -375,10 +432,10 @@ estimates only and never customer billing.
    The release is rejected unless all 21 release images have registry digests;
    20 are rendered into K3s while the host-only health inspector is excluded
    and all four platform image occurrences match their locked digests. The
-   pre-upgrade Job applies the shared migration history, provisions service
-   roles, extracts the eight logical databases when needed, applies
-   service-owned migrations and enables PostgreSQL observability before any
-   workload rolls.
+   migration gate Job (run by the script before `helm upgrade`, not as a hook)
+   applies the shared migration history, provisions service roles, extracts the
+   eight logical databases when needed, applies service-owned migrations and
+   enables PostgreSQL observability before any workload rolls.
 
 7. Run the production smoke, security, migration-boundary and performance
    gates from outside the cluster. First record the read-only cluster
