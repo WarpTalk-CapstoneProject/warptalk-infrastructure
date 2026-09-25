@@ -134,7 +134,11 @@ verify_reusable_image() {
       --arg buildFingerprint "$expected_fingerprint" \
       --arg anyCommit "$any_commit" '
       [ .[] | if type == "array" then .[] else . end | .payload |
-        (@base64d | fromjson | .predicate) |
+        # cosign wraps a `--type custom` predicate as {"Data": "<json string>", "Timestamp": ...}.
+        # Without unwrapping it nothing ever matched, and every "reusable" image was rebuilt
+        # (v227: 11 images with identical sources rebuilt as "unsigned or untrusted").
+        (@base64d | fromjson | .predicate |
+          if (type == "object" and ((.Data? | type) == "string")) then (.Data | fromjson) else . end) |
         select(
           .sourceRepository == $sourceRepository and
           ($anyCommit == "true" or .sourceCommit == $sourceCommit) and

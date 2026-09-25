@@ -81,4 +81,20 @@ jq -e '
 ' "$infra_root/deploy/production/image-matrix.json" >/dev/null ||
   fail "an image-matrix sourcePaths entry is malformed"
 
+# 5. build-release.sh's reuse check accepts the provenance cosign actually returns: a `custom`
+#    predicate wrapped as {"Data": "<json string>"}. It never did before, so no image was reused.
+mkdir -p "$work/bin"
+payload="$(printf '%s' '{"predicate":{"Data":"{\"sourceRepository\":\"warptalk-backend\",\"sourceCommit\":\"old-commit\",\"buildFingerprint\":\"fp1\"}","Timestamp":"t"}}' | base64 | tr -d '\n')"
+printf '#!/bin/sh\nprintf %%s %s\n' "'{\"payload\":\"$payload\"}'" >"$work/bin/cosign"
+chmod +x "$work/bin/cosign"
+awk '/^verify_reusable_image\(\) \{/,/^}/' "$script_dir/build-release.sh" >"$work/verify.sh"
+verified="$(PATH="$work/bin:$PATH" COSIGN_CERTIFICATE_IDENTITY_REGEXP=x COSIGN_CERTIFICATE_OIDC_ISSUER=y sh -c \
+  ". '$work/verify.sh'; verify_reusable_image img@sha256:1 warptalk-backend new-commit fp1 true")" ||
+  fail "a Data-wrapped provenance for the same fingerprint was not accepted for reuse"
+[ "$verified" = "old-commit" ] || fail "reuse did not report the commit the image was built from (got '$verified')"
+if PATH="$work/bin:$PATH" COSIGN_CERTIFICATE_IDENTITY_REGEXP=x COSIGN_CERTIFICATE_OIDC_ISSUER=y sh -c \
+  ". '$work/verify.sh'; verify_reusable_image img@sha256:1 warptalk-backend new-commit other-fp true" >/dev/null; then
+  fail "a provenance for a different fingerprint was accepted for reuse"
+fi
+
 echo "Image source fingerprint contract: PASS"
