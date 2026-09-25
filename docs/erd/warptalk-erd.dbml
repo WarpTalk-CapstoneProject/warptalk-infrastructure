@@ -749,12 +749,35 @@ Table transcript.transcript_segments {
   is_corrected boolean [not null, default: false]
   is_final boolean [not null, default: true]
   matched_segment_id uuid
+  clean_text text [note: 'WT-716 tier 1. NULL = not cleaned (read original_text); empty = filler only']
+  clean_flags text[]
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
 
   indexes {
     (transcript_id, sequence_order) [unique]
   }
+}
+
+Table transcript.transcript_clean_sentences {
+  id uuid [pk, note: 'producer sentence_id']
+  transcript_id uuid [not null]
+  speaker_participant_id uuid
+  segment_ids uuid[] [not null, note: 'raw transcript_segments ids; no FK, cardinality > 0']
+  clean_text text [not null]
+  language varchar(15) [not null]
+  flags text[] [not null, default: `'{}'`]
+  source varchar(20) [not null, note: 'llm | prepass']
+  revision integer [not null, note: '>= 0; higher revision replaces']
+  start_time_ms integer
+  produced_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    transcript_id
+  }
+  Note: 'WT-716 tier 2: whole cleaned sentences, a view over raw segments, never a replacement.'
 }
 
 Table transcript.transcript_corrections {
@@ -1358,6 +1381,7 @@ Ref: transcript.transcripts.previous_transcript_id > transcript.transcripts.id
 Ref: transcript.transcript_segments.transcript_id > transcript.transcripts.id
 Ref: transcript.transcript_segments.speaker_participant_id > translation_room.translation_room_participants.id
 Ref: transcript.transcript_segments.matched_segment_id > transcript.transcript_segments.id
+Ref: transcript.transcript_clean_sentences.transcript_id > transcript.transcripts.id
 Ref: transcript.transcript_corrections.segment_id > transcript.transcript_segments.id
 Ref: transcript.transcript_corrections.user_id > auth.users.id
 Ref: transcript.transcript_corrections.translation_content_id > transcript.translation_contents.id

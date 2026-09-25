@@ -707,6 +707,12 @@ services:
       # closes the turn. Per-room override `translationRoom:{id}:flash_mode` still wins
       # in both directions, so a bad room can be moved back without a deploy.
       STT_STREAMING_ENABLED: "true"
+      # WT-716 tier 1: the deterministic filler/stutter prepass that runs inside this worker
+      # and publishes clean_text alongside the raw text on stt:results. Same flag name as the
+      # one on transcript-clean-worker on purpose — they are two halves of one feature, and
+      # turning tier 2 off while leaving tier 1 on (or the reverse) is a half-clean transcript.
+      # original_text is never touched either way, so this is safe to flip back.
+      TRANSCRIPT_CLEAN_ENABLED: "true"
     healthcheck: *ai-healthcheck
     deploy:
       resources:
@@ -781,6 +787,58 @@ services:
       # the mini tier cannot use the ASR-repair machinery, and these lines were transcribed
       # under exactly the conditions that needs.
       TRANSLATION_MODEL: gpt-4.1
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  # WT-716 tier 2 of "clean transcript": whole cleaned SENTENCES over the raw segments, read off
+  # transcript:clean and stored beside the raw rows, never instead of them. Tier 1 (fillers and
+  # stutters, per segment, deterministic) runs inside stt-worker on the live path; this is the
+  # LLM pass that joins segments into sentences once they are final.
+  #
+  # Its own image (ai-transcript-clean, the `transcript-clean` target of warptalk-ai/Dockerfile),
+  # NOT the ai-translation image under another command: the matrix fingerprints each image by its
+  # sourcePaths, and ai-translation's do not include transcript_clean_worker/, so a change to this
+  # worker alone would have reused a stale translation image. The Kubernetes release also demands
+  # exactly one workload per release image (deploy-k3s-release.sh), which a shared image breaks.
+  #
+  # A separate container rather than a loop inside translation-worker: this pass waits for
+  # segments to settle and then calls an LLM per sentence, which must never queue in front of a
+  # live translation somebody is listening for.
+  transcript-clean-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-transcript-clean:${IMAGE_TAG:?}
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: transcript-clean
+      # The kill switch for the whole feature, also set on stt-worker for tier 1. Off means the
+      # transcript is served raw, which is what every reader already falls back to when
+      # clean_text is NULL.
+      TRANSCRIPT_CLEAN_ENABLED: "true"
+      # Segments closer together than this are joined into one sentence candidate; a gap wider
+      # than it ends the sentence.
+      TRANSCRIPT_CLEAN_MERGE_GAP_MS: "1200"
+      # A hard ceiling so an unbroken monologue is still cut into sentences rather than growing
+      # one unbounded prompt.
+      TRANSCRIPT_CLEAN_MAX_SENTENCE_MS: "30000"
+      # A speaker who simply stopped talking must not leave the last sentence unflushed.
+      TRANSCRIPT_CLEAN_IDLE_FLUSH_MS: "4000"
+      # Nothing downstream waits on this worker; the LLM call is detached from the consume loop.
+      # On timeout or any failure revision 1 is simply not published and the rule-tier revision 0
+      # line stands. The raw segment is never touched either way.
+      TRANSCRIPT_CLEAN_LLM_TIMEOUT_S: "8"
+      # The guardrail that keeps "cleaning" from becoming "summarising": a candidate that deletes
+      # more than this fraction of the source is rejected and the raw text is kept instead.
+      TRANSCRIPT_CLEAN_MAX_DELETE_RATIO: "0.4"
+      # Pinned rather than left to the worker default, for the reason TRANSLATION_REALTIME_MODEL
+      # spells out above: an unpinned model means a code default silently decides what production
+      # runs. The same non-reasoning chat model translation-worker uses off the realtime socket —
+      # this pass rewrites transcribed speech under exactly the conditions that model is tuned
+      # for, and a reasoning tier buys nothing for filler removal.
+      TRANSCRIPT_CLEAN_MODEL: gpt-4.1
     healthcheck: *ai-healthcheck
     deploy:
       resources:
