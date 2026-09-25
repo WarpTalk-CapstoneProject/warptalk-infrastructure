@@ -399,6 +399,12 @@ workloads:
       Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
       Storage__S3__BucketName: STORAGE_S3_BUCKET_NAME
       VectorDb__ApiKey: VECTOR_DB_API_KEY
+    # G12 pending-work inbox: each owning service's inbox-items endpoint, called directly over the
+    # cluster network with the staff member's own token (not through the gateway).
+    env:
+      AdminInbox__BillingUrl: http://billing-service:5107
+      AdminInbox__AuthUrl: http://auth-service:5101
+      AdminInbox__NotificationUrl: http://notification-service:5104
   billing-service:
     image: billing-service
     # Hosted background loops that must not run concurrently on two replicas. Rendered as the
@@ -426,6 +432,14 @@ workloads:
       SignalR__Redis: Redis__ConnectionString
       Stripe__SecretKey: STRIPE_SECRET_KEY
       Stripe__WebhookSecret: STRIPE_WEBHOOK_SECRET
+      # G12 operating-expense receipts: the in-cluster MinIO every other service uses, in the
+      # workspace documents bucket under the finance/receipts/ prefix (no new bucket or secret).
+      # Missing values leave billing running with receipt uploads refused (503), never crashing.
+      Storage__Provider: STORAGE_PROVIDER
+      Storage__S3__ServiceUrl: STORAGE_S3_SERVICE_URL
+      Storage__S3__AccessKey: STORAGE_S3_ACCESS_KEY
+      Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
+      Storage__S3__BucketName: STORAGE_S3_BUCKET_NAME
     # CartesiaUsageSyncWorker (admin Insights, measured dubbing cost). Optional: without the admin
     # key the worker logs once that it is disabled and Insights estimate. Several replicas are safe:
     # they share one sync schedule through a Redis lease, so Cartesia sees one sync per interval.

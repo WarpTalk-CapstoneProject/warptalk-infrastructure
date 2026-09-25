@@ -215,6 +215,10 @@ services:
       # production (WT-402). Prometheus publishes 9090 on the infra private address only, and
       # the query API is read-only: this deployment does not run --web.enable-admin-api.
       Monitoring__PrometheusUrl: http://${INFRA_PRIVATE_IP:?}:9090
+      # G12 pending-work inbox: the owning services' inbox-items endpoints, called directly.
+      AdminInbox__BillingUrl: http://billing-service:5107
+      AdminInbox__AuthUrl: http://auth-service:5101
+      AdminInbox__NotificationUrl: http://notification-service:5104
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -540,6 +544,12 @@ services:
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:?}
       Stripe__SuccessUrl: https://${APP_DOMAIN:?}/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}
       Stripe__CancelUrl: https://${APP_DOMAIN:?}/workspace/payment/plans
+      # G12 operating-expense receipts, in the workspace documents bucket under finance/receipts/.
+      Storage__Provider: MinIO
+      Storage__S3__ServiceUrl: http://${DATA_PRIVATE_IP:?}:9000
+      Storage__S3__AccessKey: ${MINIO_ROOT_USER:?}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:?}
+      Storage__S3__BucketName: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:?}
       BillingRates__SttPerMinute: ${BILLING_RATE_STT_PER_MINUTE:-15}
       BillingRates__TranslationPerMinute: ${BILLING_RATE_TRANSLATION_PER_MINUTE:-15}
       BillingRates__StandardTtsPerMinute: ${BILLING_RATE_STANDARD_TTS_PER_MINUTE:-15}
