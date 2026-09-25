@@ -554,6 +554,8 @@ services:
       # Plugin marketplace: a member's request notifies the workspace Owner, and the Owner's
       # decision notifies the member, through the notification service's SendNotification RPC.
       GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
+      # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
+      GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -590,6 +592,8 @@ services:
       GrpcUrls__NotificationServiceUrl: "http://notification-service:50054"
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
+      # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
+      GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
       AllowedOrigins__0: ${ALLOWED_ORIGINS:-http://localhost:3000}
       RateLimits__IpPermitLimit: ${RATE_LIMIT_IP_PER_WINDOW:-300}
       RateLimits__UserPermitLimit: ${RATE_LIMIT_USER_PER_WINDOW:-180}
