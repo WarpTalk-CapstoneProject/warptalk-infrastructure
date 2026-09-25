@@ -474,6 +474,8 @@ services:
       # Plugin marketplace request notifications (member -> Owner, Owner -> member) go through the
       # notification service's SendNotification RPC. Same rule: required outside Development.
       GrpcSettings__NotificationServiceUrl: http://notification-service:50054
+      # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
+      GrpcSettings__AuthServiceUrl: http://auth-service:50051
       # Plugin OAuth callbacks land the browser here; the service refuses to start outside
       # Development when this is missing or points at localhost.
       AppBaseUrl: https://${APP_DOMAIN:?}
@@ -584,6 +586,8 @@ services:
       GrpcUrls__NotificationServiceUrl: http://notification-service:50054
       GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
       GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
+      # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
+      GrpcUrls__AuthServiceUrl: http://auth-service:50051
       AllowedOrigins__0: ${ALLOWED_ORIGINS:?}
       RateLimits__IpPermitLimit: ${RATE_LIMIT_IP_PER_WINDOW:-300}
       RateLimits__UserPermitLimit: ${RATE_LIMIT_USER_PER_WINDOW:-180}
