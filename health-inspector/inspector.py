@@ -47,10 +47,9 @@ EXPECTED_SERVICES: dict[str, ServiceProbe] = {
 PRODUCTION_AI_SERVICES = {
     "stt-worker",
     "translation-worker",
-    # WT-716. Runs the ai-translation image under a different command, so a release pins it
-    # through that image's alsoServices — but it still needs its own entry here, because the
-    # heartbeat probe is per WORKER_HEALTH_NAME and a container whose consume loop died keeps
-    # reporting a running image.
+    # WT-716. Its own image (ai-transcript-clean) and its own Deployment on Kubernetes; listed so
+    # both platforms expect it, and a container whose consume loop died is caught by its
+    # WORKER_HEALTH_NAME heartbeat rather than looking like a running image.
     "transcript-clean-worker",
     "tts-worker",
     "assistant-worker",

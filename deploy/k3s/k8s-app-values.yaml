@@ -234,6 +234,16 @@ workloads:
     cpuLimit: 300m
     memoryLimit: 768Mi
 
+  # WT-716, new: no production history yet, so sized from its closest relative (suggestion-worker,
+  # also a text-only singleton on stt:results that calls an LLM off the live path, p95 113Mi / 90m)
+  # plus headroom for the fugashi/unidic-lite Japanese tokenizer the prepass loads. Re-measure after
+  # a week and apply the same p95 x 1.3 rule as the rest.
+  transcript-clean-worker:
+    cpu: 50m
+    memory: 192Mi
+    cpuLimit: 300m
+    memoryLimit: 512Mi
+
   tts-worker:          # p95 112Mi / 65m (max 157Mi)
     cpu: 90m
     memory: 160Mi

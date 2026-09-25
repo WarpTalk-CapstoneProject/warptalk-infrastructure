@@ -799,18 +799,18 @@ services:
   # stutters, per segment, deterministic) runs inside stt-worker on the live path; this is the
   # LLM pass that joins segments into sentences once they are final.
   #
-  # Same ai-translation image, different module and stream — the same arrangement as
-  # translation-backfill-worker above. The builder stage of warptalk-ai/Dockerfile installs every
-  # worker package into one venv, so no new build target, scan or signature enters the release
-  # pipeline for this container; `command` is what picks the worker.
+  # Its own image (ai-transcript-clean, the `transcript-clean` target of warptalk-ai/Dockerfile),
+  # NOT the ai-translation image under another command: the matrix fingerprints each image by its
+  # sourcePaths, and ai-translation's do not include transcript_clean_worker/, so a change to this
+  # worker alone would have reused a stale translation image. The Kubernetes release also demands
+  # exactly one workload per release image (deploy-k3s-release.sh), which a shared image breaks.
   #
   # A separate container rather than a loop inside translation-worker: this pass waits for
   # segments to settle and then calls an LLM per sentence, which must never queue in front of a
   # live translation somebody is listening for.
   transcript-clean-worker:
     <<: *service-defaults
-    image: ${IMAGE_REGISTRY:?}/ai-translation:${IMAGE_TAG:?}
-    command: ["python", "-m", "transcript_clean_worker"]
+    image: ${IMAGE_REGISTRY:?}/ai-transcript-clean:${IMAGE_TAG:?}
     environment:
       <<: *ai-environment
       WORKER_HEALTH_NAME: transcript-clean
@@ -826,8 +826,9 @@ services:
       TRANSCRIPT_CLEAN_MAX_SENTENCE_MS: "30000"
       # A speaker who simply stopped talking must not leave the last sentence unflushed.
       TRANSCRIPT_CLEAN_IDLE_FLUSH_MS: "4000"
-      # Nothing downstream waits on this worker, but a hung call would hold the consumer group's
-      # floor. On timeout the sentence falls back to the raw text (flag fallback_raw).
+      # Nothing downstream waits on this worker; the LLM call is detached from the consume loop.
+      # On timeout or any failure revision 1 is simply not published and the rule-tier revision 0
+      # line stands. The raw segment is never touched either way.
       TRANSCRIPT_CLEAN_LLM_TIMEOUT_S: "8"
       # The guardrail that keeps "cleaning" from becoming "summarising": a candidate that deletes
       # more than this fraction of the source is rejected and the raw text is kept instead.
