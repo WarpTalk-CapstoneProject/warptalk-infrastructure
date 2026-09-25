@@ -152,6 +152,19 @@ groups:
         annotations:
           summary: "Dead-letter stream {{ $labels.stream }} is not empty"
 
+      # Billable AI work that nobody paid for. 2026-09-24: a workspace whose subscription had
+      # expired the day before translated and dubbed a 14-minute meeting free — billing_worker
+      # found no subscription, logged a warning per segment, and returned. It now stops the room
+      # and counts it (warptalk_billing_unbilled_events_total, from the ai-metrics exporter).
+      # Any increase means a room was stopped for having no live plan; it should be rare, and a
+      # sustained rate means a gate upstream (paywall snapshot, Start Translation) is not holding.
+      - alert: WarpTalkUnbilledAiWork
+        expr: sum by (reason, charge_type) (increase(warptalk_billing_unbilled_events_total{reason="no_active_subscription"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} {{ $labels.charge_type }} events in 15m had no active subscription to bill; the room was stopped"
+
       # A stream with a producer and nothing reading it.
       #
       # Redis keeps a consumer registered after its process dies, so this is NOT a liveness
