@@ -36,7 +36,9 @@ matrix_file="$infra_root/deploy/production/image-matrix.json"
 lock_file="$infra_root/deploy/k3s/addons.lock.env"
 runtime_secret_check="$infra_root/scripts/check-k3s-runtime-secret.sh"
 acceptance_check="$infra_root/scripts/accept-k3s-release.sh"
-helm_locked="$infra_root/scripts/helm-locked.sh"
+# Always the locked Helm. K3S_HELM_COMMAND exists only so scripts/test-k3s-release-gate.sh can put
+# a recording stub in front of it; the release job never sets it.
+helm_locked="${K3S_HELM_COMMAND:-$infra_root/scripts/helm-locked.sh}"
 
 fail() {
   echo "K3s release: $*" >&2
@@ -74,7 +76,17 @@ jq -e --slurpfile matrix "$matrix_file" '
 
 override_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-images.XXXXXX")"
 rendered_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-release.XXXXXX")"
-trap 'rm -f "$override_file" "$rendered_file"' EXIT INT TERM
+migration_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-migrations.XXXXXX")"
+# The rollout shape for this one release (see choose_rollout_mode); empty means the chart default.
+rollout_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-rollout.XXXXXX")"
+printf '{}\n' >"$rollout_file"
+capacity_nodes_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-nodes.XXXXXX")"
+capacity_pods_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-pods.XXXXXX")"
+# reconcile_prestop_handlers: the target's workloads (YAML, then JSON) and the live ones.
+prestop_target_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-target.XXXXXX")"
+prestop_desired_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-desired.XXXXXX")"
+prestop_live_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-live.XXXXXX")"
+trap 'rm -f "$override_file" "$rendered_file" "$migration_file" "$rollout_file" "$capacity_nodes_file" "$capacity_pods_file" "$prestop_target_file" "$prestop_desired_file" "$prestop_live_file"' EXIT INT TERM
 
 jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
   ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
@@ -85,6 +97,9 @@ jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
     },
     # The secret source is chosen by the release job, not by the values file.
     secret: {externalSecret: {enabled: ($secretSource == "external-secrets")}},
+    # This script owns the migrations: it runs them as a gated step BEFORE `helm upgrade`
+    # (run_migration_gate below), so the release itself never carries a migration hook.
+    migrations: {mode: "external"},
     migrator: {
       imageRef: (
         .images[]
@@ -111,6 +126,28 @@ jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
   --namespace "$NAMESPACE" \
   -f "$K3S_VALUES_FILE" \
   -f "$override_file" >"$rendered_file"
+
+# The migration gate: the migrator ServiceAccount and Job as plain objects, applied and awaited by
+# run_migration_gate before `helm upgrade` touches anything. Rendered from the same chart, values
+# and manifest as the release, and validated with it below (the migrator image is counted there).
+"$helm_locked" template "$RELEASE_NAME" "$chart_dir" \
+  --namespace "$NAMESPACE" \
+  -f "$K3S_VALUES_FILE" \
+  -f "$override_file" \
+  --set migrations.mode=job \
+  --show-only templates/migration-job.yaml >"$migration_file"
+if grep -Eq '^  name: warptalk-migrations-' "$rendered_file"; then
+  fail "the release renders a migration Job; migrations must run as the gate before the upgrade, not as a hook inside it"
+fi
+migration_job="$(awk '/^kind: Job$/ { job = 1 } job && /^  name: / { print $2; exit }' "$migration_file")"
+case "$migration_job" in
+  warptalk-migrations-?*) ;;
+  *) fail "could not render the migration Job" ;;
+esac
+{
+  printf '%s\n' '---'
+  cat "$migration_file"
+} >>"$rendered_file"
 
 docker run --rm -i "$KUBECONFORM_IMAGE" \
   -strict -summary -ignore-missing-schemas <"$rendered_file"
@@ -264,7 +301,8 @@ fi
 
 if [ "$K3S_DRY_RUN" = "true" ]; then
   # The API server admits every rendered object (schemas, CRDs, webhooks, quotas, RBAC for this
-  # identity) without persisting anything. Hooks are rendered, not run.
+  # identity) without persisting anything, the migration gate's Job included.
+  kubectl apply --dry-run=server --namespace "$NAMESPACE" -f "$migration_file" >/dev/null
   "$helm_locked" upgrade --install "$RELEASE_NAME" "$chart_dir" \
     --namespace "$NAMESPACE" \
     --dry-run=server \
@@ -287,25 +325,89 @@ if sa_json="$(kubectl get serviceaccount warptalk --namespace "$NAMESPACE" -o js
   echo "K3s release: adopted the former hook ServiceAccount warptalk into release $RELEASE_NAME"
 fi
 
+# ---------------------------------------------------------------------------------------------
+# Where a failure goes back to: the last revision Helm marked DEPLOYED, captured before anything
+# changes. Never "the previous revision": after a failed upgrade that is a FAILED revision, and
+# rolling back to it (what `--atomic` and `helm rollback` without a number do) re-applies a
+# manifest that never fully existed - on 24 Sep that hit PodDisruptionBudgets the failed revision
+# had never created, and the rollback itself failed.
+# ---------------------------------------------------------------------------------------------
 previous_revision=""
 if "$helm_locked" status "$RELEASE_NAME" --namespace "$NAMESPACE" >/dev/null 2>&1; then
-  previous_revision="$(
-    "$helm_locked" history "$RELEASE_NAME" --namespace "$NAMESPACE" --output json |
-      jq -r '[.[] | select(.status == "deployed")] | last | .revision // empty'
-  )"
+  history_json="$("$helm_locked" history "$RELEASE_NAME" --namespace "$NAMESPACE" --output json)"
+  previous_revision="$(printf '%s\n' "$history_json" |
+    jq -r '[.[] | select(.status == "deployed")] | last | .revision // empty')"
+  # A FAILED latest revision (24 Sep: rev 8's upgrade and the manual rollback, rev 9) does not
+  # block anything: Helm upgrades from it, and the rollback target above is still the last
+  # DEPLOYED revision. Only a pending-* one is refused below.
+  latest_status="$(printf '%s\n' "$history_json" | jq -r 'last | .status // empty')"
+  case "$latest_status" in
+    pending-*)
+      # An interrupted run (a cancelled job, a lost runner) or someone else's live operation.
+      # Helm refuses to upgrade over it either way; which of the two it is only a human can say.
+      fail "release $RELEASE_NAME is $latest_status. If no other deploy is running, restore the last deployed revision first: helm rollback $RELEASE_NAME ${previous_revision:-<none>} --namespace $NAMESPACE --wait --timeout 15m"
+      ;;
+  esac
+  [ -n "$previous_revision" ] ||
+    fail "release $RELEASE_NAME has no DEPLOYED revision to return to; refusing to upgrade without a rollback target"
 fi
 
-"$helm_locked" upgrade --install "$RELEASE_NAME" "$chart_dir" \
-  --namespace "$NAMESPACE" \
-  --create-namespace \
-  --atomic \
-  --wait \
-  --timeout 15m \
-  -f "$K3S_VALUES_FILE" \
-  -f "$override_file"
+# ---------------------------------------------------------------------------------------------
+# A container lifecycle hook may name ONE handler (exec, httpGet, tcpSocket or sleep). Helm's
+# three-way merge only deletes a field that its last RECORDED revision had and the target lacks;
+# it never deletes one that only the live object has. After a failed upgrade and a rollback the two
+# disagree: on 24 Sep (v223) the live Deployments carried revision 10's `preStop.exec` while the
+# last recorded revision already had `preStop.sleep`, so the patch added `sleep` next to `exec`,
+# the API server refused all 21 Deployments, and the rollback to revision 10 failed the same way.
+#
+# So, before Helm touches a workload, any live preStop whose handler type differs from the target
+# manifest's is replaced outright with the target's. This starts a rollout of that workload a few
+# seconds ahead of Helm's own (maxUnavailable 0: nothing stops serving), and is a no-op whenever
+# live and target already agree, which is every release after the first one it runs in.
+# ---------------------------------------------------------------------------------------------
+reconcile_prestop_handlers() {
+  awk '
+    function flush() { if (keep) printf "---\n%s", doc; doc = ""; keep = 0 }
+    /^---/ { flush(); next }
+    { doc = doc $0 "\n" }
+    /^kind: (Deployment|StatefulSet)$/ { keep = 1 }
+    END { flush() }
+  ' "$1" >"$prestop_target_file"
+  [ -s "$prestop_target_file" ] || return 0
+  kubectl create --dry-run=client -o json -f "$prestop_target_file" >"$prestop_desired_file" ||
+    return 1
+  [ -s "$prestop_desired_file" ] || return 0
+  kubectl get deployments,statefulsets --namespace "$NAMESPACE" -o json >"$prestop_live_file" ||
+    return 1
+  jq -r --slurpfile desired_doc "$prestop_desired_file" '
+    # One object per workload, streamed (a List only from some kubectl versions).
+    [$desired_doc[] | if .kind == "List" then .items[] else . end] as $desired |
+    .items[] as $live |
+    ($desired[] | select(.kind == $live.kind and .metadata.name == $live.metadata.name)) as $want |
+    [ $live.spec.template.spec.containers | to_entries[] |
+      .key as $index | .value as $container |
+      ($want.spec.template.spec.containers[] | select(.name == $container.name)
+        | .lifecycle.preStop) as $target |
+      ($container.lifecycle.preStop) as $current |
+      select($target != null and $current != null and ($target | keys) != ($current | keys)) |
+      {op: "replace", path: "/spec/template/spec/containers/\($index)/lifecycle/preStop", value: $target}
+    ] | select(length > 0) |
+    "\($live.kind | ascii_downcase)/\($live.metadata.name)\t\(tojson)"
+  ' "$prestop_live_file" >"$prestop_target_file" || return 1
+  while IFS="$(printf '\t')" read -r workload patch; do
+    echo "K3s release: $workload preStop handler differs from the target; replacing it"
+    kubectl patch "$workload" --namespace "$NAMESPACE" --type json --patch "$patch" >/dev/null ||
+      return 1
+  done <"$prestop_target_file"
+}
 
 rollback_release() {
   if [ -n "$previous_revision" ]; then
+    echo "K3s release: rolling back to the last DEPLOYED revision $previous_revision" >&2
+    "$helm_locked" get manifest "$RELEASE_NAME" --revision "$previous_revision" \
+      --namespace "$NAMESPACE" >"$rendered_file" &&
+      reconcile_prestop_handlers "$rendered_file" ||
+      echo "::warning::K3s release: could not reconcile preStop handlers before the rollback" >&2
     "$helm_locked" rollback "$RELEASE_NAME" "$previous_revision" \
       --namespace "$NAMESPACE" \
       --wait \
@@ -318,6 +420,175 @@ rollback_release() {
     --wait \
     --timeout 15m
 }
+
+# ---------------------------------------------------------------------------------------------
+# Step 1: migrations, as a hard gate. A plain Job, applied and awaited HERE, before the upgrade:
+# if it fails, the release stops with nothing rolled - the running pods keep the schema they
+# were built for. (As a pre-upgrade hook under `--atomic` a failure still left new images running
+# on an unmigrated schema, 24 Sep.) The runner records every applied file and skips it next time,
+# so re-running the gate for the same release is harmless. Migrations are additive: a later
+# rollback of the images leaves the schema where it is, and the previous images run against it.
+# ---------------------------------------------------------------------------------------------
+print_migration_logs() {
+  kubectl logs "job/$migration_job" --namespace "$NAMESPACE" --all-containers --tail=200 >&2 ||
+    echo "K3s release: (no migration logs available)" >&2
+}
+
+run_migration_gate() {
+  kubectl delete job "$migration_job" --namespace "$NAMESPACE" \
+    --ignore-not-found --wait=true >/dev/null || return 1
+  kubectl apply --namespace "$NAMESPACE" -f "$migration_file" >/dev/null || return 1
+  echo "K3s release: migration gate $migration_job started"
+  # The Job's activeDeadlineSeconds (900) marks it Failed first; this is the backstop.
+  deadline=$(($(date +%s) + 960))
+  while :; do
+    job_json="$(kubectl get job "$migration_job" --namespace "$NAMESPACE" -o json)" || return 1
+    if printf '%s\n' "$job_json" | jq -e '(.status.succeeded // 0) >= 1' >/dev/null; then
+      echo "K3s release: migration gate $migration_job succeeded"
+      return 0
+    fi
+    if printf '%s\n' "$job_json" |
+      jq -e 'any(.status.conditions[]?; .type == "Failed" and .status == "True")' >/dev/null; then
+      print_migration_logs
+      return 1
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      print_migration_logs
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+# ---------------------------------------------------------------------------------------------
+# Step 2: the rollout shape. Surge (new pod Ready before the old one goes) is the only shape with
+# no unavailability, and it needs room for one more pod on the App node. Measured, not assumed:
+# when no App node can fit one more pod of the largest workload in this release, surging would
+# leave that pod Pending and time the release out (v220), so this ONE release replaces pods in
+# place instead - every user-facing service keeps its other replica serving - and says so.
+# K3S_ROLLOUT_MODE=surge|in-place forces either.
+# ---------------------------------------------------------------------------------------------
+K3S_ROLLOUT_MODE="${K3S_ROLLOUT_MODE:-auto}"
+K3S_APP_NODE_SELECTOR="${K3S_APP_NODE_SELECTOR:-node.warptalk.io/role=app}"
+
+# The largest per-pod request (memory MiB, CPU millicores) among the release's Deployments.
+largest_release_pod() {
+  awk '
+    function mib(v) {
+      gsub(/"/, "", v)
+      if (v ~ /Ki$/) return substr(v, 1, length(v) - 2) / 1024
+      if (v ~ /Mi$/) return substr(v, 1, length(v) - 2) + 0
+      if (v ~ /Gi$/) return substr(v, 1, length(v) - 2) * 1024
+      return v / 1048576
+    }
+    function milli(v) {
+      gsub(/"/, "", v)
+      if (v ~ /m$/) return substr(v, 1, length(v) - 1) + 0
+      return v * 1000
+    }
+    /^kind: / { kind = $2 }
+    /^[[:space:]]+requests:$/ { inreq = (kind == "Deployment"); next }
+    /^[[:space:]]+limits:$/ { inreq = 0 }
+    inreq && $1 == "memory:" { m = mib($2); if (m > mem) mem = m }
+    inreq && $1 == "cpu:" { c = milli($2); if (c > cpu) cpu = c }
+    END { printf "%d %d\n", mem, cpu }
+  ' "$rendered_file"
+}
+
+# The most free memory (MiB) and CPU (m) left by requests on any single App node.
+app_node_headroom() {
+  # Files, not --argjson: the cluster's pod list is larger than an argument may be.
+  kubectl get nodes -l "$K3S_APP_NODE_SELECTOR" -o json >"$capacity_nodes_file" || return 1
+  kubectl get pods --all-namespaces \
+    --field-selector 'status.phase!=Succeeded,status.phase!=Failed' -o json \
+    >"$capacity_pods_file" || return 1
+  jq -rn --slurpfile nodes_doc "$capacity_nodes_file" --slurpfile pods_doc "$capacity_pods_file" '
+    def q:
+      if . == null then 0 else tostring |
+        if test("^[0-9.]+m$") then (.[:-1] | tonumber) / 1000
+        elif test("Ki$") then (.[:-2] | tonumber) * 1024
+        elif test("Mi$") then (.[:-2] | tonumber) * 1048576
+        elif test("Gi$") then (.[:-2] | tonumber) * 1073741824
+        elif test("k$") then (.[:-1] | tonumber) * 1000
+        elif test("M$") then (.[:-1] | tonumber) * 1000000
+        elif test("G$") then (.[:-1] | tonumber) * 1000000000
+        else tonumber end
+      end;
+    def podreq($r):
+      [([.spec.containers[]?.resources.requests[$r] | q] | add // 0),
+       ([.spec.initContainers[]?.resources.requests[$r] | q] | max // 0)] | max;
+    $nodes_doc[0] as $nodes | $pods_doc[0] as $pods |
+    [ $nodes.items[] | .metadata.name as $node |
+      {
+        mem: ((.status.allocatable.memory | q) -
+              ([$pods.items[] | select(.spec.nodeName == $node) | podreq("memory")] | add // 0)),
+        cpu: ((.status.allocatable.cpu | q) -
+              ([$pods.items[] | select(.spec.nodeName == $node) | podreq("cpu")] | add // 0))
+      }
+    ] |
+    if length == 0 then "0 0"
+    else (max_by(.mem) | "\((.mem / 1048576) | floor) \((.cpu * 1000) | floor)") end
+  '
+}
+
+choose_rollout_mode() {
+  case "$K3S_ROLLOUT_MODE" in
+    surge) mode=surge ;;
+    in-place) mode=in-place ;;
+    auto)
+      largest="$(largest_release_pod)"
+      need_mem="${largest% *}"
+      need_cpu="${largest#* }"
+      headroom="$(app_node_headroom)" || fail "could not measure App-node headroom"
+      free_mem="${headroom% *}"
+      free_cpu="${headroom#* }"
+      echo "K3s release: App-node headroom ${free_mem}Mi / ${free_cpu}m; largest pod in this release ${need_mem}Mi / ${need_cpu}m"
+      if [ "$free_mem" -ge "$need_mem" ] && [ "$free_cpu" -ge "$need_cpu" ]; then
+        mode=surge
+      else
+        mode=in-place
+      fi
+      ;;
+    *) fail "K3S_ROLLOUT_MODE must be auto, surge or in-place" ;;
+  esac
+  if [ "$mode" = "in-place" ]; then
+    cat >"$rollout_file" <<'EOF'
+rollout:
+  multiReplica: {maxSurge: 0, maxUnavailable: 1}
+  singleReplica: {maxSurge: 0, maxUnavailable: 1}
+EOF
+    echo "::warning::K3s release: the App node cannot fit one more pod of the largest workload, so this release replaces pods IN PLACE (surge 0 / unavailable 1). Multi-replica services keep serving from their other replica; single-replica workers restart. Free App-node memory to restore surge rollouts."
+  else
+    echo "K3s release: surge rollout (maxSurge 1 / maxUnavailable 0)"
+  fi
+}
+
+if ! run_migration_gate; then
+  fail "migration gate $migration_job failed; nothing was rolled, the running release is untouched"
+fi
+
+choose_rollout_mode
+
+reconcile_prestop_handlers "$rendered_file" ||
+  fail "could not reconcile live preStop handlers with this release; nothing was upgraded"
+
+# ---------------------------------------------------------------------------------------------
+# Step 3: the upgrade. `--wait` (every Deployment rolled out and Ready), not `--atomic`: on failure
+# this script rolls back itself, explicitly, to the revision captured above.
+# ---------------------------------------------------------------------------------------------
+if ! "$helm_locked" upgrade --install "$RELEASE_NAME" "$chart_dir" \
+  --namespace "$NAMESPACE" \
+  --create-namespace \
+  --wait \
+  --timeout 15m \
+  -f "$K3S_VALUES_FILE" \
+  -f "$override_file" \
+  -f "$rollout_file"; then
+  echo "K3s release: helm upgrade failed; restoring the last deployed release." >&2
+  rollback_release ||
+    fail "helm upgrade failed and the rollback to revision ${previous_revision:-<none>} also failed"
+  fail "helm upgrade failed; restored revision ${previous_revision:-<none>} (migrations stay applied; they are additive)"
+fi
 
 post_deploy_checks() {
   if [ "$K3S_SECRET_SOURCE" = "external-secrets" ]; then

@@ -1,6 +1,6 @@
 # The identity the production-k8s release job deploys as (GitHub `production` secret
-# K8S_KUBECONFIG). Applied by the one-time k8s-bootstrap job in release.yml, which runs with the
-# cluster-admin K8S_BOOTSTRAP_KUBECONFIG; scripts/render-k8s-deployer-kubeconfig.sh turns the token
+# K8S_KUBECONFIG). Applied by hand with an admin kubeconfig (deploy/k3s/README.md, "Cluster
+# bootstrap by hand"); scripts/render-k8s-deployer-kubeconfig.sh turns the token
 # below into the K8S_KUBECONFIG value.
 #
 # What it can do, and why:
@@ -89,6 +89,16 @@ rules:
   - apiGroups: [external-secrets.io]
     resources: [clustersecretstores]
     verbs: [get, list, watch]
+  # The data tier's PriorityClass (deploy/k3s/data-chart/templates/priority-class.yaml). Create is
+  # cluster-wide by nature (RBAC cannot scope `create` by name); every other write is limited to
+  # the one class the chart owns, so the deployer cannot rewrite or delete system classes.
+  - apiGroups: [scheduling.k8s.io]
+    resources: [priorityclasses]
+    verbs: [get, list, watch, create]
+  - apiGroups: [scheduling.k8s.io]
+    resources: [priorityclasses]
+    resourceNames: [warptalk-data-critical]
+    verbs: [update, patch, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

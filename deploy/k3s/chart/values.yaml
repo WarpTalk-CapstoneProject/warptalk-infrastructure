@@ -42,6 +42,17 @@ secret:
 migrator:
   imageRef: ""
 
+# How the database migrations run.
+#   hook     - a pre-install/pre-upgrade Helm hook (kind, local and contract installs).
+#   external - the chart renders NO migration Job. scripts/deploy-k3s-release.sh renders it with
+#              mode=job and runs it as its own step BEFORE `helm upgrade`, waits for it, and stops
+#              the release with nothing rolled if it fails. Production uses this: a failed hook
+#              under `helm --atomic` once left the new images running on an unmigrated schema.
+#   job      - render the migration ServiceAccount + Job as plain objects (what the deploy script
+#              asks for with --show-only templates/migration-job.yaml). Never set in a values file.
+migrations:
+  mode: hook
+
 config:
   ASPNETCORE_ENVIRONMENT: Production
   Jwt__Issuer: WarpTalk.AuthService
@@ -74,6 +85,12 @@ config:
   VectorDb__Url: http://warptalk-qdrant.warptalk-data.svc.cluster.local:6333
   # kube-prometheus-stack is installed into the `monitoring` namespace (install-k3s-addons.sh).
   Monitoring__PrometheusUrl: http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+  # Firing alerts on the admin System Health page come from Alertmanager, the only place silences
+  # and inhibitions exist (Prometheus rule state lists silenced alerts as firing).
+  Monitoring__AlertmanagerUrl: http://monitoring-kube-prometheus-alertmanager.monitoring.svc.cluster.local:9093
+  # Same-origin path the admin-only Grafana is published under (monitoring-values.yaml grafana.ingress,
+  # behind the gateway ForwardAuth). The System Health page embeds its dashboards from here.
+  Monitoring__GrafanaEmbedPath: /grafana
   VECTOR_DB_PROVIDER: qdrant
   EMBEDDING_PROVIDER: openai
   EMBEDDING_MODEL: text-embedding-3-small
@@ -382,6 +399,12 @@ workloads:
       Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
       Storage__S3__BucketName: STORAGE_S3_BUCKET_NAME
       VectorDb__ApiKey: VECTOR_DB_API_KEY
+    # G12 pending-work inbox: each owning service's inbox-items endpoint, called directly over the
+    # cluster network with the staff member's own token (not through the gateway).
+    env:
+      AdminInbox__BillingUrl: http://billing-service:5107
+      AdminInbox__AuthUrl: http://auth-service:5101
+      AdminInbox__NotificationUrl: http://notification-service:5104
   billing-service:
     image: billing-service
     # Hosted background loops that must not run concurrently on two replicas. Rendered as the
@@ -409,12 +432,27 @@ workloads:
       SignalR__Redis: Redis__ConnectionString
       Stripe__SecretKey: STRIPE_SECRET_KEY
       Stripe__WebhookSecret: STRIPE_WEBHOOK_SECRET
+      # G12 operating-expense receipts: the in-cluster MinIO every other service uses, in the
+      # workspace documents bucket under the finance/receipts/ prefix (no new bucket or secret).
+      # Missing values leave billing running with receipt uploads refused (503), never crashing.
+      Storage__Provider: STORAGE_PROVIDER
+      Storage__S3__ServiceUrl: STORAGE_S3_SERVICE_URL
+      Storage__S3__AccessKey: STORAGE_S3_ACCESS_KEY
+      Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
+      Storage__S3__BucketName: STORAGE_S3_BUCKET_NAME
     # CartesiaUsageSyncWorker (admin Insights, measured dubbing cost). Optional: without the admin
     # key the worker logs once that it is disabled and Insights estimate. Several replicas are safe:
     # they share one sync schedule through a Redis lease, so Cartesia sees one sync per interval.
     optionalSecretEnv:
       Cartesia__AdminApiKey: CARTESIA_ADMIN_API_KEY
       Cartesia__UsageApiKeyId: CARTESIA_USAGE_API_KEY_ID
+    # Admin Providers page: public status pages polled for the 90-day uptime row (statuspage.io v2
+    # API, verified 2026-09-25; Stripe's page has none). Public URLs, not secrets. Remove a line to
+    # stop polling that provider; ProviderStatus__PollIntervalMinutes: "0" stops all of them.
+    env:
+      ProviderStatus__Pages__openai: https://status.openai.com
+      ProviderStatus__Pages__cartesia: https://status.cartesia.ai
+      ProviderStatus__Pages__livekit: https://status.livekit.io
   assistant-service:
     image: assistant-service
     replicas: 2
@@ -627,6 +665,20 @@ workloads:
     secretEnv:
       REDIS_PASSWORD: REDIS_PASSWORD
 
+# Exec probes of the Python workers (every workload with workerHealthName). Each run starts a new
+# interpreter and imports the Redis client before it reads the heartbeat; on a CPU-pressed node
+# that took longer than the old 5s timeout, and the kubelet killed healthy workers into
+# CrashLoopBackOff. 15s is a realistic ceiling; startup allows 15s x 12 = 3 min; liveness needs
+# 3 misses 30s apart (~1.5 min) before a restart. scripts/check-k3s-deployment.sh pins the floors.
+workerProbe:
+  timeoutSeconds: 15
+  startup:
+    periodSeconds: 15
+    failureThreshold: 12
+  liveness:
+    periodSeconds: 30
+    failureThreshold: 3
+
 # DOCX -> PDF for the exported biên bản. A third-party image, so it is pinned by digest and
 # locked in deploy/k3s/addons.lock.env like the collector and the SQL exporter, rather than
 # living in .Values.workloads — nothing in a WarpTalk release rewrites this tag.
@@ -721,3 +773,24 @@ keda:
       max: 12
       stream: translate:results
       consumerGroup: tts-workers
+
+# Rolling-update shape. The default surges (new pod first, zero unavailable) for every workload,
+# which is what makes a rollout invisible: the old pod keeps serving until its replacement is
+# Ready. scripts/deploy-k3s-release.sh measures the App node before each release and, only when
+# it cannot fit one more pod of the largest workload, overrides both to replace in place for that
+# one release (and says so). Values files do not override these.
+rollout:
+  multiReplica:
+    maxSurge: 1
+    maxUnavailable: 0
+  singleReplica:
+    maxSurge: 1
+    maxUnavailable: 0
+  # Drain. On SIGTERM a pod is removed from the Service endpoints at the same moment the kubelet
+  # signals it, and Traefik / kube-proxy learn about it a few seconds later; the preStop sleep keeps
+  # the pod answering until they have. The grace period then covers the sleep plus the process's
+  # own graceful shutdown (ASP.NET Core's HostOptions.ShutdownTimeout is 30s).
+  preStopSleepSeconds: 10
+  terminationGracePeriodSeconds: 45
+  # Kept below every probe window so a Ready pod has proven itself before the next one is replaced.
+  minReadySeconds: 5

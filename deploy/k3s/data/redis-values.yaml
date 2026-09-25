@@ -11,10 +11,13 @@ auth:
   existingSecret: warptalk-redis-auth
   existingSecretPasswordKey: password
 replica:
-  # Three nodes, because quorum is 2 and every sentinel lives inside a redis pod: with two pods,
-  # losing the master's pod also loses its sentinel, the survivor alone cannot reach quorum 2, and
-  # no failover ever happens.
-  replicaCount: 3
+  # Two nodes, as production has run since the k8s cutover. A third (redis-node-2) was added with
+  # the k8s readiness PR; on 2026-09-24 its sentinel crash-looped on the Data node (32 restarts,
+  # logs unreachable because the API server cannot reach that node's kubelet on :10250) and the
+  # Redis helm upgrade timed out, failing release v220. With two pods a lost master's sentinel
+  # goes with it, so quorum 2 cannot fail over automatically - a known gap to close together
+  # with the Data-node kubelet reachability, not by guessing at a pod we cannot inspect.
+  replicaCount: 2
   # noeviction, and a maxmemory under the container limit.
   #
   # allkeys-lru is what compose ran, and it is the reason a full Redis never looked full: it

@@ -52,9 +52,15 @@ function requiredKeysByService() {
     for (const project of readdirSync(srcDir)) {
       const program = path.join(srcDir, project, "Program.cs");
       if (!existsSync(program)) continue;
+      const source = readFileSync(program, "utf8");
       const keys = [
-        ...readFileSync(program, "utf8").matchAll(/"Grpc(?:Settings|Urls):([A-Za-z]+)"/g),
+        ...source.matchAll(/"Grpc(?:Settings|Urls):([A-Za-z]+)"/g),
       ].map((match) => match[1]);
+      // G10: AddWarpTalkStaffAuthorization (WarpTalk.Shared) builds a UserService client from
+      // GrpcSettings:AuthServiceUrl or GrpcUrls:AuthServiceUrl and THROWS at startup outside
+      // Development when neither is set. The key lives in the shared library, not in the
+      // Program.cs this scan reads, so the call itself stands for it.
+      if (/AddWarpTalkStaffAuthorization\(/.test(source)) keys.push("AuthServiceUrl");
       if (keys.length === 0) continue;
       const name = SERVICE_NAMES[dir.name] ?? dir.name;
       required.set(name, new Set([...(required.get(name) ?? []), ...keys]));

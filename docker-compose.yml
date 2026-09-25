@@ -248,6 +248,9 @@ services:
       ConnectionStrings__AuthDb: "Host=pgbouncer;Port=6432;Database=warptalk_auth;Username=warptalk_auth;Password=${AUTH_DB_PASSWORD};Search Path=auth,public;GSS Encryption Mode=Disable"
       AppBaseUrl: ${APP_BASE_URL:-http://localhost:3000}
       GrpcSettings__WorkspaceServiceUrl: "http://workspace-service:50056"
+      # The verification and password-reset emails read their admin-edited template from the
+      # notification service (GetEmailTemplate); without it they fall back to the built-in wording.
+      GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
@@ -323,6 +326,10 @@ services:
       VectorDb__Url: ${VECTOR_DB_URL:-http://qdrant:6333}
       # Backs the admin System Health screen. Query-only against Prometheus.
       Monitoring__PrometheusUrl: ${PROMETHEUS_URL:-http://prometheus:9090}
+      # G12 pending-work inbox: the owning services' inbox-items endpoints, called directly.
+      AdminInbox__BillingUrl: "http://billing-service:5107"
+      AdminInbox__AuthUrl: "http://auth-service:5101"
+      AdminInbox__NotificationUrl: "http://notification-service:5104"
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -551,6 +558,8 @@ services:
       # Plugin marketplace: a member's request notifies the workspace Owner, and the Owner's
       # decision notifies the member, through the notification service's SendNotification RPC.
       GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
+      # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
+      GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -587,6 +596,8 @@ services:
       GrpcUrls__NotificationServiceUrl: "http://notification-service:50054"
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
+      # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
+      GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
       AllowedOrigins__0: ${ALLOWED_ORIGINS:-http://localhost:3000}
       RateLimits__IpPermitLimit: ${RATE_LIMIT_IP_PER_WINDOW:-300}
       RateLimits__UserPermitLimit: ${RATE_LIMIT_USER_PER_WINDOW:-180}
@@ -640,8 +651,16 @@ services:
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       GrpcUrls__AuthServiceUrl: "http://auth-service:50051"
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
+      # Admin Providers page: LiveKit usage (translation-room GetMediaUsage).
+      GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
       Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
+      # G12 operating-expense receipts, in the workspace documents bucket under finance/receipts/.
+      Storage__Provider: ${WORKSPACE_STORAGE_PROVIDER:-MinIO}
+      Storage__S3__ServiceUrl: ${WORKSPACE_STORAGE_S3_ENDPOINT:-http://minio:9000}
+      Storage__S3__AccessKey: ${WORKSPACE_STORAGE_S3_ACCESS_KEY:-${MINIO_ROOT_USER:-warptalk-admin}}
+      Storage__S3__SecretKey: ${WORKSPACE_STORAGE_S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-warptalk-s3-secretkey}} # gitleaks:allow
+      Storage__S3__BucketName: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:-warptalk-workspace-documents}
       # Optional: a Cartesia ADMIN key turns on billing's usage sync (admin Insights, measured dubbing cost).
       Cartesia__AdminApiKey: ${CARTESIA_ADMIN_API_KEY:-}
       Cartesia__UsageApiKeyId: ${CARTESIA_USAGE_API_KEY_ID:-}

@@ -94,12 +94,17 @@ kubectl get rabbitmqcluster warptalk-rabbitmq --namespace "$NAMESPACE" -o json |
     any(.status.conditions[]?; .type == "AllReplicasReady" and .status == "True")
   ' >/dev/null || fail "RabbitMQ does not have all of its replicas ready"
 
-# Redis runs one sentinel per node with quorum 2, so fewer than three nodes can never fail over.
-kubectl get statefulset warptalk-redis-node --namespace "$DATA_NAMESPACE" -o json |
-  jq -e '
-    (.spec.replicas // 0) >= 3 and
+# Redis runs one sentinel per node with quorum 2. Production runs TWO nodes (infra #216: the Data
+# node could not hold a third), which keeps a replica of every key but cannot elect a new master if
+# one node is lost. That is a known, accepted gap, so it is a warning here, not a failure: v224 was
+# rolled back only because this line still demanded three after #216 made it two.
+redis_json="$(kubectl get statefulset warptalk-redis-node --namespace "$DATA_NAMESPACE" -o json)"
+printf '%s\n' "$redis_json" | jq -e '
+    (.spec.replicas // 0) >= 2 and
     (.status.readyReplicas // 0) == .spec.replicas
-  ' >/dev/null || fail "Redis needs three ready nodes for a sentinel quorum of two"
+  ' >/dev/null || fail "Redis does not have all of its (at least two) nodes ready"
+printf '%s\n' "$redis_json" | jq -e '(.spec.replicas // 0) >= 3' >/dev/null ||
+  echo "::warning::K3s acceptance: Redis runs $(printf '%s\n' "$redis_json" | jq '.spec.replicas') nodes; sentinel quorum 2 cannot fail over until it has three"
 kubectl get statefulset warptalk-qdrant --namespace "$DATA_NAMESPACE" -o json |
   jq -e '
     (.spec.replicas // 0) >= 1 and
@@ -249,7 +254,7 @@ kubectl get configmap warptalk-grafana-dashboard \
   fail "WarpTalk Grafana dashboard is missing"
 
 # Traefik runs host ports on the App node (traefik-values.yaml), fronted in-VPC by a
-# LoadBalancer Service. Traefik is installed by the k8s-bootstrap job, not by a release, so its
+# LoadBalancer Service. Traefik is installed by the cluster bootstrap, not by a release, so its
 # configuration checks apply once it runs the locked values (recognisable by the HTTP->HTTPS
 # redirect those values add); before that the report says so instead of pretending.
 traefik_service="$(kubectl get service traefik --namespace traefik -o json)"
@@ -265,7 +270,7 @@ if printf '%s\n' "$traefik_deployment" |
   printf '%s\n' "$traefik_service" | jq -e '.spec.externalTrafficPolicy == "Local"' >/dev/null ||
     fail "Traefik must preserve the client address (externalTrafficPolicy: Local)"
 else
-  traefik_config="not yet on deploy/k3s/traefik-values.yaml (run the k8s-bootstrap job)"
+  traefik_config="not yet on deploy/k3s/traefik-values.yaml (run the cluster bootstrap in deploy/k3s/README.md)"
   echo "K3s acceptance: WARNING Traefik is $traefik_config; redirect and client-IP checks deferred" >&2
 fi
 

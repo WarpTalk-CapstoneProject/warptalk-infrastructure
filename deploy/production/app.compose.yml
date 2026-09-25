@@ -138,6 +138,9 @@ services:
       # Required by WorkspaceInvitationGrpcClient, which verifies and accepts workspace
       # invitation tokens. Same failure mode as above.
       GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
+      # Required by the email template composer: the verification and password-reset emails read
+      # their admin-edited template from the notification service (GetEmailTemplate).
+      GrpcSettings__NotificationServiceUrl: http://notification-service:50054
       HEALTH_PORT: "5101"
       AppBaseUrl: https://${APP_DOMAIN:?}
       Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID:?}
@@ -212,6 +215,10 @@ services:
       # production (WT-402). Prometheus publishes 9090 on the infra private address only, and
       # the query API is read-only: this deployment does not run --web.enable-admin-api.
       Monitoring__PrometheusUrl: http://${INFRA_PRIVATE_IP:?}:9090
+      # G12 pending-work inbox: the owning services' inbox-items endpoints, called directly.
+      AdminInbox__BillingUrl: http://billing-service:5107
+      AdminInbox__AuthUrl: http://auth-service:5101
+      AdminInbox__NotificationUrl: http://notification-service:5104
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -471,6 +478,8 @@ services:
       # Plugin marketplace request notifications (member -> Owner, Owner -> member) go through the
       # notification service's SendNotification RPC. Same rule: required outside Development.
       GrpcSettings__NotificationServiceUrl: http://notification-service:50054
+      # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
+      GrpcSettings__AuthServiceUrl: http://auth-service:50051
       # Plugin OAuth callbacks land the browser here; the service refuses to start outside
       # Development when this is missing or points at localhost.
       AppBaseUrl: https://${APP_DOMAIN:?}
@@ -529,10 +538,18 @@ services:
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:?}
       GrpcUrls__AuthServiceUrl: http://auth-service:50051
       GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
+      # Admin Providers page: LiveKit usage (translation-room GetMediaUsage).
+      GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
       Stripe__SecretKey: ${STRIPE_SECRET_KEY:?}
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:?}
       Stripe__SuccessUrl: https://${APP_DOMAIN:?}/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}
       Stripe__CancelUrl: https://${APP_DOMAIN:?}/workspace/payment/plans
+      # G12 operating-expense receipts, in the workspace documents bucket under finance/receipts/.
+      Storage__Provider: MinIO
+      Storage__S3__ServiceUrl: http://${DATA_PRIVATE_IP:?}:9000
+      Storage__S3__AccessKey: ${MINIO_ROOT_USER:?}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:?}
+      Storage__S3__BucketName: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:?}
       BillingRates__SttPerMinute: ${BILLING_RATE_STT_PER_MINUTE:-15}
       BillingRates__TranslationPerMinute: ${BILLING_RATE_TRANSLATION_PER_MINUTE:-15}
       BillingRates__StandardTtsPerMinute: ${BILLING_RATE_STANDARD_TTS_PER_MINUTE:-15}
@@ -542,7 +559,8 @@ services:
       # CartesiaUsageSyncWorker: measured Cartesia credits for admin Insights' dubbing cost.
       # OPTIONAL on purpose (`:-`, not `:?`): with no admin key the worker logs once that it is
       # disabled and Insights keep the rate-card estimate, so a host without the GitHub secret
-      # still deploys. Both values arrive through release.yml's add_runtime_secret; the key id
+      # still deploys. On a compose host both values come from the host env file (release.yml
+      # deploys only to Kubernetes now); the key id
       # limits usage to the production TTS key (empty = every key on the Cartesia account).
       Cartesia__AdminApiKey: ${CARTESIA_ADMIN_API_KEY:-}
       Cartesia__UsageApiKeyId: ${CARTESIA_USAGE_API_KEY_ID:-}
@@ -578,6 +596,8 @@ services:
       GrpcUrls__NotificationServiceUrl: http://notification-service:50054
       GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
       GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
+      # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
+      GrpcUrls__AuthServiceUrl: http://auth-service:50051
       AllowedOrigins__0: ${ALLOWED_ORIGINS:?}
       RateLimits__IpPermitLimit: ${RATE_LIMIT_IP_PER_WINDOW:-300}
       RateLimits__UserPermitLimit: ${RATE_LIMIT_USER_PER_WINDOW:-180}
