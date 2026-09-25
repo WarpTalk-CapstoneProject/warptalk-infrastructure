@@ -719,11 +719,12 @@ services:
       # in both directions, so a bad room can be moved back without a deploy.
       STT_STREAMING_ENABLED: "true"
       # WT-716 tier 1: the deterministic filler/stutter prepass that runs inside this worker
-      # and publishes clean_text alongside the raw text on stt:results. Same flag name as the
-      # one on transcript-clean-worker on purpose — they are two halves of one feature, and
-      # turning tier 2 off while leaving tier 1 on (or the reverse) is a half-clean transcript.
-      # original_text is never touched either way, so this is safe to flip back.
-      TRANSCRIPT_CLEAN_ENABLED: "true"
+      # and publishes clean_text alongside the raw text on stt:results. Its own switch, NOT the
+      # one on transcript-clean-worker: this one decides what gets translated and dubbed live,
+      # while TRANSCRIPT_CLEAN_ENABLED only decides whether a stored view is written. An
+      # operator must be able to stop touching the live path without losing the clean
+      # transcript. original_text is never touched either way, so this is safe to flip back.
+      STT_CLEAN_PREPASS_ENABLED: "true"
       # 2026-10-01 — reverse far-side LEAK dedupe for the Google Meet bridge. Text-only bridge
       # mode (PO-approved) has the host on their REAL mic and speakers: Meet's audio played by
       # Chrome leaks into that mic, so the host's line repeats what the stand-in already carried.
@@ -834,7 +835,7 @@ services:
     environment:
       <<: *ai-environment
       WORKER_HEALTH_NAME: transcript-clean
-      # The kill switch for the whole feature, also set on stt-worker for tier 1. Off means the
+      # The kill switch for tier 2 only (the live prepass has STT_CLEAN_PREPASS_ENABLED). Off means the
       # transcript is served raw, which is what every reader already falls back to when
       # clean_text is NULL.
       TRANSCRIPT_CLEAN_ENABLED: "true"
