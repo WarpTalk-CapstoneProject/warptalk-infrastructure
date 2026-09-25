@@ -658,7 +658,7 @@ for name, doc in pdbs.items():
         fail(f"PDB {name} uses minAvailable; use maxUnavailable")
     if "maxUnavailable: 1" not in doc:
         fail(f"PDB {name} must allow exactly one voluntary disruption (maxUnavailable: 1)")
-for singleton in ("suggestion-worker", "metrics-exporter"):
+for singleton in ("suggestion-worker", "transcript-clean-worker", "metrics-exporter"):
     if "type: Recreate" not in deployments[singleton] or "replicas: 1" not in deployments[singleton]:
         fail(f"{singleton} is a singleton: one replica and a Recreate rollout")
 

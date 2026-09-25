@@ -115,6 +115,7 @@ built without kubelet reservations). On 24 Sep its requests were at 99% (15872Mi
 | assistant-worker (HPA) | 1 | 115 / 154Mi | 119m | 384 -> 160Mi | 150 -> 180m |
 | embedding-worker | 1 | 116 / 152Mi | 93m | 512 -> 160Mi | 150 -> 130m |
 | suggestion-worker (singleton) | 1 | 113 / 125Mi | 90m | 256 -> 160Mi | 100 -> 120m |
+| transcript-clean-worker (singleton, WT-716, new) | 1 | not measured yet | - | 256 -> 192Mi | 100 -> 50m |
 | security-worker | 1 | 112 / 115Mi | 86m | 192 -> 160Mi | 100 -> 120m |
 | billing-worker | 1 | 90 / 92Mi | 91m | 192 -> 128Mi | 100 -> 120m |
 | metrics-exporter (singleton) | 1 | 58 / 58Mi | 10m | 96 -> 80Mi | 50 -> 25m |
@@ -122,7 +123,7 @@ built without kubelet reservations). On 24 Sep its requests were at 99% (15872Mi
 | otel collector | 1 | 88 / 90Mi | 15m | 256 -> 128Mi | 100 -> 50m |
 | seq | 1 | 132 / 146Mi | 13m | 384 -> 176Mi | 100 -> 50m |
 | 3 cost exporters | 1 each | 14 / 14Mi | 1m | 48 -> 32Mi each | 25 -> 10m each |
-| **WarpTalk chart at minimum replicas** | | | | **10096 -> 7920Mi** | **4675 -> 3465m** |
+| **WarpTalk chart at minimum replicas** | | | | **10352 -> 8112Mi** | **4775 -> 3515m** |
 | Postgres x2 (data chart, App node) | 2 | 315 / 402Mi, 259 / 263Mi | 18m | 1Gi -> 512Mi each | 300 -> 100m each |
 
 Everything else requesting memory on the App node, unchanged here: add-ons 1200Mi (KEDA 3 x

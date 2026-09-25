@@ -109,6 +109,10 @@ config:
   # translation model came from shared/config.py's default with nothing in either
   # deploy file recording it. Keep both files in step.
   TRANSLATION_REALTIME_MODEL: gpt-realtime-2.1
+  # WT-716 clean transcript. One flag for both tiers, kept in step with app.compose.yml: stt-worker
+  # reads it for the deterministic per-segment prepass (tier 1) and transcript-clean-worker for the
+  # sentence/LLM pass (tier 2). Off = the transcript is served raw; original_text is never touched.
+  TRANSCRIPT_CLEAN_ENABLED: "true"
   TTS_MODEL: sonic-3.5
   # See app.compose.yml for the reasoning: Luna replaces gpt-4.1 (cheaper + stronger,
   # off the realtime path); the chat model stays on 4o-mini because Luna is dearer
@@ -542,6 +546,34 @@ workloads:
       OPENAI_API_KEY: OPENAI_API_KEY
       TRANSLATION_PROVIDER: TRANSLATION_PROVIDER
       TRANSLATION_API_KEY: TRANSLATION_API_KEY
+  # WT-716 tier 2: joins raw stt:results segments into whole clean sentences and publishes them on
+  # transcript:clean (revision 0 from the rule tier at once, revision 1 from a bounded LLM pass).
+  # Own image (ai-transcript-clean) so the release keeps one workload per image. A singleton for
+  # the same reason as suggestion-worker: sentence assembly is per-meeting state held in the
+  # process, so two replicas in one consumer group would each see half of a meeting's segments and
+  # cut every sentence in the wrong place. Nothing waits on it (captions and dubs read stt:results
+  # in their own groups), so one replica and a Recreate rollout cost no live latency.
+  transcript-clean-worker:
+    image: ai-transcript-clean
+    workerHealthName: transcript-clean
+    replicas: 1
+    singleton: true
+    cpu: 100m
+    memory: 256Mi
+    cpuLimit: 500m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: false}
+    env:
+      # Kept in step with deploy/production/app.compose.yml (see the comments there).
+      TRANSCRIPT_CLEAN_MERGE_GAP_MS: "1200"
+      TRANSCRIPT_CLEAN_MAX_SENTENCE_MS: "30000"
+      TRANSCRIPT_CLEAN_IDLE_FLUSH_MS: "4000"
+      TRANSCRIPT_CLEAN_LLM_TIMEOUT_S: "8"
+      TRANSCRIPT_CLEAN_MAX_DELETE_RATIO: "0.4"
+      TRANSCRIPT_CLEAN_MODEL: gpt-4.1
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
   tts-worker:
     image: ai-tts
     workerHealthName: tts
