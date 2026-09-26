@@ -165,6 +165,32 @@ groups:
         annotations:
           summary: "{{ $value }} {{ $labels.charge_type }} events in 15m had no active subscription to bill; the room was stopped"
 
+      # Paid extra credits with no live plan to put them on (warptalk-backend#467). Checkout refuses
+      # a top-up or credit pack without a live subscription, so each of these is a payment that got
+      # past that gate — a Stripe session opened before the plan expired, or a race with the expiry
+      # worker. The customer was charged.
+      #   frozen: booked FROZEN on the workspace's latest subscription, restored when it renews, and
+      #           listed in the admin inbox (paid_credits_frozen). Nothing is lost; a person should
+      #           tell the customer.
+      #   unheld: the workspace never had a subscription at all, so there was nowhere to hold them.
+      #           The webhook fails so Stripe retries, but the credits exist nowhere until support
+      #           acts. Critical.
+      # Both counters are published at 0 on startup (billing PaidCreditsMetrics.Initialize), so
+      # increase() sees the first event rather than a series that appears at 1.
+      - alert: WarpTalkPaidCreditsFrozen
+        expr: sum by (payment_type) (increase(warptalk_billing_paid_credits_frozen_total[30m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} paid {{ $labels.payment_type }} purchase(s) in 30m arrived with no live subscription and were booked frozen; see the admin inbox"
+
+      - alert: WarpTalkPaidCreditsUnheld
+        expr: sum by (payment_type) (increase(warptalk_billing_paid_credits_unheld_total[30m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "A paid {{ $labels.payment_type }} arrived for a workspace that never had a subscription; the credits are held nowhere (billing logs: credit_*_no_subscription)"
+
       # A stream with a producer and nothing reading it.
       #
       # Redis keeps a consumer registered after its process dies, so this is NOT a liveness
