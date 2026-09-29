@@ -205,12 +205,11 @@ if [ "$SECRET_SOURCE" = "external-secrets" ]; then
     jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
       >/dev/null || fail "externalsecret/$RUNTIME_SECRET_NAME is not Ready"
 fi
-for resource in \
-  "scaledobject/translation-worker-queue-lag"; do
-  kubectl get "$resource" --namespace "$NAMESPACE" -o json |
-    jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
-      >/dev/null || fail "$resource is not Ready"
-done
+# translation-worker is the only KEDA-scaled workload left; stt-worker and tts-worker are
+# singletons, checked below. Written as one resource rather than a loop over one item.
+kubectl get scaledobject/translation-worker-queue-lag --namespace "$NAMESPACE" -o json |
+  jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
+    >/dev/null || fail "scaledobject/translation-worker-queue-lag is not Ready"
 # stt-worker and tts-worker are singletons (chart/values.yaml): per-speaker streaming state lives
 # in the process. A ScaledObject left behind - including one applied by hand, as the 2026-09-20
 # `kubectl apply` of min 2 / max 12 was - keeps them at 2+ replicas whatever the chart renders.
