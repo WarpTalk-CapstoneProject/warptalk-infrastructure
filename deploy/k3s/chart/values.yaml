@@ -541,10 +541,26 @@ workloads:
       OPENAI_API_KEY: OPENAI_API_KEY
       STT_PROVIDER: STT_PROVIDER
       STT_API_KEY: STT_API_KEY
+  # A singleton, like the two stages either side of it. What lives in this process and is wrong
+  # split across replicas:
+  #   - the rolling per-meeting context (`_recent_source_contexts`) the model is given as "what has
+  #     been said so far" - each replica saw only the segments the consumer group dealt it;
+  #   - speculative translation: `stt:speculative` is Pub/Sub, which FANS OUT, so every replica
+  #     paid for its own model call on every speculative sentence, and only the one that later got
+  #     the final segment could use the result - N replicas, N paid calls, one used.
+  # What scaling out bought: nothing measured. Lag on `translate-workers` has been 0 since the
+  # migration and the ScaledObject never activated above its floor (p95 73m CPU). The consumer is
+  # asyncio and I/O-bound: one process runs 8 messages at once over a pool of 4 Realtime sockets
+  # (TRANSLATION_REALTIME_POOL_SIZE), and that pool - not the replica count - is the knob if a
+  # bigger meeting ever needs it. And stt-worker and tts-worker, the stages on either side, are
+  # singletons with Recreate rollouts already, so the pipeline already pauses for one pod start on
+  # every release; a Recreate here adds no new kind of gap.
+  # Redeliveries are idempotent regardless (warptalk-ai: a chunk id is published at most once).
   translation-worker:
     image: ai-translation
     workerHealthName: translation
-    replicas: 2
+    replicas: 1
+    singleton: true
     cpu: 300m
     memory: 384Mi
     cpuLimit: "2"
@@ -805,16 +821,15 @@ keda:
   redisSentinelAddresses: warptalk-redis.warptalk-data.svc.cluster.local:26379
   queueLagThreshold: "120"
   activationQueueLagThreshold: "1"
-  # Only stateless workers belong here. stt-worker and tts-worker are singletons (see their
-  # workloads entries) and must never be given a ScaledObject: KEDA would own their replica count
-  # and scale them past 1 on queue lag, which is exactly when streaming state matters most.
-  # scripts/check-k3s-deployment.sh fails the render if either reappears.
-  workers:
-    translation-worker:
-      min: 2
-      max: 12
-      stream: stt:results
-      consumerGroup: translate-workers
+  # Only stateless workers belong here, and today there are none. stt-worker, translation-worker
+  # and tts-worker are singletons (see their workloads entries) and must never be given a
+  # ScaledObject: KEDA would own their replica count and scale them past 1 on queue lag, which is
+  # exactly when per-meeting and per-speaker state matters most. scripts/check-k3s-deployment.sh
+  # fails the render if any of the three reappears, and accept-k3s-release.sh fails a release that
+  # finds one live (they were last hand-applied with min 2 / max 12 on 2026-09-20).
+  # The machinery stays for a worker that is genuinely stateless: an entry needs min, max, stream
+  # and consumerGroup, as keda-scaledobjects.yaml reads them.
+  workers: {}
 
 # Rolling-update shape. The default surges (new pod first, zero unavailable) for every workload,
 # which is what makes a rollout invisible: the old pod keeps serving until its replacement is
