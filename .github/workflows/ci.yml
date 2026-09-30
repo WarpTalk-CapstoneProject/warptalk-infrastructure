@@ -121,6 +121,9 @@ jobs:
       - name: Optimized release and supply-chain contract
         working-directory: warptalk-infrastructure
         run: ./scripts/test-release-optimization-contract.sh
+      - name: Per-service image fingerprint contract
+        working-directory: warptalk-infrastructure
+        run: ./scripts/test-image-source-fingerprint.sh
       - name: Runtime secret application contract
         working-directory: warptalk-infrastructure
         run: ./scripts/test-apply-runtime-secrets.sh

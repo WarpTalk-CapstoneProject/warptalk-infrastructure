@@ -29,11 +29,33 @@ route:
       matchers:
         - alertname = "WarpTalkDeadLetterPresent"
 
+    # Watchdog is ALWAYS firing by design (it proves the pipeline delivers) and InfoInhibitor
+    # exists only to inhibit info alerts. Neither is news, and with send_resolved every 4h they
+    # were a steady trickle of mail on their own. Wire Watchdog to a dead-man's-switch service
+    # if one is ever added; until then it goes nowhere.
+    - receiver: dead-letter-muted
+      matchers:
+        - alertname =~ "Watchdog|InfoInhibitor"
+
+    # severity=info (CPUThrottlingHigh on every throttled worker, ...) is a dashboard signal,
+    # not a page. It flapped firing/resolved all day, and each flip was a mail.
+    - receiver: dead-letter-muted
+      matchers:
+        - severity = "info"
+
+    # Warnings (disk filling, overcommit, a dead-letter backlog elsewhere) still mail, but once
+    # a day while they last instead of every 4h. Criticals keep the 4h default above.
+    - receiver: warptalk-operations
+      matchers:
+        - severity = "warning"
+      repeat_interval: 24h
+
 receivers:
   - name: warptalk-operations
     email_configs:
       - to: __ALERT_EMAIL_TO__
         send_resolved: true
 
-  # Intentionally has no notifier. Alerts routed here are grouped and dropped.
+  # Intentionally has no notifier. Alerts routed here are grouped and dropped (the dead-letter
+  # mute, Watchdog/InfoInhibitor and severity=info).
   - name: dead-letter-muted

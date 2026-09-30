@@ -108,13 +108,14 @@ built without kubelet reservations). On 24 Sep its requests were at 99% (15872Mi
 | workspace-service | 2 | 253 / 265Mi | 48m | 320 -> 336Mi | 150 -> 100m |
 | billing-service | 2 | 223 / 229Mi | 48m | 320 -> 304Mi | 150 -> 100m |
 | assistant-service | 1 -> **2** | 193 / 196Mi | 31m | 320 -> 256Mi | 150 -> 50m |
-| stt-worker (KEDA) | 1 | 122 / 160Mi | 93m | 384 -> 160Mi | 150 -> 130m |
-| translation-worker (KEDA) | 1 | 124 / 132Mi | 73m | 384 -> 176Mi | 150 -> 100m |
-| tts-worker (KEDA) | 1 | 112 / 157Mi | 65m | 384 -> 160Mi | 150 -> 90m |
+| stt-worker (singleton) | 1 | 122 / 160Mi | 93m | 384 -> 160Mi | 150 -> 130m |
+| translation-worker (singleton) | 1 | 124 / 132Mi | 73m | 384 -> 176Mi | 150 -> 100m |
+| tts-worker (singleton) | 1 | 112 / 157Mi | 65m | 384 -> 160Mi | 150 -> 90m |
 | livekit-ingress-worker (HPA) | 1 | 629 / 649Mi | 205m | **512 -> 832Mi** | 200 -> 320m |
 | assistant-worker (HPA) | 1 | 115 / 154Mi | 119m | 384 -> 160Mi | 150 -> 180m |
 | embedding-worker | 1 | 116 / 152Mi | 93m | 512 -> 160Mi | 150 -> 130m |
 | suggestion-worker (singleton) | 1 | 113 / 125Mi | 90m | 256 -> 160Mi | 100 -> 120m |
+| transcript-clean-worker (singleton, WT-716, new) | 1 | not measured yet | - | 256 -> 192Mi | 100 -> 50m |
 | security-worker | 1 | 112 / 115Mi | 86m | 192 -> 160Mi | 100 -> 120m |
 | billing-worker | 1 | 90 / 92Mi | 91m | 192 -> 128Mi | 100 -> 120m |
 | metrics-exporter (singleton) | 1 | 58 / 58Mi | 10m | 96 -> 80Mi | 50 -> 25m |
@@ -122,7 +123,7 @@ built without kubelet reservations). On 24 Sep its requests were at 99% (15872Mi
 | otel collector | 1 | 88 / 90Mi | 15m | 256 -> 128Mi | 100 -> 50m |
 | seq | 1 | 132 / 146Mi | 13m | 384 -> 176Mi | 100 -> 50m |
 | 3 cost exporters | 1 each | 14 / 14Mi | 1m | 48 -> 32Mi each | 25 -> 10m each |
-| **WarpTalk chart at minimum replicas** | | | | **10096 -> 7920Mi** | **4675 -> 3465m** |
+| **WarpTalk chart at minimum replicas** | | | | **10352 -> 8112Mi** | **4775 -> 3515m** |
 | Postgres x2 (data chart, App node) | 2 | 315 / 402Mi, 259 / 263Mi | 18m | 1Gi -> 512Mi each | 300 -> 100m each |
 
 Everything else requesting memory on the App node, unchanged here: add-ons 1200Mi (KEDA 3 x
@@ -241,9 +242,29 @@ only (`warptalk_gateway_affinity`); the backend PR `fix/multi-replica-safety` ad
 backplane wiring in the three services and de-duplicates the gateway's Redis subscribers.
 
 Workloads that must be single-instance set `singleton: true` (one replica, `Recreate`, no
-HPA/PDB): suggestion-worker, metrics-exporter. Services that must stay multi-replica but host
+HPA/PDB/ScaledObject): stt-worker, translation-worker, tts-worker, transcript-clean-worker,
+suggestion-worker, metrics-exporter. Services that must stay multi-replica but host
 background loops that must not run twice list them in `singletonWorkers`, rendered as the
 `warptalk.io/singleton-workers` annotation; the guard is the backend PR's distributed lock.
+
+Which Python workers may overlap themselves (a second replica, or the old and new pod of a surge
+rollout) and why - decided from the code, 2026-09-30:
+
+| Worker | Overlap | Why |
+| --- | --- | --- |
+| stt-worker | no - singleton | per-speaker Realtime session, uncommitted buffer and frame sequence; `audio:frames` dealt across pods abandons every streamed turn |
+| translation-worker | no - singleton | rolling per-meeting context; `stt:speculative` is Pub/Sub, so every pod paid for every speculative call |
+| tts-worker | no - singleton | per-(speaker, language) order, spoken watermark, prosody turn and one LiveKit interpreter bot per pod |
+| transcript-clean-worker, suggestion-worker | no - singleton | per-meeting sentence assembly / rolling window |
+| livekit-ingress-worker | yes | one bot per room is elected in Redis (`livekit:ingress:room-owner:{room}`, SET NX + renew); a pod stops its audio readers before releasing the lease on SIGTERM, and the other claims the room on its next sweep |
+| billing-worker | yes | every charge is idempotent per (segment, language, service) in `settle_usage_charge`; suspension is announced by SET NX |
+| embedding-worker | yes | vectors are upserted by chunk id; search is a stateless RPC |
+| security-worker | yes | one scan per request, no cross-message state |
+| assistant-worker | yes | chat, summary-template and fact extraction are per request. The live summary's end-of-meeting trigger is not single-owner yet: two pods can each act on a duplicated `__MEETING_END__` (follow-up) |
+
+A redelivered message (a pod killed between publishing and XACK, a retry after a partial publish)
+is made harmless in warptalk-ai itself: STT transcribes an `audio:chunks` entry at most once,
+translation publishes a chunk id at most once, and billing keys every charge on the unit it bills.
 
 ### Monitoring
 
@@ -254,6 +275,22 @@ traces go to Seq (same image as compose); the collector's `memory_limiter` (300 
 add Kubernetes rules (crash loops, OOM kills, unavailable replicas, filling volumes, and
 stream-group coverage so a regression to a hard-coded exporter list is visible).
 `Monitoring__PrometheusUrl` points at the `monitoring` namespace.
+
+**Grafana in the admin portal.** Grafana is published at `https://app.warptalk.io.vn/grafana/`
+(same origin as the admin portal) and embedded by `/admin/health`. Every request passes a Traefik
+ForwardAuth to the gateway's `/internal/grafana/auth`, which validates the WarpTalk JWT from the
+`access_token` cookie and requires the system-admin role; Grafana runs `auth.proxy` and trusts
+`X-WEBAUTH-USER` only from the pod CIDR, and a NetworkPolicy admits only Traefik and the
+`monitoring` namespace. There is no anonymous access. Break-glass: `kubectl -n monitoring
+port-forward svc/monitoring-grafana 3000:80`, then `http://localhost:3000/grafana/` with the
+`warptalk-grafana-admin` password. The provisioned dashboards (`chart/files/dashboards`, uids
+`warptalk-meetings`, `warptalk-platform`, `warptalk-pods`) ship with the app release; the
+Grafana settings, the Middlewares and the platform alert rules ship with `monitoring-values.yaml`,
+which is applied only by the add-on bootstrap (`k8s_bootstrap=true`), not by a normal release.
+
+The kubeadm control plane (etcd, scheduler, controller-manager, kube-proxy) binds its metrics to
+127.0.0.1, so those four components are disabled in `monitoring-values.yaml` rather than left as
+permanently-down targets raising false critical alerts.
 
 ### Supply chain at admission
 

@@ -94,12 +94,17 @@ kubectl get rabbitmqcluster warptalk-rabbitmq --namespace "$NAMESPACE" -o json |
     any(.status.conditions[]?; .type == "AllReplicasReady" and .status == "True")
   ' >/dev/null || fail "RabbitMQ does not have all of its replicas ready"
 
-# Redis runs one sentinel per node with quorum 2, so fewer than three nodes can never fail over.
-kubectl get statefulset warptalk-redis-node --namespace "$DATA_NAMESPACE" -o json |
-  jq -e '
-    (.spec.replicas // 0) >= 3 and
+# Redis runs one sentinel per node with quorum 2. Production runs TWO nodes (infra #216: the Data
+# node could not hold a third), which keeps a replica of every key but cannot elect a new master if
+# one node is lost. That is a known, accepted gap, so it is a warning here, not a failure: v224 was
+# rolled back only because this line still demanded three after #216 made it two.
+redis_json="$(kubectl get statefulset warptalk-redis-node --namespace "$DATA_NAMESPACE" -o json)"
+printf '%s\n' "$redis_json" | jq -e '
+    (.spec.replicas // 0) >= 2 and
     (.status.readyReplicas // 0) == .spec.replicas
-  ' >/dev/null || fail "Redis needs three ready nodes for a sentinel quorum of two"
+  ' >/dev/null || fail "Redis does not have all of its (at least two) nodes ready"
+printf '%s\n' "$redis_json" | jq -e '(.spec.replicas // 0) >= 3' >/dev/null ||
+  echo "::warning::K3s acceptance: Redis runs $(printf '%s\n' "$redis_json" | jq '.spec.replicas') nodes; sentinel quorum 2 cannot fail over until it has three"
 kubectl get statefulset warptalk-qdrant --namespace "$DATA_NAMESPACE" -o json |
   jq -e '
     (.spec.replicas // 0) >= 1 and
@@ -122,7 +127,11 @@ jq -r --slurpfile matrix "$matrix" '
   .images[] |
   select(.service != "migrator") |
   select(.service as $service | $k3s_services | index($service)) |
-  [.service, (.ref + "@" + .digest)] | @tsv
+  . as $image |
+  # Every workload over this image, not just the first: translation-backfill-worker shares
+  # ai-translation and was absent from Kubernetes while acceptance kept passing.
+  ([.service] + ([$matrix[0].images[] | select(.service == $image.service) | .alsoServices // []] | add // []))[] |
+  [., ($image.ref + "@" + $image.digest)] | @tsv
 ' "$RELEASE_MANIFEST" |
   while IFS="$(printf '\t')" read -r service expected_image; do
     kubectl rollout status deployment "$service" --namespace "$NAMESPACE" \
@@ -200,13 +209,16 @@ if [ "$SECRET_SOURCE" = "external-secrets" ]; then
     jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
       >/dev/null || fail "externalsecret/$RUNTIME_SECRET_NAME is not Ready"
 fi
-for resource in \
-  "scaledobject/stt-worker-queue-lag" \
-  "scaledobject/translation-worker-queue-lag" \
-  "scaledobject/tts-worker-queue-lag"; do
-  kubectl get "$resource" --namespace "$NAMESPACE" -o json |
-    jq -e 'any(.status.conditions[]?; .type == "Ready" and .status == "True")' \
-      >/dev/null || fail "$resource is not Ready"
+# stt-worker, translation-worker and tts-worker are singletons (chart/values.yaml): per-meeting
+# and per-speaker state lives in the process. No workload is KEDA-scaled any more. A ScaledObject
+# left behind - including one applied by hand, as the 2026-09-20 `kubectl apply` of min 2 / max 12
+# was - keeps a stage at 2+ replicas whatever the chart renders.
+for singleton in stt-worker translation-worker tts-worker; do
+  if kubectl get "scaledobject/${singleton}-queue-lag" --namespace "$NAMESPACE" >/dev/null 2>&1; then
+    fail "scaledobject/${singleton}-queue-lag still exists; ${singleton} is a singleton"
+  fi
+  replicas="$(kubectl get deployment "$singleton" --namespace "$NAMESPACE" -o jsonpath='{.spec.replicas}')"
+  [ "$replicas" = "1" ] || fail "$singleton is a singleton but runs $replicas replicas"
 done
 if [ "$MANAGED_TLS" = "true" ]; then
   kubectl get "certificate/$TLS_SECRET_NAME" --namespace "$NAMESPACE" -o json |

@@ -117,6 +117,11 @@ spec:
           image: "{{ $.Values.global.imageRegistry }}/{{ $app.image }}:{{ $.Values.global.imageTag }}"
           {{- end }}
           imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          {{- /* A second workload over another workload's image (translation-backfill-worker over
+                 ai-translation) differs from it only by entry point, as `command:` does in Compose. */}}
+          {{- with $app.command }}
+          command: {{ toJson . }}
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

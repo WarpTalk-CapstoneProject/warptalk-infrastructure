@@ -165,10 +165,10 @@ grep -q 'trap restore_dependency EXIT INT TERM' "$DEPENDENCY_READINESS_DRILL" ||
 jq -e '
   .schemaVersion == 1
   and .platform == "linux/amd64"
-  and ([.images[].name] | length == 22)
-  and ([.images[].name] | unique | length == 22)
+  and ([.images[].name] | length == 23)
+  and ([.images[].name] | unique | length == 23)
   and (all(.images[]; (.context | length) > 0 and (.dockerfile | length) > 0))
-' "$IMAGE_MATRIX" >/dev/null || fail "image matrix must define 22 unique linux/amd64 release images"
+' "$IMAGE_MATRIX" >/dev/null || fail "image matrix must define 23 unique linux/amd64 release images"
 
 MATRIX_NAMES="$(jq -r '.images[] | select(.compose != false) | .name' "$IMAGE_MATRIX" | sort)"
 IMAGE_REGISTRY_VALUE="$(
@@ -458,7 +458,8 @@ assert_services "$INFRA_JSON" \
 assert_services "$APP_JSON" \
   migrator auth-service workspace-service translation-room-service \
   transcript-service notification-service meeting-service assistant-service \
-  billing-service gateway frontend stt-worker translation-worker translation-backfill-worker tts-worker \
+  billing-service gateway frontend stt-worker translation-worker translation-backfill-worker \
+  transcript-clean-worker tts-worker \
   assistant-worker suggestion-worker embedding-worker billing-worker livekit-ingress-worker \
   security-worker gotenberg caddy
 
