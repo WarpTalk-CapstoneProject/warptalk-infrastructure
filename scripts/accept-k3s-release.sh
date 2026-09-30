@@ -127,7 +127,11 @@ jq -r --slurpfile matrix "$matrix" '
   .images[] |
   select(.service != "migrator") |
   select(.service as $service | $k3s_services | index($service)) |
-  [.service, (.ref + "@" + .digest)] | @tsv
+  . as $image |
+  # Every workload over this image, not just the first: translation-backfill-worker shares
+  # ai-translation and was absent from Kubernetes while acceptance kept passing.
+  ([.service] + ([$matrix[0].images[] | select(.service == $image.service) | .alsoServices // []] | add // []))[] |
+  [., ($image.ref + "@" + $image.digest)] | @tsv
 ' "$RELEASE_MANIFEST" |
   while IFS="$(printf '\t')" read -r service expected_image; do
     kubectl rollout status deployment "$service" --namespace "$NAMESPACE" \

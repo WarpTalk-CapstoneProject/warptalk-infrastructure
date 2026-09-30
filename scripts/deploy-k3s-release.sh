@@ -89,7 +89,10 @@ prestop_live_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-live.XXXXXX")"
 trap 'rm -f "$override_file" "$rendered_file" "$migration_file" "$rollout_file" "$capacity_nodes_file" "$capacity_pods_file" "$prestop_target_file" "$prestop_desired_file" "$prestop_live_file"' EXIT INT TERM
 
 jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
-  ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
+  # `alsoServices` are further workloads over the same image (translation-backfill-worker runs
+  # ai-translation with its own command). Resolving only `.service` left them without an imageRef,
+  # which the production render refuses; they were simply absent from Kubernetes instead.
+  ($matrix[0].images | map(select(.k3s != false) | ([.service] + (.alsoServices // []))[])) as $k3s_services |
   {
     global: {
       production: true,
@@ -113,7 +116,13 @@ jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
         | select(.service != "migrator")
         | select(.service as $service | $k3s_services | index($service))
       ) as $image ({};
-        .[$image.service] = {imageRef: ($image.ref + "@" + $image.digest)}
+        reduce (
+          ([$image.service] + (
+            $matrix[0].images[] | select(.service == $image.service) | (.alsoServices // [])
+          ))[]
+        ) as $workload (.;
+          .[$workload] = {imageRef: ($image.ref + "@" + $image.digest)}
+        )
       )
     )
   }
@@ -179,7 +188,10 @@ expected_total_image_count=$((expected_image_count + platform_image_count))
 [ "$image_count" -eq "$expected_total_image_count" ] ||
   fail "rendered $image_count immutable images; expected $expected_image_count release plus $platform_image_count locked platform images"
 jq -r --slurpfile matrix "$matrix_file" '
-  ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
+  # `alsoServices` are further workloads over the same image (translation-backfill-worker runs
+  # ai-translation with its own command). Resolving only `.service` left them without an imageRef,
+  # which the production render refuses; they were simply absent from Kubernetes instead.
+  ($matrix[0].images | map(select(.k3s != false) | ([.service] + (.alsoServices // []))[])) as $k3s_services |
   .images[] |
   select(.service as $service | $k3s_services | index($service)) |
   .ref + "@" + .digest

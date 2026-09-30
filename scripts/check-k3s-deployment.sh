@@ -420,7 +420,8 @@ jq '{
   global: {releaseId: "contract01"},
   migrator: {imageRef: ("ghcr.io/warptalk/migrator:contract01@sha256:" + ("1" * 64))},
   workloads: ([.images[] | select(.k3s != false and .service != "migrator") |
-    {key: .service, value: {imageRef: ("ghcr.io/warptalk/" + .name + ":contract01@sha256:" + ("1" * 64))}}
+    . as $image | ([.service] + (.alsoServices // []))[] |
+    {key: ., value: {imageRef: ("ghcr.io/warptalk/" + $image.name + ":contract01@sha256:" + ("1" * 64))}}
   ] | from_entries)
 }' "$ROOT_DIR/deploy/production/image-matrix.json" >"$PROD_IMAGES"
 "$HELM" template warptalk "$CHART_DIR" --namespace warptalk \
@@ -527,8 +528,29 @@ ingress = by_kind.get("Ingress", {}).get("warptalk", "")
 if "sticky" in ingress:
     fail("sticky annotations on the Ingress are ignored by Traefik; they belong on the Service")
 
-# 3. Backplanes on every service that hosts a SignalR hub.
 deployments = by_kind.get("Deployment", {})
+
+# 3a. Every workload the release builds an image for runs on Kubernetes — including the ones that
+# share another workload's image through `alsoServices`. translation-backfill-worker was in the
+# Compose file and the image matrix and never in this chart, so from the move to Kubernetes every
+# transcript gap fill (WT-865) and every correction's retranslation (WT-876) queued into
+# translate:backfill_requests with no consumer group, and nothing anywhere failed.
+import json
+
+matrix = json.load(open(f"{root}/deploy/production/image-matrix.json", encoding="utf-8"))
+for image in matrix["images"]:
+    if image.get("k3s") is False or image.get("role") == "none":
+        continue
+    for workload in [image["service"], *image.get("alsoServices", [])]:
+        if workload not in deployments:
+            fail(f"{workload} is in the image matrix ({image['name']}) but renders no Deployment")
+backfill = deployments.get("translation-backfill-worker", "")
+if 'command: ["python","-m","translation_worker.backfill_worker"]' not in backfill:
+    fail("translation-backfill-worker must run translation_worker.backfill_worker, not the image's live translation entry point")
+if "value: \"translation-backfill\"" not in backfill:
+    fail("translation-backfill-worker must report its own WORKER_HEALTH_NAME heartbeat")
+
+# 3. Backplanes on every service that hosts a SignalR hub.
 for service in ("gateway", "meeting-service", "assistant-service", "billing-service"):
     if "name: SignalR__Redis" not in deployments.get(service, ""):
         fail(f"{service} hosts a SignalR hub and needs SignalR__Redis")
