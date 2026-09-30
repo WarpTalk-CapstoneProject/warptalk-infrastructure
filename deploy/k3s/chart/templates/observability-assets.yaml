@@ -19,3 +19,22 @@ metadata:
 data:
   warptalk-overview.json: |
 {{ .Files.Get "files/warptalk-overview.json" | nindent 4 }}
+---
+# The three provisioned dashboards the admin System Health page embeds (files/dashboards/*.json):
+# warptalk-meetings (live-meeting success rate and the STT -> MT -> TTS pipeline), warptalk-platform
+# and warptalk-pods. Picked up by the kube-prometheus-stack Grafana sidecar through the
+# grafana_dashboard label, in every namespace. Their uids are part of the web contract: the admin
+# page builds /grafana/d/<uid> URLs from them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: warptalk-grafana-dashboards
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    {{- include "warptalk.labels" . | nindent 4 }}
+data:
+{{- range $path, $_ := .Files.Glob "files/dashboards/*.json" }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}

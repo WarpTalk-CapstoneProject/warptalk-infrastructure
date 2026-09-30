@@ -83,6 +83,8 @@ case "$*" in
       "$FAKE_NODE_MEMORY"
     ;;
   "get pods "*) echo '{"items":[]}' ;;
+  "get scaledobjects.keda.sh "*) [ -z "$FAKE_SCALEDOBJECTS" ] || printf '%s\n' "$FAKE_SCALEDOBJECTS" ;;
+  "delete scaledobject.keda.sh "* | "delete hpa "* | "scale "*) echo "kubectl $*" >>"$log" ;;
   "wait "*) echo "kubectl wait" >>"$log"; exit 1 ;;
   *) exit 0 ;;
 esac
@@ -136,6 +138,7 @@ run() {
     FAKE_HELM_UPGRADE_EXIT="$3" \
     FAKE_NODE_MEMORY="$4" \
     FAKE_HELM_HISTORY="$5" \
+    FAKE_SCALEDOBJECTS="${FAKE_SCALEDOBJECTS:-}" \
     REAL_HELM="$REAL_HELM" \
     K3S_HELM_COMMAND="$work/bin/helm" \
     KUBECONFIG=/dev/null \
@@ -240,5 +243,23 @@ grep "rollout-values:" "$work/in-place.log" | grep -Fq "maxSurge: 0, maxUnavaila
   fail "with no room for one more pod the release must replace pods in place"
 grep -Fq "::warning::" "$work/in-place.out" ||
   fail "an in-place release must announce itself"
+
+# 6. A ScaledObject the release no longer renders goes BEFORE the upgrade, and its Deployment is set
+#    to the target's replicas; otherwise its HPA re-scales the Deployment while Helm is still
+#    applying it (30 Sep: stt-worker stayed at 2 replicas and acceptance rolled the release back).
+#    A ScaledObject Helm does not own is never touched.
+FAKE_SCALEDOBJECTS='{"items":[
+  {"metadata":{"name":"stt-worker-queue-lag","annotations":{"meta.helm.sh/release-name":"warptalk"}},"spec":{"scaleTargetRef":{"name":"stt-worker"}}},
+  {"metadata":{"name":"hand-made","annotations":{}},"spec":{"scaleTargetRef":{"name":"stt-worker"}}}]}' \
+  run autoscaler-dropped ok 0 64Gi "$HISTORY_WITH_FAILURES" >/dev/null
+first_delete="$(grep -n "delete scaledobject.keda.sh stt-worker-queue-lag" "$work/autoscaler-dropped.log" | head -n 1 | cut -d: -f1)"
+first_upgrade="$(grep -n "^helm upgrade " "$work/autoscaler-dropped.log" | head -n 1 | cut -d: -f1)"
+[ -n "$first_delete" ] && [ -n "$first_upgrade" ] && [ "$first_delete" -lt "$first_upgrade" ] ||
+  fail "a ScaledObject the release drops must be deleted before helm upgrade"
+grep -Fq "kubectl scale deployment/stt-worker --namespace warptalk --replicas=1" "$work/autoscaler-dropped.log" ||
+  fail "the Deployment of a dropped ScaledObject must be set to the target's replica count"
+if grep -Fq "hand-made" "$work/autoscaler-dropped.log"; then
+  fail "a ScaledObject Helm does not own must never be deleted"
+fi
 
 echo "K3s release gate contract: PASS"

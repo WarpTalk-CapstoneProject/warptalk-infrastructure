@@ -82,10 +82,20 @@ rollout_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-rollout.XXXXXX")"
 printf '{}\n' >"$rollout_file"
 capacity_nodes_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-nodes.XXXXXX")"
 capacity_pods_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-pods.XXXXXX")"
-trap 'rm -f "$override_file" "$rendered_file" "$migration_file" "$rollout_file" "$capacity_nodes_file" "$capacity_pods_file"' EXIT INT TERM
+# reconcile_prestop_handlers: the target's workloads (YAML, then JSON) and the live ones.
+prestop_target_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-target.XXXXXX")"
+prestop_desired_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-desired.XXXXXX")"
+prestop_live_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-live.XXXXXX")"
+# reconcile_removed_autoscalers: the target's ScaledObjects and Deployment replicas, and the live ones.
+autoscaler_target_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-autoscaler-target.XXXXXX")"
+autoscaler_live_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-autoscaler-live.XXXXXX")"
+trap 'rm -f "$override_file" "$rendered_file" "$migration_file" "$rollout_file" "$capacity_nodes_file" "$capacity_pods_file" "$prestop_target_file" "$prestop_desired_file" "$prestop_live_file" "$autoscaler_target_file" "$autoscaler_live_file"' EXIT INT TERM
 
 jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
-  ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
+  # `alsoServices` are further workloads over the same image (translation-backfill-worker runs
+  # ai-translation with its own command). Resolving only `.service` left them without an imageRef,
+  # which the production render refuses; they were simply absent from Kubernetes instead.
+  ($matrix[0].images | map(select(.k3s != false) | ([.service] + (.alsoServices // []))[])) as $k3s_services |
   {
     global: {
       production: true,
@@ -109,7 +119,13 @@ jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
         | select(.service != "migrator")
         | select(.service as $service | $k3s_services | index($service))
       ) as $image ({};
-        .[$image.service] = {imageRef: ($image.ref + "@" + $image.digest)}
+        reduce (
+          ([$image.service] + (
+            $matrix[0].images[] | select(.service == $image.service) | (.alsoServices // [])
+          ))[]
+        ) as $workload (.;
+          .[$workload] = {imageRef: ($image.ref + "@" + $image.digest)}
+        )
       )
     )
   }
@@ -153,7 +169,8 @@ if grep -Eiq 'CHANGE_ME|replace-with|example\.com|:latest([@"[:space:]]|$)' "$re
 fi
 
 image_count="$(grep -Ec '^[[:space:]]+image: ".+@sha256:[a-f0-9]{64}"$' "$rendered_file")"
-expected_image_count="$(jq '[.images[] | select(.k3s != false)] | length' "$matrix_file")"
+# One per workload, not per image: an `alsoServices` workload renders the same image again.
+expected_image_count="$(jq '[.images[] | select(.k3s != false) | ([.service] + (.alsoServices // []))[]] | length' "$matrix_file")"
 otel_image_count="$(grep -Fc "$OTEL_COLLECTOR_IMAGE_DIGEST" "$rendered_file")"
 sql_exporter_image_count="$(grep -Fc "$SQL_EXPORTER_IMAGE_DIGEST" "$rendered_file")"
 # The document converter is a third-party image like the two above: it is not built from this
@@ -178,11 +195,16 @@ jq -r --slurpfile matrix "$matrix_file" '
   ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
   .images[] |
   select(.service as $service | $k3s_services | index($service)) |
-  .ref + "@" + .digest
+  . as $image |
+  # Once per workload that runs it: an image with `alsoServices` backs more than one Deployment.
+  [
+    (.ref + "@" + .digest),
+    (1 + ([$matrix[0].images[] | select(.service == $image.service) | (.alsoServices // []) | length] | add // 0))
+  ] | @tsv
 ' "$RELEASE_MANIFEST" |
-  while IFS= read -r image_ref; do
-    [ "$(grep -Fc "$image_ref" "$rendered_file")" -eq 1 ] ||
-      fail "release image must appear exactly once: $image_ref"
+  while IFS="$(printf '\t')" read -r image_ref workloads; do
+    [ "$(grep -Fc "$image_ref" "$rendered_file")" -eq "$workloads" ] ||
+      fail "release image must appear once per workload ($workloads): $image_ref"
   done
 
 if [ "$K3S_SECRET_SOURCE" = "external-secrets" ]; then
@@ -348,9 +370,122 @@ if "$helm_locked" status "$RELEASE_NAME" --namespace "$NAMESPACE" >/dev/null 2>&
     fail "release $RELEASE_NAME has no DEPLOYED revision to return to; refusing to upgrade without a rollback target"
 fi
 
+# ---------------------------------------------------------------------------------------------
+# A container lifecycle hook may name ONE handler (exec, httpGet, tcpSocket or sleep). Helm's
+# three-way merge only deletes a field that its last RECORDED revision had and the target lacks;
+# it never deletes one that only the live object has. After a failed upgrade and a rollback the two
+# disagree: on 24 Sep (v223) the live Deployments carried revision 10's `preStop.exec` while the
+# last recorded revision already had `preStop.sleep`, so the patch added `sleep` next to `exec`,
+# the API server refused all 21 Deployments, and the rollback to revision 10 failed the same way.
+#
+# So, before Helm touches a workload, any live preStop whose handler type differs from the target
+# manifest's is replaced outright with the target's. This starts a rollout of that workload a few
+# seconds ahead of Helm's own (maxUnavailable 0: nothing stops serving), and is a no-op whenever
+# live and target already agree, which is every release after the first one it runs in.
+# ---------------------------------------------------------------------------------------------
+reconcile_prestop_handlers() {
+  awk '
+    function flush() { if (keep) printf "---\n%s", doc; doc = ""; keep = 0 }
+    /^---/ { flush(); next }
+    { doc = doc $0 "\n" }
+    /^kind: (Deployment|StatefulSet)$/ { keep = 1 }
+    END { flush() }
+  ' "$1" >"$prestop_target_file"
+  [ -s "$prestop_target_file" ] || return 0
+  kubectl create --dry-run=client -o json -f "$prestop_target_file" >"$prestop_desired_file" ||
+    return 1
+  [ -s "$prestop_desired_file" ] || return 0
+  kubectl get deployments,statefulsets --namespace "$NAMESPACE" -o json >"$prestop_live_file" ||
+    return 1
+  jq -r --slurpfile desired_doc "$prestop_desired_file" '
+    # One object per workload, streamed (a List only from some kubectl versions).
+    [$desired_doc[] | if .kind == "List" then .items[] else . end] as $desired |
+    .items[] as $live |
+    ($desired[] | select(.kind == $live.kind and .metadata.name == $live.metadata.name)) as $want |
+    [ $live.spec.template.spec.containers | to_entries[] |
+      .key as $index | .value as $container |
+      ($want.spec.template.spec.containers[] | select(.name == $container.name)
+        | .lifecycle.preStop) as $target |
+      ($container.lifecycle.preStop) as $current |
+      select($target != null and $current != null and ($target | keys) != ($current | keys)) |
+      {op: "replace", path: "/spec/template/spec/containers/\($index)/lifecycle/preStop", value: $target}
+    ] | select(length > 0) |
+    "\($live.kind | ascii_downcase)/\($live.metadata.name)\t\(tojson)"
+  ' "$prestop_live_file" >"$prestop_target_file" || return 1
+  while IFS="$(printf '\t')" read -r workload patch; do
+    echo "K3s release: $workload preStop handler differs from the target; replacing it"
+    kubectl patch "$workload" --namespace "$NAMESPACE" --type json --patch "$patch" >/dev/null ||
+      return 1
+  done <"$prestop_target_file"
+}
+
+# ---------------------------------------------------------------------------------------------
+# A ScaledObject the target no longer renders must be gone BEFORE Helm sets the replica count.
+# Helm applies the Deployments first and deletes the ScaledObject last, and in between KEDA's HPA
+# is still alive. On 30 Sep (prod-20260930-1550, infra #248) Helm set stt-worker to `replicas: 1`,
+# the HPA (min 2) scaled it back to 2 before the ScaledObject was deleted, and KEDA does not restore
+# a replica count when its ScaledObject goes. The Deployment stayed at 2, acceptance refused a
+# singleton with two replicas, and the release rolled back.
+#
+# So every live ScaledObject this release owns and the target does not render is deleted first
+# (KEDA deletes its HPA with it), and the Deployment it scaled is set to the target's replica
+# count. Helm then finds nothing left to fight it. A no-op whenever live and target agree.
+# ---------------------------------------------------------------------------------------------
+reconcile_removed_autoscalers() {
+  awk '
+    function flush() {
+      if (kind == "ScaledObject" && name != "") print "ScaledObject", name
+      if (kind == "Deployment" && name != "" && replicas != "") print "Deployment", name, replicas
+      kind = ""; name = ""; replicas = ""; in_metadata = 0; in_spec = 0
+    }
+    /^---/ { flush(); next }
+    /^kind: / { kind = $2 }
+    /^metadata:/ { in_metadata = 1; in_spec = 0; next }
+    /^spec:/ { in_spec = 1; in_metadata = 0; next }
+    /^[^ ]/ { in_metadata = 0; in_spec = 0 }
+    in_metadata && name == "" && /^  name: / { name = $2 }
+    in_spec && /^  replicas: / { replicas = $2 }
+    END { flush() }
+  ' "$1" >"$autoscaler_target_file"
+  if ! kubectl get scaledobjects.keda.sh --namespace "$NAMESPACE" -o json >"$autoscaler_live_file" 2>/dev/null; then
+    echo "K3s release: no ScaledObjects readable in $NAMESPACE; nothing to reconcile"
+    return 0
+  fi
+  [ -s "$autoscaler_live_file" ] || return 0
+  jq -r --arg release "$RELEASE_NAME" '
+    .items[]
+    | select(.metadata.annotations["meta.helm.sh/release-name"] == $release)
+    | "\(.metadata.name)\t\(.spec.scaleTargetRef.name)"
+  ' "$autoscaler_live_file" |
+    while IFS="$(printf '\t')" read -r scaled_object target; do
+      if awk -v name="$scaled_object" '$1 == "ScaledObject" && $2 == name { found = 1 } END { exit !found }' \
+        "$autoscaler_target_file"; then
+        continue
+      fi
+      echo "K3s release: ScaledObject $scaled_object is not in this release; deleting it before the upgrade"
+      kubectl delete scaledobject.keda.sh "$scaled_object" --namespace "$NAMESPACE" \
+        --wait=true --timeout=2m >/dev/null || return 1
+      kubectl delete hpa "keda-hpa-$scaled_object" --namespace "$NAMESPACE" \
+        --ignore-not-found >/dev/null || return 1
+      replicas="$(awk -v name="$target" '$1 == "Deployment" && $2 == name { print $3 }' "$autoscaler_target_file")"
+      if [ -n "$replicas" ]; then
+        echo "K3s release: deployment/$target set to the target's $replicas replica(s)"
+        kubectl scale "deployment/$target" --namespace "$NAMESPACE" --replicas="$replicas" >/dev/null ||
+          return 1
+      fi
+    done
+}
+
 rollback_release() {
   if [ -n "$previous_revision" ]; then
     echo "K3s release: rolling back to the last DEPLOYED revision $previous_revision" >&2
+    "$helm_locked" get manifest "$RELEASE_NAME" --revision "$previous_revision" \
+      --namespace "$NAMESPACE" >"$rendered_file" &&
+      reconcile_prestop_handlers "$rendered_file" ||
+      echo "::warning::K3s release: could not reconcile preStop handlers before the rollback" >&2
+    [ -s "$rendered_file" ] &&
+      { reconcile_removed_autoscalers "$rendered_file" ||
+        echo "::warning::K3s release: could not reconcile ScaledObjects before the rollback" >&2; }
     "$helm_locked" rollback "$RELEASE_NAME" "$previous_revision" \
       --namespace "$NAMESPACE" \
       --wait \
@@ -511,6 +646,12 @@ if ! run_migration_gate; then
 fi
 
 choose_rollout_mode
+
+reconcile_prestop_handlers "$rendered_file" ||
+  fail "could not reconcile live preStop handlers with this release; nothing was upgraded"
+
+reconcile_removed_autoscalers "$rendered_file" ||
+  fail "could not remove the ScaledObjects this release drops; nothing was upgraded"
 
 # ---------------------------------------------------------------------------------------------
 # Step 3: the upgrade. `--wait` (every Deployment rolled out and Ready), not `--atomic`: on failure

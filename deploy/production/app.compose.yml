@@ -138,6 +138,9 @@ services:
       # Required by WorkspaceInvitationGrpcClient, which verifies and accepts workspace
       # invitation tokens. Same failure mode as above.
       GrpcSettings__WorkspaceServiceUrl: http://workspace-service:50056
+      # Required by the email template composer: the verification and password-reset emails read
+      # their admin-edited template from the notification service (GetEmailTemplate).
+      GrpcSettings__NotificationServiceUrl: http://notification-service:50054
       HEALTH_PORT: "5101"
       AppBaseUrl: https://${APP_DOMAIN:?}
       Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID:?}
@@ -212,6 +215,10 @@ services:
       # production (WT-402). Prometheus publishes 9090 on the infra private address only, and
       # the query API is read-only: this deployment does not run --web.enable-admin-api.
       Monitoring__PrometheusUrl: http://${INFRA_PRIVATE_IP:?}:9090
+      # G12 pending-work inbox: the owning services' inbox-items endpoints, called directly.
+      AdminInbox__BillingUrl: http://billing-service:5107
+      AdminInbox__AuthUrl: http://auth-service:5101
+      AdminInbox__NotificationUrl: http://notification-service:5104
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -471,6 +478,8 @@ services:
       # Plugin marketplace request notifications (member -> Owner, Owner -> member) go through the
       # notification service's SendNotification RPC. Same rule: required outside Development.
       GrpcSettings__NotificationServiceUrl: http://notification-service:50054
+      # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
+      GrpcSettings__AuthServiceUrl: http://auth-service:50051
       # Plugin OAuth callbacks land the browser here; the service refuses to start outside
       # Development when this is missing or points at localhost.
       AppBaseUrl: https://${APP_DOMAIN:?}
@@ -529,10 +538,18 @@ services:
       RabbitMQ__Password: ${RABBITMQ_PASSWORD:?}
       GrpcUrls__AuthServiceUrl: http://auth-service:50051
       GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
+      # Admin Providers page: LiveKit usage (translation-room GetMediaUsage).
+      GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
       Stripe__SecretKey: ${STRIPE_SECRET_KEY:?}
       Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:?}
       Stripe__SuccessUrl: https://${APP_DOMAIN:?}/workspace/payment/success?session_id={CHECKOUT_SESSION_ID}
       Stripe__CancelUrl: https://${APP_DOMAIN:?}/workspace/payment/plans
+      # G12 operating-expense receipts, in the workspace documents bucket under finance/receipts/.
+      Storage__Provider: MinIO
+      Storage__S3__ServiceUrl: http://${DATA_PRIVATE_IP:?}:9000
+      Storage__S3__AccessKey: ${MINIO_ROOT_USER:?}
+      Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:?}
+      Storage__S3__BucketName: ${MINIO_WORKSPACE_DOCUMENTS_BUCKET:?}
       BillingRates__SttPerMinute: ${BILLING_RATE_STT_PER_MINUTE:-15}
       BillingRates__TranslationPerMinute: ${BILLING_RATE_TRANSLATION_PER_MINUTE:-15}
       BillingRates__StandardTtsPerMinute: ${BILLING_RATE_STANDARD_TTS_PER_MINUTE:-15}
@@ -579,6 +596,8 @@ services:
       GrpcUrls__NotificationServiceUrl: http://notification-service:50054
       GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
       GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
+      # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
+      GrpcUrls__AuthServiceUrl: http://auth-service:50051
       AllowedOrigins__0: ${ALLOWED_ORIGINS:?}
       RateLimits__IpPermitLimit: ${RATE_LIMIT_IP_PER_WINDOW:-300}
       RateLimits__UserPermitLimit: ${RATE_LIMIT_USER_PER_WINDOW:-180}
@@ -688,6 +707,12 @@ services:
       # closes the turn. Per-room override `translationRoom:{id}:flash_mode` still wins
       # in both directions, so a bad room can be moved back without a deploy.
       STT_STREAMING_ENABLED: "true"
+      # WT-716 tier 1: the deterministic filler/stutter prepass that runs inside this worker
+      # and publishes clean_text alongside the raw text on stt:results. Same flag name as the
+      # one on transcript-clean-worker on purpose — they are two halves of one feature, and
+      # turning tier 2 off while leaving tier 1 on (or the reverse) is a half-clean transcript.
+      # original_text is never touched either way, so this is safe to flip back.
+      TRANSCRIPT_CLEAN_ENABLED: "true"
     healthcheck: *ai-healthcheck
     deploy:
       resources:
@@ -762,6 +787,58 @@ services:
       # the mini tier cannot use the ASR-repair machinery, and these lines were transcribed
       # under exactly the conditions that needs.
       TRANSLATION_MODEL: gpt-4.1
+    healthcheck: *ai-healthcheck
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  # WT-716 tier 2 of "clean transcript": whole cleaned SENTENCES over the raw segments, read off
+  # transcript:clean and stored beside the raw rows, never instead of them. Tier 1 (fillers and
+  # stutters, per segment, deterministic) runs inside stt-worker on the live path; this is the
+  # LLM pass that joins segments into sentences once they are final.
+  #
+  # Its own image (ai-transcript-clean, the `transcript-clean` target of warptalk-ai/Dockerfile),
+  # NOT the ai-translation image under another command: the matrix fingerprints each image by its
+  # sourcePaths, and ai-translation's do not include transcript_clean_worker/, so a change to this
+  # worker alone would have reused a stale translation image. The Kubernetes release also demands
+  # exactly one workload per release image (deploy-k3s-release.sh), which a shared image breaks.
+  #
+  # A separate container rather than a loop inside translation-worker: this pass waits for
+  # segments to settle and then calls an LLM per sentence, which must never queue in front of a
+  # live translation somebody is listening for.
+  transcript-clean-worker:
+    <<: *service-defaults
+    image: ${IMAGE_REGISTRY:?}/ai-transcript-clean:${IMAGE_TAG:?}
+    environment:
+      <<: *ai-environment
+      WORKER_HEALTH_NAME: transcript-clean
+      # The kill switch for the whole feature, also set on stt-worker for tier 1. Off means the
+      # transcript is served raw, which is what every reader already falls back to when
+      # clean_text is NULL.
+      TRANSCRIPT_CLEAN_ENABLED: "true"
+      # Segments closer together than this are joined into one sentence candidate; a gap wider
+      # than it ends the sentence.
+      TRANSCRIPT_CLEAN_MERGE_GAP_MS: "1200"
+      # A hard ceiling so an unbroken monologue is still cut into sentences rather than growing
+      # one unbounded prompt.
+      TRANSCRIPT_CLEAN_MAX_SENTENCE_MS: "30000"
+      # A speaker who simply stopped talking must not leave the last sentence unflushed.
+      TRANSCRIPT_CLEAN_IDLE_FLUSH_MS: "4000"
+      # Nothing downstream waits on this worker; the LLM call is detached from the consume loop.
+      # On timeout or any failure revision 1 is simply not published and the rule-tier revision 0
+      # line stands. The raw segment is never touched either way.
+      TRANSCRIPT_CLEAN_LLM_TIMEOUT_S: "8"
+      # The guardrail that keeps "cleaning" from becoming "summarising": a candidate that deletes
+      # more than this fraction of the source is rejected and the raw text is kept instead.
+      TRANSCRIPT_CLEAN_MAX_DELETE_RATIO: "0.4"
+      # Pinned rather than left to the worker default, for the reason TRANSLATION_REALTIME_MODEL
+      # spells out above: an unpinned model means a code default silently decides what production
+      # runs. The same non-reasoning chat model translation-worker uses off the realtime socket —
+      # this pass rewrites transcribed speech under exactly the conditions that model is tuned
+      # for, and a reasoning tier buys nothing for filler removal.
+      TRANSCRIPT_CLEAN_MODEL: gpt-4.1
     healthcheck: *ai-healthcheck
     deploy:
       resources:

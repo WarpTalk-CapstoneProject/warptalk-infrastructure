@@ -6,6 +6,32 @@ spec:
   podSelector: {}
   policyTypes: [Ingress]
 ---
+{{- if .Values.ingress.certManager.enabled }}
+# cert-manager's HTTP-01 solver pods are created in this namespace per challenge and carry none of
+# the labels above, so default-deny-ingress silently blackholed Traefik's requests to them: every
+# challenge timed out (2026-09-24, release v222 failed acceptance on certificate/warptalk-tls).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-acme-http01-solver-from-traefik
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cert-manager
+      ports:
+        - protocol: TCP
+          port: 8089
+{{- end }}
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
