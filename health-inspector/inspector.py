@@ -47,6 +47,9 @@ EXPECTED_SERVICES: dict[str, ServiceProbe] = {
 PRODUCTION_AI_SERVICES = {
     "stt-worker",
     "translation-worker",
+    # Post-meeting gap fills and correction retranslations (translate:backfill_requests). It
+    # was missing from Kubernetes for ten days and nothing noticed, because nothing expected it.
+    "translation-backfill-worker",
     # WT-716. Its own image (ai-transcript-clean) and its own Deployment on Kubernetes; listed so
     # both platforms expect it, and a container whose consume loop died is caught by its
     # WORKER_HEALTH_NAME heartbeat rather than looking like a running image.

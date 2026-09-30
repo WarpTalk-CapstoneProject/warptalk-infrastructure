@@ -571,6 +571,29 @@ workloads:
       OPENAI_API_KEY: OPENAI_API_KEY
       TRANSLATION_PROVIDER: TRANSLATION_PROVIDER
       TRANSLATION_API_KEY: TRANSLATION_API_KEY
+  # Same image as translation-worker, different entry point and stream: it reads
+  # translate:backfill_requests, which TranscriptService writes when a reader picks a language the
+  # meeting never covered (WT-865) and when somebody corrects a line (WT-876). Compose has run it
+  # since v145 (deploy/production/app.compose.yml); the move to Kubernetes dropped it, so from
+  # 20 Sep every gap fill and every correction's retranslation queued into a stream with no
+  # consumer group at all — the transcript kept the old translation and "13 of 48 are not in
+  # English yet" never closed. Kept out of translation-worker for the reason Compose gives: that
+  # loop is on the meeting's critical path and a backfill is a long batch job.
+  translation-backfill-worker:
+    image: ai-translation
+    command: ["python", "-m", "translation_worker.backfill_worker"]
+    workerHealthName: translation-backfill
+    replicas: 1
+    cpu: 50m
+    memory: 192Mi
+    cpuLimit: 500m
+    memoryLimit: 512Mi
+    autoscaling: {enabled: false}
+    secretEnv:
+      REDIS_PASSWORD: REDIS_PASSWORD
+      OPENAI_API_KEY: OPENAI_API_KEY
+      TRANSLATION_PROVIDER: TRANSLATION_PROVIDER
+      TRANSLATION_API_KEY: TRANSLATION_API_KEY
   # WT-716 tier 2: joins raw stt:results segments into whole clean sentences and publishes them on
   # transcript:clean (revision 0 from the rule tier at once, revision 1 from a bounded LLM pass).
   # Own image (ai-transcript-clean) so the release keeps one workload per image. A singleton for

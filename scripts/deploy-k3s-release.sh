@@ -92,7 +92,10 @@ autoscaler_live_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-autoscaler-live.XXX
 trap 'rm -f "$override_file" "$rendered_file" "$migration_file" "$rollout_file" "$capacity_nodes_file" "$capacity_pods_file" "$prestop_target_file" "$prestop_desired_file" "$prestop_live_file" "$autoscaler_target_file" "$autoscaler_live_file"' EXIT INT TERM
 
 jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
-  ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
+  # `alsoServices` are further workloads over the same image (translation-backfill-worker runs
+  # ai-translation with its own command). Resolving only `.service` left them without an imageRef,
+  # which the production render refuses; they were simply absent from Kubernetes instead.
+  ($matrix[0].images | map(select(.k3s != false) | ([.service] + (.alsoServices // []))[])) as $k3s_services |
   {
     global: {
       production: true,
@@ -116,7 +119,13 @@ jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
         | select(.service != "migrator")
         | select(.service as $service | $k3s_services | index($service))
       ) as $image ({};
-        .[$image.service] = {imageRef: ($image.ref + "@" + $image.digest)}
+        reduce (
+          ([$image.service] + (
+            $matrix[0].images[] | select(.service == $image.service) | (.alsoServices // [])
+          ))[]
+        ) as $workload (.;
+          .[$workload] = {imageRef: ($image.ref + "@" + $image.digest)}
+        )
       )
     )
   }
@@ -160,7 +169,8 @@ if grep -Eiq 'CHANGE_ME|replace-with|example\.com|:latest([@"[:space:]]|$)' "$re
 fi
 
 image_count="$(grep -Ec '^[[:space:]]+image: ".+@sha256:[a-f0-9]{64}"$' "$rendered_file")"
-expected_image_count="$(jq '[.images[] | select(.k3s != false)] | length' "$matrix_file")"
+# One per workload, not per image: an `alsoServices` workload renders the same image again.
+expected_image_count="$(jq '[.images[] | select(.k3s != false) | ([.service] + (.alsoServices // []))[]] | length' "$matrix_file")"
 otel_image_count="$(grep -Fc "$OTEL_COLLECTOR_IMAGE_DIGEST" "$rendered_file")"
 sql_exporter_image_count="$(grep -Fc "$SQL_EXPORTER_IMAGE_DIGEST" "$rendered_file")"
 # The document converter is a third-party image like the two above: it is not built from this
@@ -185,11 +195,16 @@ jq -r --slurpfile matrix "$matrix_file" '
   ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
   .images[] |
   select(.service as $service | $k3s_services | index($service)) |
-  .ref + "@" + .digest
+  . as $image |
+  # Once per workload that runs it: an image with `alsoServices` backs more than one Deployment.
+  [
+    (.ref + "@" + .digest),
+    (1 + ([$matrix[0].images[] | select(.service == $image.service) | (.alsoServices // []) | length] | add // 0))
+  ] | @tsv
 ' "$RELEASE_MANIFEST" |
-  while IFS= read -r image_ref; do
-    [ "$(grep -Fc "$image_ref" "$rendered_file")" -eq 1 ] ||
-      fail "release image must appear exactly once: $image_ref"
+  while IFS="$(printf '\t')" read -r image_ref workloads; do
+    [ "$(grep -Fc "$image_ref" "$rendered_file")" -eq "$workloads" ] ||
+      fail "release image must appear once per workload ($workloads): $image_ref"
   done
 
 if [ "$K3S_SECRET_SOURCE" = "external-secrets" ]; then

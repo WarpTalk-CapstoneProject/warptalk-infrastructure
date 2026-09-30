@@ -231,6 +231,15 @@ workloads:
     cpuLimit: 300m
     memoryLimit: 768Mi
 
+  # New on Kubernetes (Compose ran it at a 0.5 CPU / 512M limit): sized from translation-worker,
+  # the same image and translator, less the realtime socket it never opens. Idle between requests;
+  # a request is one batch of up to 20 lines. Re-measure after a week, same p95 x 1.3 rule.
+  translation-backfill-worker:
+    cpu: 50m
+    memory: 176Mi
+    cpuLimit: 300m
+    memoryLimit: 512Mi
+
   # WT-716, new: no production history yet, so sized from its closest relative (suggestion-worker,
   # also a text-only singleton on stt:results that calls an LLM off the live path, p95 113Mi / 90m)
   # plus headroom for the fugashi/unidic-lite Japanese tokenizer the prepass loads. Re-measure after
