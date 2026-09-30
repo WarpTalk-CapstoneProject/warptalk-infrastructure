@@ -189,17 +189,19 @@ expected_total_image_count=$((expected_image_count + platform_image_count))
 [ "$image_count" -eq "$expected_total_image_count" ] ||
   fail "rendered $image_count immutable images; expected $expected_image_count release plus $platform_image_count locked platform images"
 jq -r --slurpfile matrix "$matrix_file" '
-  # `alsoServices` are further workloads over the same image (translation-backfill-worker runs
-  # ai-translation with its own command). Resolving only `.service` left them without an imageRef,
-  # which the production render refuses; they were simply absent from Kubernetes instead.
-  ($matrix[0].images | map(select(.k3s != false) | ([.service] + (.alsoServices // []))[])) as $k3s_services |
+  ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
   .images[] |
   select(.service as $service | $k3s_services | index($service)) |
-  .ref + "@" + .digest
+  . as $image |
+  # Once per workload that runs it: an image with `alsoServices` backs more than one Deployment.
+  [
+    (.ref + "@" + .digest),
+    (1 + ([$matrix[0].images[] | select(.service == $image.service) | (.alsoServices // []) | length] | add // 0))
+  ] | @tsv
 ' "$RELEASE_MANIFEST" |
-  while IFS= read -r image_ref; do
-    [ "$(grep -Fc "$image_ref" "$rendered_file")" -eq 1 ] ||
-      fail "release image must appear exactly once: $image_ref"
+  while IFS="$(printf '\t')" read -r image_ref workloads; do
+    [ "$(grep -Fc "$image_ref" "$rendered_file")" -eq "$workloads" ] ||
+      fail "release image must appear once per workload ($workloads): $image_ref"
   done
 
 if [ "$K3S_SECRET_SOURCE" = "external-secrets" ]; then
