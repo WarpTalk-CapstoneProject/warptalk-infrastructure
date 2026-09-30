@@ -614,6 +614,8 @@ grep -q 'ufw default deny incoming' "$HOST_BOOTSTRAP" ||
   fail "host bootstrap must default-deny inbound traffic"
 grep -q 'ufw allow in on tailscale0' "$HOST_BOOTSTRAP" ||
   fail "host bootstrap must rebuild tailnet SSH or a re-run cuts off the release workflow"
+grep -q 'ufw allow in on tailscale0 to any port 9100,10250 proto tcp' "$HOST_BOOTSTRAP" ||
+  fail "host bootstrap must reopen kubelet/node-exporter over the tailnet, or a re-run cuts the control plane off the node"
 grep -q 'download.docker.com/linux/ubuntu' "$HOST_BOOTSTRAP" ||
   fail "host bootstrap must install Docker from the signed apt repository"
 grep -q 'APP_PRIVATE_IP=10.20.0.10' "$SINGLE_HOST_INVENTORY" &&

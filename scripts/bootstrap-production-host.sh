@@ -248,6 +248,20 @@ else
   done
 fi
 
+# Kubernetes, over the tailnet. `ufw --force reset` above wipes every rule, and on 30 Sep the
+# cluster was found without these on the data and infra hosts: the API server could not reach the
+# data host's kubelet (kubectl logs/exec on every data pod timed out) and Prometheus on the App
+# host could not scrape node-exporter anywhere else - permanent critical TargetDown mail.
+#   * kubelet 10250 and node-exporter 9100 from any tailnet peer (the control plane, Prometheus);
+#   * the same from the Calico pod CIDR on vxlan.calico (Prometheus is a pod);
+#   * the control plane itself: API server 6443, Calico BGP 179 and VXLAN 4789/udp.
+run ufw allow in on tailscale0 to any port 9100,10250 proto tcp comment "k8s: kubelet/node-exporter over Tailscale"
+run ufw allow in on vxlan.calico from 192.168.0.0/16 to any port 9100,10250 proto tcp comment "k8s: pod CIDR to kubelet/node-exporter"
+if [ "$ROLE" = "infra" ]; then
+  run ufw allow in on tailscale0 to any port 6443,179 proto tcp comment "k8s: API server and Calico BGP"
+  run ufw allow in on tailscale0 to any port 4789 proto udp comment "k8s: Calico VXLAN"
+fi
+
 run ufw --force enable
 run install -d -m 0750 -o root -g docker /opt/warptalk
 run install -d -m 0750 /etc/warptalk
