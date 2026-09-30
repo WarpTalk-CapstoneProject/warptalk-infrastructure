@@ -166,7 +166,8 @@ if grep -Eiq 'CHANGE_ME|replace-with|example\.com|:latest([@"[:space:]]|$)' "$re
 fi
 
 image_count="$(grep -Ec '^[[:space:]]+image: ".+@sha256:[a-f0-9]{64}"$' "$rendered_file")"
-expected_image_count="$(jq '[.images[] | select(.k3s != false)] | length' "$matrix_file")"
+# One per workload, not per image: an `alsoServices` workload renders the same image again.
+expected_image_count="$(jq '[.images[] | select(.k3s != false) | ([.service] + (.alsoServices // []))[]] | length' "$matrix_file")"
 otel_image_count="$(grep -Fc "$OTEL_COLLECTOR_IMAGE_DIGEST" "$rendered_file")"
 sql_exporter_image_count="$(grep -Fc "$SQL_EXPORTER_IMAGE_DIGEST" "$rendered_file")"
 # The document converter is a third-party image like the two above: it is not built from this
