@@ -81,6 +81,11 @@ prometheus:
 # password in warptalk-grafana-admin, at http://localhost:3000/grafana/.
 grafana:
   <<: *infra-placement
+  # serve_from_sub_path (below) moves EVERY route under /grafana/, /metrics included. The chart's
+  # ServiceMonitor still scraped /metrics at the root, which Grafana treats as an unauthenticated
+  # UI request: 401 on every scrape since 24 Sep, i.e. a permanent critical WarpTalkTargetDown mail.
+  serviceMonitor:
+    path: /grafana/metrics
   admin:
     # Written from GRAFANA_ADMIN_PASSWORD (GitHub `production`), as compose reads it; the chart
     # default is the public string "prom-operator".
