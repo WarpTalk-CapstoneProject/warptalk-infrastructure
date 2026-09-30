@@ -90,12 +90,17 @@ grep -Fq "kind: ScaledObject" "$RENDERED_FILE"
 grep -Fq "kind: TriggerAuthentication" "$RENDERED_FILE"
 grep -Fq "type: redis-sentinel-streams" "$RENDERED_FILE"
 grep -Fq "sentinelMaster: mymaster" "$RENDERED_FILE"
-grep -Fq "stream: audio:chunks" "$RENDERED_FILE"
-grep -Fq "consumerGroup: stt-workers" "$RENDERED_FILE"
 grep -Fq "stream: stt:results" "$RENDERED_FILE"
 grep -Fq "consumerGroup: translate-workers" "$RENDERED_FILE"
-grep -Fq "stream: translate:results" "$RENDERED_FILE"
-grep -Fq "consumerGroup: tts-workers" "$RENDERED_FILE"
+# stt-worker and tts-worker hold per-speaker streaming state in the process. A ScaledObject on
+# either scales it past one replica and splits a speaker's frames across pods (production
+# 2026-09-27..29: every streamed STT turn abandoned on frame_gap). Inverted on purpose.
+for stateful in stt-worker tts-worker; do
+  if grep -Fq "name: ${stateful}-queue-lag" "$RENDERED_FILE"; then
+    echo "${stateful} is a singleton and must not have a KEDA ScaledObject" >&2
+    exit 1
+  fi
+done
 if grep -Fq "type: prometheus" "$RENDERED_FILE"; then
   echo "KEDA must use the real Redis Sentinel stream lag, not an unevaluated Prometheus metric" >&2
   exit 1
@@ -658,7 +663,7 @@ for name, doc in pdbs.items():
         fail(f"PDB {name} uses minAvailable; use maxUnavailable")
     if "maxUnavailable: 1" not in doc:
         fail(f"PDB {name} must allow exactly one voluntary disruption (maxUnavailable: 1)")
-for singleton in ("suggestion-worker", "transcript-clean-worker", "metrics-exporter"):
+for singleton in ("suggestion-worker", "transcript-clean-worker", "metrics-exporter", "stt-worker", "tts-worker"):
     if "type: Recreate" not in deployments[singleton] or "replicas: 1" not in deployments[singleton]:
         fail(f"{singleton} is a singleton: one replica and a Recreate rollout")
 

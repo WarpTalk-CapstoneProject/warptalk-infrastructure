@@ -518,10 +518,19 @@ workloads:
       # an unset client id started cleanly and died on Google's consent screen instead.
       Plugins__GoogleWorkspace__OAuth__ClientId: GOOGLE_WORKSPACE_CLIENT_ID
       Plugins__GoogleWorkspace__OAuth__ClientSecret: GOOGLE_WORKSPACE_CLIENT_SECRET
+  # A singleton, like suggestion-worker, and for a harder reason. Streaming STT keeps each
+  # speaker's live turn in this process: the Realtime socket, the uncommitted input buffer and
+  # the frame sequence it was filled from. `audio:frames` and `audio:chunks` are each read through
+  # ONE consumer group, so at 2 replicas Redis deals a speaker's frames out alternately and every
+  # turn is abandoned on a `frame_gap` (expected_seq 1, got_seq 2), and the closing chunk lands on
+  # whichever pod is next, not the one holding the buffer. Production 2026-09-27..29: ~420
+  # abandoned turns against ~128 segments, streaming dead and every caption waiting for VAD.
+  # Scaling it out needs per-meeting ownership first (the livekit ingress room-owner lease).
   stt-worker:
     image: ai-stt
     workerHealthName: stt
-    replicas: 2
+    replicas: 1
+    singleton: true
     cpu: 500m
     memory: 512Mi
     cpuLimit: "2"
@@ -574,10 +583,17 @@ workloads:
     secretEnv:
       REDIS_PASSWORD: REDIS_PASSWORD
       OPENAI_API_KEY: OPENAI_API_KEY
+  # A singleton for the same class of reason as stt-worker: the per-(speaker, language) lock, the
+  # spoken-position watermark and the prosody turn all live in this process, and so does the
+  # LiveKit interpreter bot. At 2 replicas `tts-workers` splits one speaker's sentences across two
+  # pods, each publishes its own bot into the room (25 `livekit_tts_bot_published` per pod over
+  # 72h), the in-order guarantee is gone, and the two pods together overrun the Cartesia plan's
+  # concurrency limit of 2 (`429 concurrency_limited`).
   tts-worker:
     image: ai-tts
     workerHealthName: tts
-    replicas: 2
+    replicas: 1
+    singleton: true
     cpu: 300m
     memory: 384Mi
     cpuLimit: "2"
@@ -789,22 +805,16 @@ keda:
   redisSentinelAddresses: warptalk-redis.warptalk-data.svc.cluster.local:26379
   queueLagThreshold: "120"
   activationQueueLagThreshold: "1"
+  # Only stateless workers belong here. stt-worker and tts-worker are singletons (see their
+  # workloads entries) and must never be given a ScaledObject: KEDA would own their replica count
+  # and scale them past 1 on queue lag, which is exactly when streaming state matters most.
+  # scripts/check-k3s-deployment.sh fails the render if either reappears.
   workers:
-    stt-worker:
-      min: 2
-      max: 12
-      stream: audio:chunks
-      consumerGroup: stt-workers
     translation-worker:
       min: 2
       max: 12
       stream: stt:results
       consumerGroup: translate-workers
-    tts-worker:
-      min: 2
-      max: 12
-      stream: translate:results
-      consumerGroup: tts-workers
 
 # Rolling-update shape. The default surges (new pod first, zero unavailable) for every workload,
 # which is what makes a rollout invisible: the old pod keeps serving until its replacement is
