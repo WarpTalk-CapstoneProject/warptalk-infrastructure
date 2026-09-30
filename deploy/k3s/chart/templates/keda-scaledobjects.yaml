@@ -1,4 +1,5 @@
-{{- if .Values.keda.enabled }}
+{{- /* Nothing to authenticate for when no worker is KEDA-scaled (see keda.workers). */}}
+{{- if and .Values.keda.enabled .Values.keda.workers }}
 apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
 metadata:
