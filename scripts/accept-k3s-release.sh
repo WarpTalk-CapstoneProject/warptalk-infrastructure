@@ -98,11 +98,24 @@ kubectl get rabbitmqcluster warptalk-rabbitmq --namespace "$NAMESPACE" -o json |
 # node could not hold a third), which keeps a replica of every key but cannot elect a new master if
 # one node is lost. That is a known, accepted gap, so it is a warning here, not a failure: v224 was
 # rolled back only because this line still demanded three after #216 made it two.
-redis_json="$(kubectl get statefulset warptalk-redis-node --namespace "$DATA_NAMESPACE" -o json)"
-printf '%s\n' "$redis_json" | jq -e '
-    (.spec.replicas // 0) >= 2 and
-    (.status.readyReplicas // 0) == .spec.replicas
-  ' >/dev/null || fail "Redis does not have all of its (at least two) nodes ready"
+#
+# Waited for, not sampled once. The Data node's sentinel restarts every few hours (its DNS goes
+# through the Tailscale DERP relay to CoreDNS on the Infra node: ~90ms per round trip, A+AAAA
+# lookups of 0.5-1s block sentinel's event loop into TILT and its liveness probe kills it). On 30 Sep
+# prod-20260930-2043 upgraded cleanly and was rolled back only because this check ran during one of
+# those ~1-minute restarts. A node that is still not Ready after 5 minutes is a real failure.
+redis_ready_deadline=$(( $(date +%s) + 300 ))
+while :; do
+  redis_json="$(kubectl get statefulset warptalk-redis-node --namespace "$DATA_NAMESPACE" -o json)"
+  printf '%s\n' "$redis_json" | jq -e '
+      (.spec.replicas // 0) >= 2 and
+      (.status.readyReplicas // 0) == .spec.replicas
+    ' >/dev/null && break
+  [ "$(date +%s)" -lt "$redis_ready_deadline" ] ||
+    fail "Redis does not have all of its (at least two) nodes ready after 5 minutes"
+  echo "K3s acceptance: waiting for every Redis node to be Ready"
+  sleep 10
+done
 printf '%s\n' "$redis_json" | jq -e '(.spec.replicas // 0) >= 3' >/dev/null ||
   echo "::warning::K3s acceptance: Redis runs $(printf '%s\n' "$redis_json" | jq '.spec.replicas') nodes; sentinel quorum 2 cannot fail over until it has three"
 kubectl get statefulset warptalk-qdrant --namespace "$DATA_NAMESPACE" -o json |
