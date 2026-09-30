@@ -86,7 +86,10 @@ capacity_pods_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-pods.XXXXXX")"
 prestop_target_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-target.XXXXXX")"
 prestop_desired_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-desired.XXXXXX")"
 prestop_live_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-prestop-live.XXXXXX")"
-trap 'rm -f "$override_file" "$rendered_file" "$migration_file" "$rollout_file" "$capacity_nodes_file" "$capacity_pods_file" "$prestop_target_file" "$prestop_desired_file" "$prestop_live_file"' EXIT INT TERM
+# reconcile_removed_autoscalers: the target's ScaledObjects and Deployment replicas, and the live ones.
+autoscaler_target_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-autoscaler-target.XXXXXX")"
+autoscaler_live_file="$(mktemp "${TMPDIR:-/tmp}/warptalk-k3s-autoscaler-live.XXXXXX")"
+trap 'rm -f "$override_file" "$rendered_file" "$migration_file" "$rollout_file" "$capacity_nodes_file" "$capacity_pods_file" "$prestop_target_file" "$prestop_desired_file" "$prestop_live_file" "$autoscaler_target_file" "$autoscaler_live_file"' EXIT INT TERM
 
 jq --slurpfile matrix "$matrix_file" --arg secretSource "$K3S_SECRET_SOURCE" '
   ($matrix[0].images | map(select(.k3s != false) | .service)) as $k3s_services |
@@ -401,6 +404,63 @@ reconcile_prestop_handlers() {
   done <"$prestop_target_file"
 }
 
+# ---------------------------------------------------------------------------------------------
+# A ScaledObject the target no longer renders must be gone BEFORE Helm sets the replica count.
+# Helm applies the Deployments first and deletes the ScaledObject last, and in between KEDA's HPA
+# is still alive. On 30 Sep (prod-20260930-1550, infra #248) Helm set stt-worker to `replicas: 1`,
+# the HPA (min 2) scaled it back to 2 before the ScaledObject was deleted, and KEDA does not restore
+# a replica count when its ScaledObject goes. The Deployment stayed at 2, acceptance refused a
+# singleton with two replicas, and the release rolled back.
+#
+# So every live ScaledObject this release owns and the target does not render is deleted first
+# (KEDA deletes its HPA with it), and the Deployment it scaled is set to the target's replica
+# count. Helm then finds nothing left to fight it. A no-op whenever live and target agree.
+# ---------------------------------------------------------------------------------------------
+reconcile_removed_autoscalers() {
+  awk '
+    function flush() {
+      if (kind == "ScaledObject" && name != "") print "ScaledObject", name
+      if (kind == "Deployment" && name != "" && replicas != "") print "Deployment", name, replicas
+      kind = ""; name = ""; replicas = ""; in_metadata = 0; in_spec = 0
+    }
+    /^---/ { flush(); next }
+    /^kind: / { kind = $2 }
+    /^metadata:/ { in_metadata = 1; in_spec = 0; next }
+    /^spec:/ { in_spec = 1; in_metadata = 0; next }
+    /^[^ ]/ { in_metadata = 0; in_spec = 0 }
+    in_metadata && name == "" && /^  name: / { name = $2 }
+    in_spec && /^  replicas: / { replicas = $2 }
+    END { flush() }
+  ' "$1" >"$autoscaler_target_file"
+  if ! kubectl get scaledobjects.keda.sh --namespace "$NAMESPACE" -o json >"$autoscaler_live_file" 2>/dev/null; then
+    echo "K3s release: no ScaledObjects readable in $NAMESPACE; nothing to reconcile"
+    return 0
+  fi
+  [ -s "$autoscaler_live_file" ] || return 0
+  jq -r --arg release "$RELEASE_NAME" '
+    .items[]
+    | select(.metadata.annotations["meta.helm.sh/release-name"] == $release)
+    | "\(.metadata.name)\t\(.spec.scaleTargetRef.name)"
+  ' "$autoscaler_live_file" |
+    while IFS="$(printf '\t')" read -r scaled_object target; do
+      if awk -v name="$scaled_object" '$1 == "ScaledObject" && $2 == name { found = 1 } END { exit !found }' \
+        "$autoscaler_target_file"; then
+        continue
+      fi
+      echo "K3s release: ScaledObject $scaled_object is not in this release; deleting it before the upgrade"
+      kubectl delete scaledobject.keda.sh "$scaled_object" --namespace "$NAMESPACE" \
+        --wait=true --timeout=2m >/dev/null || return 1
+      kubectl delete hpa "keda-hpa-$scaled_object" --namespace "$NAMESPACE" \
+        --ignore-not-found >/dev/null || return 1
+      replicas="$(awk -v name="$target" '$1 == "Deployment" && $2 == name { print $3 }' "$autoscaler_target_file")"
+      if [ -n "$replicas" ]; then
+        echo "K3s release: deployment/$target set to the target's $replicas replica(s)"
+        kubectl scale "deployment/$target" --namespace "$NAMESPACE" --replicas="$replicas" >/dev/null ||
+          return 1
+      fi
+    done
+}
+
 rollback_release() {
   if [ -n "$previous_revision" ]; then
     echo "K3s release: rolling back to the last DEPLOYED revision $previous_revision" >&2
@@ -408,6 +468,9 @@ rollback_release() {
       --namespace "$NAMESPACE" >"$rendered_file" &&
       reconcile_prestop_handlers "$rendered_file" ||
       echo "::warning::K3s release: could not reconcile preStop handlers before the rollback" >&2
+    [ -s "$rendered_file" ] &&
+      { reconcile_removed_autoscalers "$rendered_file" ||
+        echo "::warning::K3s release: could not reconcile ScaledObjects before the rollback" >&2; }
     "$helm_locked" rollback "$RELEASE_NAME" "$previous_revision" \
       --namespace "$NAMESPACE" \
       --wait \
@@ -571,6 +634,9 @@ choose_rollout_mode
 
 reconcile_prestop_handlers "$rendered_file" ||
   fail "could not reconcile live preStop handlers with this release; nothing was upgraded"
+
+reconcile_removed_autoscalers "$rendered_file" ||
+  fail "could not remove the ScaledObjects this release drops; nothing was upgraded"
 
 # ---------------------------------------------------------------------------------------------
 # Step 3: the upgrade. `--wait` (every Deployment rolled out and Ready), not `--atomic`: on failure
