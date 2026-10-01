@@ -105,6 +105,9 @@ config:
   # model is 2.9x SLOWER on a closed chunk, so these two revert together or not at all.
   STT_MODEL: gpt-live-transcribe
   STT_STREAMING_ENABLED: "true"
+  # Reverse far-side leak dedupe for the Google Meet bridge (text-only mode: host on real mic +
+  # speakers). Kept in step with app.compose.yml, which carries the reasoning and the known risk.
+  STT_FAR_SIDE_LEAK_DEDUPE_ENABLED: "true"
   # Both off the mini tier — see app.compose.yml for the measurements. Short version:
   # the mini models receive the ASR-repair hint and ignore it (0/3), the full ones act
   # on it (3/3), and the full realtime model is not measurably slower on ordinary speech.

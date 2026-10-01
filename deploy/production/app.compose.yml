@@ -722,6 +722,15 @@ services:
       # turning tier 2 off while leaving tier 1 on (or the reverse) is a half-clean transcript.
       # original_text is never touched either way, so this is safe to flip back.
       TRANSCRIPT_CLEAN_ENABLED: "true"
+      # 2026-10-01 — reverse far-side LEAK dedupe for the Google Meet bridge. Text-only bridge
+      # mode (PO-approved) has the host on their REAL mic and speakers: Meet's audio played by
+      # Chrome leaks into that mic, so the host's line repeats what the stand-in already carried.
+      # On, a named line whose text matches a stand-in line that started up to 150ms earlier /
+      # 1000ms later is dropped as the leak. Bridge rooms only (needs a stand-in line); no effect
+      # in native rooms. Known risk, see shared/config.py: chunk-granular timing can mis-drop a
+      # WarpTalk user's line as a leak. Thresholds are stricter than the forward dedupe (0.85
+      # ratio, >=12 chars). Flip to "false" to revert; nothing is persisted differently.
+      STT_FAR_SIDE_LEAK_DEDUPE_ENABLED: "true"
     healthcheck: *ai-healthcheck
     deploy:
       resources:
