@@ -281,12 +281,14 @@ workloads:
       LiveKit__Egress__S3__Bucket: LIVEKIT_EGRESS_S3_BUCKET
       LiveKit__Egress__S3__Region: LIVEKIT_EGRESS_S3_REGION
       LiveKit__Egress__S3__Endpoint: LIVEKIT_EGRESS_S3_ENDPOINT
-      Smtp__Host: SMTP_HOST
-      Smtp__Port: SMTP_PORT
-      Smtp__Username: SMTP_USERNAME
-      Smtp__Password: SMTP_PASSWORD
-      Smtp__FromEmail: SMTP_FROM_EMAIL
-      Smtp__FromName: SMTP_FROM_NAME
+      # Mail goes out through Resend's SMTP relay, the same provider and sender the auth,
+      # notification and workspace services use over its API. The relay authenticates with the
+      # Resend API key as the password; host, port and username are fixed (see env: below).
+      # These two services used to log in to Gmail SMTP with SMTP_PASSWORD, which Gmail rejected
+      # (535 5.7.8), so every meeting invitation email failed.
+      Smtp__Password: RESEND_API_KEY
+      Smtp__FromEmail: RESEND_FROM_EMAIL
+      Smtp__FromName: RESEND_FROM_NAME
     # On the workload rather than in the shared ConfigMap, for the same reason the assistant
     # plugin keys are: this is the only service that reads it. The backend treats an absent
     # Gotenberg:Url as a supported state — the minutes export still serves .docx and reports PDF
@@ -295,6 +297,9 @@ workloads:
     # chart did from the day the feature shipped. See templates/gotenberg.yaml for the converter.
     env:
       Gotenberg__Url: http://gotenberg:3000
+      Smtp__Host: smtp.resend.com
+      Smtp__Port: "587"
+      Smtp__Username: resend
   transcript-service:
     image: transcript-service
     replicas: 2
@@ -367,18 +372,25 @@ workloads:
       LiveKit__Egress__S3__Bucket: LIVEKIT_EGRESS_S3_BUCKET
       LiveKit__Egress__S3__Region: LIVEKIT_EGRESS_S3_REGION
       LiveKit__Egress__S3__Endpoint: LIVEKIT_EGRESS_S3_ENDPOINT
-      Smtp__Host: SMTP_HOST
-      Smtp__Port: SMTP_PORT
-      Smtp__Username: SMTP_USERNAME
-      Smtp__Password: SMTP_PASSWORD
-      Smtp__FromEmail: SMTP_FROM_EMAIL
-      Smtp__FromName: SMTP_FROM_NAME
+      # Mail goes out through Resend's SMTP relay, the same provider and sender the auth,
+      # notification and workspace services use over its API. The relay authenticates with the
+      # Resend API key as the password; host, port and username are fixed (see env: below).
+      # These two services used to log in to Gmail SMTP with SMTP_PASSWORD, which Gmail rejected
+      # (535 5.7.8), so every meeting invitation email failed.
+      Smtp__Password: RESEND_API_KEY
+      Smtp__FromEmail: RESEND_FROM_EMAIL
+      Smtp__FromName: RESEND_FROM_NAME
       OpenAI__ApiKey: OPENAI_API_KEY
       Storage__Provider: STORAGE_PROVIDER
       Storage__S3__ServiceUrl: STORAGE_S3_SERVICE_URL
       Storage__S3__AccessKey: STORAGE_S3_ACCESS_KEY
       Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
       Storage__S3__BucketName: MEETING_CHAT_STORAGE_S3_BUCKET_NAME
+    env:
+      Smtp__Host: smtp.resend.com
+      Smtp__Port: "587"
+      Smtp__Username: resend
+
   workspace-service:
     image: workspace-service
     replicas: 2
