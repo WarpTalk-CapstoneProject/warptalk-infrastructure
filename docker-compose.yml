@@ -360,6 +360,9 @@ services:
       GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
       GrpcSettings__TranscriptServiceUrl: "http://transcript-service:50053"
       GrpcSettings__WorkspaceServiceUrl: "http://workspace-service:50056"
+      # Google Meet bridge: MeetConferenceEndWorker ends a bridge room when its Meet conference
+      # ends, reading Meet REST through assistant-service's internal gRPC (meet_conference.proto).
+      GrpcSettings__AssistantServiceUrl: "http://assistant-service:50058"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
@@ -428,6 +431,9 @@ services:
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
       GrpcUrls__BillingServiceUrl: "http://billing-service:50057"
+      # Google Meet bridge: the far-speaker relabel worker reads Meet's own transcript through
+      # assistant-service's internal gRPC (meet_conference.proto).
+      GrpcUrls__AssistantServiceUrl: "http://assistant-service:50058"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
@@ -560,6 +566,9 @@ services:
       GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
       # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
       GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
+      # Google Meet bridge roster: checks the caller is the bridge room's host or participant and
+      # finds its Meet link through translation-room's room/participant reads.
+      GrpcSettings__TranslationRoomServiceUrl: "http://translation-room-service:50052"
     depends_on:
       migrator:
         condition: service_completed_successfully
