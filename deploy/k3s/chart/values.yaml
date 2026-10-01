@@ -255,6 +255,10 @@ workloads:
       Storage__S3__AccessKey: STORAGE_S3_ACCESS_KEY
       Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
       Storage__S3__BucketName: VOICE_SAMPLES_STORAGE_S3_BUCKET_NAME
+      # WT-888: a voice profile is accepted only from a live recording that reads a server-issued
+      # phrase, and the auth service checks that by transcribing the clip with OpenAI. Without the
+      # key every check answers 503 and NO voice profile can be created (fail closed, on purpose).
+      OpenAI__ApiKey: OPENAI_API_KEY
   translation-room-service:
     image: translation-room-service
     # Hosted background loops that must not run concurrently on two replicas. Rendered as the

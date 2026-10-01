@@ -257,6 +257,9 @@ services:
       Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID}
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      # WT-888: transcribes the read-aloud voice-profile recording. Empty = profile creation answers
+      # 503 ("couldn't check your recording"), which is the intended fail-closed state.
+      OpenAI__ApiKey: ${OPENAI_API_KEY:-}
       # WT-644: S3ArtifactUrlSigner reads these to mint the short-lived link the record page plays
       # a recording from. They were set for this service in deploy/production and in the helm
       # chart but NOT here, so on the local stack every recording download threw "S3 signing
