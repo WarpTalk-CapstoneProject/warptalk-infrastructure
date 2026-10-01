@@ -719,11 +719,12 @@ services:
       # in both directions, so a bad room can be moved back without a deploy.
       STT_STREAMING_ENABLED: "true"
       # WT-716 tier 1: the deterministic filler/stutter prepass that runs inside this worker
-      # and publishes clean_text alongside the raw text on stt:results. Same flag name as the
-      # one on transcript-clean-worker on purpose — they are two halves of one feature, and
-      # turning tier 2 off while leaving tier 1 on (or the reverse) is a half-clean transcript.
-      # original_text is never touched either way, so this is safe to flip back.
-      TRANSCRIPT_CLEAN_ENABLED: "true"
+      # and publishes clean_text alongside the raw text on stt:results. Its own switch, NOT the
+      # one on transcript-clean-worker: this one decides what gets translated and dubbed live,
+      # while TRANSCRIPT_CLEAN_ENABLED only decides whether a stored view is written. An
+      # operator must be able to stop touching the live path without losing the clean
+      # transcript. original_text is never touched either way, so this is safe to flip back.
+      STT_CLEAN_PREPASS_ENABLED: "true"
       # 2026-10-01 — reverse far-side LEAK dedupe for the Google Meet bridge. Text-only bridge
       # mode (PO-approved) has the host on their REAL mic and speakers: Meet's audio played by
       # Chrome leaks into that mic, so the host's line repeats what the stand-in already carried.
@@ -834,7 +835,7 @@ services:
     environment:
       <<: *ai-environment
       WORKER_HEALTH_NAME: transcript-clean
-      # The kill switch for the whole feature, also set on stt-worker for tier 1. Off means the
+      # The kill switch for tier 2 only (the live prepass has STT_CLEAN_PREPASS_ENABLED). Off means the
       # transcript is served raw, which is what every reader already falls back to when
       # clean_text is NULL.
       TRANSCRIPT_CLEAN_ENABLED: "true"
@@ -853,6 +854,10 @@ services:
       # The guardrail that keeps "cleaning" from becoming "summarising": a candidate that deletes
       # more than this fraction of the source is rejected and the raw text is kept instead.
       TRANSCRIPT_CLEAN_MAX_DELETE_RATIO: "0.4"
+      # A verified self-correction ("họp thứ hai, à không, thứ ba") legitimately deletes more
+      # than the ordinary cap allows, so it has its own ceiling. Lower it to make tier 2 give
+      # up on repairs sooner; the tier-1 wording then stands.
+      TRANSCRIPT_CLEAN_SELF_REPAIR_MAX_DELETE_RATIO: "0.7"
       # Pinned rather than left to the worker default, for the reason TRANSLATION_REALTIME_MODEL
       # spells out above: an unpinned model means a code default silently decides what production
       # runs. The same non-reasoning chat model translation-worker uses off the realtime socket —

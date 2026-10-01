@@ -116,9 +116,12 @@ config:
   # translation model came from shared/config.py's default with nothing in either
   # deploy file recording it. Keep both files in step.
   TRANSLATION_REALTIME_MODEL: gpt-realtime-2.1
-  # WT-716 clean transcript. One flag for both tiers, kept in step with app.compose.yml: stt-worker
-  # reads it for the deterministic per-segment prepass (tier 1) and transcript-clean-worker for the
-  # sentence/LLM pass (tier 2). Off = the transcript is served raw; original_text is never touched.
+  # WT-716 clean transcript, kept in step with app.compose.yml. Two switches, one per tier:
+  # STT_CLEAN_PREPASS_ENABLED is read by stt-worker for the deterministic per-segment prepass
+  # (tier 1, which decides what gets translated and dubbed live); TRANSCRIPT_CLEAN_ENABLED is read
+  # by transcript-clean-worker for the sentence/LLM pass (tier 2, the stored clean view only).
+  # Either can be turned off without the other; original_text is never touched.
+  STT_CLEAN_PREPASS_ENABLED: "true"
   TRANSCRIPT_CLEAN_ENABLED: "true"
   TTS_MODEL: sonic-3.5
   # See app.compose.yml for the reasoning: Luna replaces gpt-4.1 (cheaper + stronger,
@@ -642,6 +645,9 @@ workloads:
       TRANSCRIPT_CLEAN_IDLE_FLUSH_MS: "4000"
       TRANSCRIPT_CLEAN_LLM_TIMEOUT_S: "8"
       TRANSCRIPT_CLEAN_MAX_DELETE_RATIO: "0.4"
+      # A verified self-correction legitimately deletes more than the ordinary cap allows, so it
+      # has its own ceiling (see app.compose.yml).
+      TRANSCRIPT_CLEAN_SELF_REPAIR_MAX_DELETE_RATIO: "0.7"
       TRANSCRIPT_CLEAN_MODEL: gpt-4.1
     secretEnv:
       REDIS_PASSWORD: REDIS_PASSWORD
