@@ -65,6 +65,10 @@ config:
   GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
   GrpcUrls__NotificationServiceUrl: http://notification-service:50054
   GrpcUrls__TranscriptServiceUrl: http://transcript-service:50053
+  # Google Meet bridge (meet_conference.proto): transcript's far-speaker relabel and
+  # translation-room's conference-end worker read Meet REST through assistant-service.
+  GrpcUrls__AssistantServiceUrl: http://assistant-service:50058
+  GrpcSettings__AssistantServiceUrl: http://assistant-service:50058
   GrpcSettings__AuthServiceUrl: http://auth-service:50051
   GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
   GrpcSettings__BillingServiceUrl: http://billing-service:50057
@@ -461,6 +465,7 @@ workloads:
     image: assistant-service
     replicas: 2
     port: 5108
+    grpcPort: 50058
     healthPath: /health/ready
     cpu: 150m
     memory: 192Mi
