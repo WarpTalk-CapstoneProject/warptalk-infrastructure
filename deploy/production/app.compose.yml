@@ -170,6 +170,8 @@ services:
       Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:?}
       Storage__S3__BucketName: ${MINIO_VOICE_SAMPLES_BUCKET:?}
       Storage__S3__EnsureBucketExists: "false"
+      # WT-888: transcribes the read-aloud voice-profile recording. Absent = no profile can be made.
+      OpenAI__ApiKey: ${OPENAI_API_KEY:?}
     depends_on:
       migrator:
         condition: service_completed_successfully
