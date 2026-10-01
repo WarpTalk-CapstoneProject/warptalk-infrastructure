@@ -114,6 +114,12 @@ kubeReserved:
 evictionHard:
   memory.available: 200Mi
   nodefs.available: 10%
+# Image GC starts at 75% and frees down to 65%. The kubelet default (85/80) let images fill the
+# App root disk to the 80% alert line at rest, and every release then pulled new images into the
+# last 15% and tripped DiskPressure (64 pods rejected on 2026-09-30). This keeps a release's worth
+# of image headroom free below the nodefs eviction line.
+imageGCHighThresholdPercent: 75
+imageGCLowThresholdPercent: 65
 EOF
 
 cat <<EOF
