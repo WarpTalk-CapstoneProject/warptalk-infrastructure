@@ -221,6 +221,10 @@ services:
       AdminInbox__BillingUrl: http://billing-service:5107
       AdminInbox__AuthUrl: http://auth-service:5101
       AdminInbox__NotificationUrl: http://notification-service:5104
+      # Renders the PII-masked copy of a restricted PDF (masked text -> DOCX -> PDF). Unset, a
+      # PDF gets no masked copy and members cannot open it; Word, Excel and text files do not
+      # need the converter.
+      Gotenberg__Url: ${GOTENBERG_URL:-http://gotenberg:3000}
     depends_on:
       migrator:
         condition: service_completed_successfully
