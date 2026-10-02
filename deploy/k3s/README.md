@@ -111,7 +111,7 @@ built without kubelet reservations). On 24 Sep its requests were at 99% (15872Mi
 | stt-worker (singleton) | 1 | 122 / 160Mi | 93m | 384 -> 160Mi | 150 -> 130m |
 | translation-worker (singleton) | 1 | 124 / 132Mi | 73m | 384 -> 176Mi | 150 -> 100m |
 | tts-worker (singleton) | 1 | 112 / 157Mi | 65m | 384 -> 160Mi | 150 -> 90m |
-| livekit-ingress-worker (HPA) | 1 | 629 / 649Mi | 205m | **512 -> 832Mi** | 200 -> 320m |
+| livekit-ingress-worker (1 pod, no HPA since 3 Oct) | 1 | 629 / 649Mi | 205m | **512 -> 832Mi** | 200 -> 320m |
 | assistant-worker (HPA) | 1 | 115 / 154Mi | 119m | 384 -> 160Mi | 150 -> 180m |
 | embedding-worker | 1 | 116 / 152Mi | 93m | 512 -> 160Mi | 150 -> 130m |
 | suggestion-worker (singleton) | 1 | 113 / 125Mi | 90m | 256 -> 160Mi | 100 -> 120m |
