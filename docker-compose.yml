@@ -333,6 +333,10 @@ services:
       AdminInbox__BillingUrl: "http://billing-service:5107"
       AdminInbox__AuthUrl: "http://auth-service:5101"
       AdminInbox__NotificationUrl: "http://notification-service:5104"
+      # Renders the PII-masked copy of a restricted PDF (masked text -> DOCX -> PDF). Optional:
+      # unset, a PDF simply gets no masked copy and the document page says the converter is
+      # unavailable. Word, Excel and text files are masked in-process and do not need it.
+      Gotenberg__Url: ${GOTENBERG_URL:-http://gotenberg:3000}
     depends_on:
       migrator:
         condition: service_completed_successfully
