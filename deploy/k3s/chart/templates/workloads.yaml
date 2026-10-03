@@ -184,20 +184,28 @@ spec:
           {{- end }}
           {{- if $app.workerHealthName }}
           {{- $probe := $.Values.workerProbe }}
-          # The Python workers expose no port, so their probe is an exec of shared.health_probe:
-          # a fresh interpreter that imports the worker's Redis client and reads its heartbeat.
-          # The import alone passes 5s on a CPU-pressed node, and the old 5s timeout then had the
-          # kubelet SIGTERM healthy billing/suggestion/security workers into CrashLoopBackOff
-          # (24 Sep). See workerProbe in values.yaml.
+          # The Python workers expose no port. Each one stamps the mtime of
+          # $WORKER_HEALTH_DIR/warptalk-heartbeat-<name> every time Redis accepts its heartbeat
+          # (warptalk-ai shared/health_probe.py), and the probe reads that age from sh.
+          #
+          # It used to exec `python -m shared.health_probe`: a fresh interpreter importing the
+          # Redis client, ~1.1 CPU-seconds a run measured in the pods (3 Oct 2026), billed to the
+          # worker's own limit. That was ~35m per worker every 30s — all of their idle CPU, and
+          # 40-66% CFS throttling at rest — and under load it competed with the worker it was
+          # judging: tts-worker at its limit, the probe past its 15s timeout three times, the
+          # kubelet killed a healthy worker mid-meeting twice in 20 minutes.
+          #
+          # The module stays as the fallback while the file does not exist (an image from before
+          # it, or the first seconds of a start), so this template works with either image.
           startupProbe:
             exec:
-              command: ["python", "-m", "shared.health_probe"]
+              command: ["sh", "-c", {{ $.Values.workerProbe.script | quote }}]
             periodSeconds: {{ $probe.startup.periodSeconds }}
             timeoutSeconds: {{ $probe.timeoutSeconds }}
             failureThreshold: {{ $probe.startup.failureThreshold }}
           livenessProbe:
             exec:
-              command: ["python", "-m", "shared.health_probe"]
+              command: ["sh", "-c", {{ $.Values.workerProbe.script | quote }}]
             periodSeconds: {{ $probe.liveness.periodSeconds }}
             timeoutSeconds: {{ $probe.timeoutSeconds }}
             failureThreshold: {{ $probe.liveness.failureThreshold }}
