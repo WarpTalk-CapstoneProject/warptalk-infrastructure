@@ -50,10 +50,14 @@ on stage.
   index, so Knowledge and the assistant have something to read.
 - **Voice-clone consent in Flow 1** only, if Flow 1 shows cloning (`/[slug]/voice-profiles`).
   Flow 2 already has it (see above).
-- **The entitlement snapshot** is not hand-written: billing's `EntitlementReconcileWorker`
-  republishes it hourly from the subscription rows. Check
-  `workspace.workspace_entitlement_snapshots` shows `has_active_subscription = true` for the four
-  workspaces before the demo.
+- **The entitlement snapshot.** Billing's `EntitlementReconcileWorker` republishes it hourly from
+  the subscription rows. To avoid waiting up to an hour, `06-entitlement-snapshot-bridge.sql`
+  (run against `warptalk_workspace`) copies the snapshot billing resolved for the main demo
+  workspace — same `enterprise` plan, same `MaxActiveRooms 20` override — **keeping that row's
+  `resolved_at`**, so the consumer accepts the next sweep (it orders by `resolved_at`) and billing's
+  own answer replaces the copy within the hour. Applied 3 Oct ~20:49Z: all four read 500
+  participants, 3 languages, 20 rooms, clone/assistant/glossary on. The workspace service reads the
+  snapshot per request (no in-memory cache), so it takes effect immediately.
 
 Invites sent from Flow 1 go to these addresses. The domains are fictional, so the mail bounces;
 use the **copy invite link** the dialog shows rather than waiting for an email.
