@@ -131,11 +131,13 @@ migrations:
 # old -> new) and the App-node arithmetic are in deploy/k3s/README.md "Capacity plan";
 # scripts/check-k3s-deployment.sh pins the budget.
 workloads:
+  # 1000m (was 200m): p99 174m of a 200m limit and 76% of CFS periods throttled over 7 days —
+  # the only workload pinned at its ceiling in normal use. Next.js SSR is CPU-bound per request.
   frontend:            # p95 121Mi / 25m
     replicas: 2
     cpu: 100m
     memory: 160Mi
-    cpuLimit: 200m
+    cpuLimit: 1000m
     memoryLimit: 512Mi
     autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
@@ -219,16 +221,29 @@ workloads:
       accessMode: ReadWriteOnce
       nodeLocal: true
 
+  # LIVE-PATH WORKERS: THE CPU LIMIT IS SIZED FOR A MEETING, NOT FROM THE IDLE p95 (3 Oct 2026).
+  # The p95 x 1.3 rule below measures a week that is mostly idle. A meeting is a burst on top of
+  # it, and for stt/translation/tts the burst IS the product. tts-worker at a 500m limit sat at
+  # 0.50 cores with 62-99% of CFS periods throttled during a 3-speaker meeting (01a0ffe1): dubs
+  # landed 17-29s after the words while STT->MT stayed at 1-2s, and the kubelet restarted it twice
+  # mid-meeting. The App node has 8 cores and runs at ~15%; a limit is a ceiling on a burst, not
+  # a reservation, so the requests (what the node budget counts) are unchanged. Same reasoning as
+  # livekit-ingress-worker below.
+  #
+  # The Python workers off the live path move from 200-300m to 500m for the same reason at a
+  # smaller scale: at rest they were 40-66% throttled, mostly by their own liveness probe (now a
+  # shell check, see workerProbe in chart/values.yaml), and a 200m ceiling turns any burst — a
+  # billing settlement storm at meeting end, an embedding batch — into queueing.
   stt-worker:          # p95 122Mi / 93m (max 160Mi)
     cpu: 130m
     memory: 160Mi
-    cpuLimit: 600m
+    cpuLimit: 2000m
     memoryLimit: 1Gi
 
   translation-worker:  # p95 124Mi / 73m
     cpu: 100m
     memory: 176Mi
-    cpuLimit: 300m
+    cpuLimit: 1000m
     memoryLimit: 768Mi
 
   # New on Kubernetes (Compose ran it at a 0.5 CPU / 512M limit): sized from translation-worker,
@@ -237,7 +252,7 @@ workloads:
   translation-backfill-worker:
     cpu: 50m
     memory: 176Mi
-    cpuLimit: 300m
+    cpuLimit: 500m
     memoryLimit: 512Mi
 
   # WT-716, new: no production history yet, so sized from its closest relative (suggestion-worker,
@@ -247,26 +262,26 @@ workloads:
   transcript-clean-worker:
     cpu: 50m
     memory: 192Mi
-    cpuLimit: 300m
+    cpuLimit: 500m
     memoryLimit: 512Mi
 
   tts-worker:          # p95 112Mi / 65m (max 157Mi)
     cpu: 90m
     memory: 160Mi
-    cpuLimit: 500m
+    cpuLimit: 2000m
     memoryLimit: 1Gi
 
   suggestion-worker:   # p95 113Mi / 90m
     cpu: 120m
     memory: 160Mi
-    cpuLimit: 200m
+    cpuLimit: 500m
     memoryLimit: 512Mi
 
   embedding-worker:    # p95 116Mi / 93m (max 152Mi)
     replicas: 1
     cpu: 130m
     memory: 160Mi
-    cpuLimit: 300m
+    cpuLimit: 500m
     memoryLimit: 1Gi
     autoscaling: {enabled: false}
 
@@ -274,14 +289,14 @@ workloads:
     replicas: 1
     cpu: 120m
     memory: 160Mi
-    cpuLimit: 200m
+    cpuLimit: 500m
     memoryLimit: 384Mi
 
   billing-worker:      # p95 90Mi / 91m
     replicas: 1
     cpu: 120m
     memory: 128Mi
-    cpuLimit: 200m
+    cpuLimit: 500m
     memoryLimit: 384Mi
 
   metrics-exporter:    # p95 58Mi / 10m
@@ -319,6 +334,6 @@ workloads:
     replicas: 1
     cpu: 180m
     memory: 160Mi
-    cpuLimit: 300m
+    cpuLimit: 500m
     memoryLimit: 768Mi
     autoscaling: {enabled: true, min: 1, max: 3, cpu: 80}

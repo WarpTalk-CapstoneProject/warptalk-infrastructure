@@ -790,7 +790,18 @@ workloads:
 # that took longer than the old 5s timeout, and the kubelet killed healthy workers into
 # CrashLoopBackOff. 15s is a realistic ceiling; startup allows 15s x 12 = 3 min; liveness needs
 # 3 misses 30s apart (~1.5 min) before a restart. scripts/check-k3s-deployment.sh pins the floors.
+#
+# The probe is now `sh` reading the age of the heartbeat file (see workloads.yaml), which costs
+# milliseconds; the Python module is only the fallback while that file does not exist yet. The
+# timeouts are left as they were because the fallback still runs on an old image.
 workerProbe:
+  script: >-
+    [ -n "$WORKER_HEALTH_NAME" ] || exit 1;
+    for n in $(echo "$WORKER_HEALTH_NAME" | tr ',' ' '); do
+    f="${WORKER_HEALTH_DIR:-/tmp}/warptalk-heartbeat-$n";
+    [ -f "$f" ] || exec python -m shared.health_probe;
+    [ $(( $(date +%s) - $(stat -c %Y "$f") )) -le "${WORKER_HEALTH_MAX_HEARTBEAT_AGE_SECONDS:-30}" ] || exit 1;
+    done
   timeoutSeconds: 15
   startup:
     periodSeconds: 15
