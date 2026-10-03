@@ -35,6 +35,9 @@ DEMO_DIR = HERE.parent.parent / "demo"
 ID = "019f2b00-0de0-7000-9300-{:012x}".format
 
 # Same PBKDF2-SHA512 hash as every other WarpTalk seed: Password123.
+# VoiceConsentTextVersions.Current in the auth service (read 4 Oct 2026).
+VOICE_CONSENT_VERSION = "2026-09-29.v2"
+
 PASSWORD_HASH = "v2$SHA512$100000$16$jTFWzSKOXyuo/xZ+StGHwQ==$77jDm7DDcuTF57fhqikvLFBJhjrwoGuni8WcPdOhpAc="
 
 # Live production role ids (auth.roles), read 4 Oct 2026. Asserted in 02-workspace.sql.
@@ -333,6 +336,52 @@ COMMIT;
 """
 
 
+def consent_sql(rows: list[dict]) -> str:
+    """VOICE_CLONE consent for the Flow 2 accounts, recorded at the owner's request (4 Oct 2026).
+
+    Flow 2 does not demo the consent step, and without a grant the room refuses to clone anyone
+    (UserServiceGrpc.HasVoiceCloneConsent reads the LATEST row's status). These are the team's own
+    demo logins. The row is what VoiceConsentService.GrantAsync writes, with the CURRENT text
+    version, and says in user_agent that a script recorded it. Flow 1 accounts are left alone.
+    """
+    flow2 = [r for r in rows if r["flow"] == 2]
+    values = ",\n".join(f"    ({q(r['user_id'])})" for r in flow2)
+    return f"""-- Demo seed, four companies — PART 5/5: voice-clone consent (warptalk_auth). GENERATED.
+-- Flow 2 accounts only. Insert a GRANTED row only where the latest row is not already GRANTED.
+\\set ON_ERROR_STOP on
+BEGIN;
+
+CREATE TEMP TABLE demo_consent_users (user_id uuid PRIMARY KEY) ON COMMIT DROP;
+INSERT INTO demo_consent_users VALUES
+{values};
+
+INSERT INTO voice.voice_consents (
+    id, user_id, voice_profile_id, consent_type, consent_status, consent_text_version,
+    granted_at, revoked_at, ip_address, user_agent, created_at
+)
+SELECT uuidv7(), u.user_id, NULL, 'VOICE_CLONE', 'GRANTED', '{VOICE_CONSENT_VERSION}',
+       NOW(), NULL, NULL, 'seed: demo prep, recorded at the workspace owner''s request', NOW()
+FROM demo_consent_users AS u
+WHERE COALESCE((
+    SELECT c.consent_status FROM voice.voice_consents AS c
+    WHERE c.user_id = u.user_id AND c.consent_type = 'VOICE_CLONE'
+    ORDER BY c.created_at DESC LIMIT 1
+), '') <> 'GRANTED';
+
+DO $$
+DECLARE v int;
+BEGIN
+    SELECT count(*) INTO v FROM demo_consent_users AS u
+    WHERE (SELECT c.consent_status FROM voice.voice_consents AS c
+           WHERE c.user_id = u.user_id AND c.consent_type = 'VOICE_CLONE'
+           ORDER BY c.created_at DESC LIMIT 1) = 'GRANTED';
+    IF v <> {len(flow2)} THEN RAISE EXCEPTION 'Expected {len(flow2)} granted, found %', v; END IF;
+END $$;
+
+COMMIT;
+"""
+
+
 def main() -> None:
     rows = roster()
     files = {
@@ -340,6 +389,7 @@ def main() -> None:
         "02-workspace.sql": workspace_sql(rows),
         "03-billing.sql": billing_sql(rows),
         "04-glossary.sql": glossary_sql(rows),
+        "05-voice-consent.sql": consent_sql(rows),
     }
     for name, sql in files.items():
         (HERE / name).write_text(sql, encoding="utf-8")

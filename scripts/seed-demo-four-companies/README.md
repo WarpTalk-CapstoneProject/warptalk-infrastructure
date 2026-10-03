@@ -38,15 +38,18 @@ on stage.
   Settings as Flow 1 leaves them: allowed languages vi/en/ja (**Korean left out on purpose**, so
   Flow 2's create-room dialog shows *Blocked*), profanity filter, PII redaction, DLP, professional
   tone, honorific styles, the company's domain in Verified domains.
-- **Flow 2 only:** two glossaries from `demo/glossary-*.csv` (EN→VI 28 terms, VI→EN 22 terms).
+- **Flow 2 only:** two glossaries from `demo/glossary-*.csv` (EN→VI 28 terms, VI→EN 22 terms),
+  and **voice-clone consent (`VOICE_CLONE`, GRANTED, version `2026-09-29.v2`) for all nine
+  accounts** — recorded at the owner's request because Flow 2 does not demo the consent step. The
+  rows say so in `user_agent`. Flow 1 accounts have no consent row.
 
 ## Not seeded — do these in the UI before the demo
 
 - **Documents.** They need real files in object storage and the indexing pipeline. Upload 2–3
   files to Aurion Pharma and Tidewell Retail (`/[slug]/documents`) and give them a few minutes to
   index, so Knowledge and the assistant have something to read.
-- **Voice-clone consent** for whoever demos cloning (`/[slug]/voice-profiles`). It is that
-  person's own biometric consent and is not written by a script.
+- **Voice-clone consent in Flow 1** only, if Flow 1 shows cloning (`/[slug]/voice-profiles`).
+  Flow 2 already has it (see above).
 - **The entitlement snapshot** is not hand-written: billing's `EntitlementReconcileWorker`
   republishes it hourly from the subscription rows. Check
   `workspace.workspace_entitlement_snapshots` shows `has_active_subscription = true` for the four
@@ -66,7 +69,8 @@ at the time — `kubectl -n warptalk-data get cluster warptalk-postgres` shows `
 python3 generate.py
 # dry run: every statement and assertion against the real schema, nothing written
 for pair in 01-auth.sql:warptalk_auth 02-workspace.sql:warptalk_workspace \
-            03-billing.sql:warptalk_billing 04-glossary.sql:warptalk_transcript; do
+            03-billing.sql:warptalk_billing 04-glossary.sql:warptalk_transcript \
+            05-voice-consent.sql:warptalk_auth; do
   sed 's/^COMMIT;$/ROLLBACK;/' "${pair%%:*}" | kubectl -n warptalk-data exec -i <primary> -c postgres -- \
     env PGCLIENTENCODING=UTF8 psql -U postgres -d "${pair##*:}" -v ON_ERROR_STOP=1 -q
 done
@@ -87,6 +91,7 @@ DELETE FROM subscription.subscriptions WHERE id::text LIKE '019f2b00-0de0-7000-9
 DELETE FROM workspace.workspace_members WHERE workspace_id::text LIKE '019f2b00-0de0-7000-9300-%';
 DELETE FROM workspace.workspaces        WHERE id::text           LIKE '019f2b00-0de0-7000-9300-%';
 -- warptalk_auth
+DELETE FROM voice.voice_consents WHERE user_id::text LIKE '019f2b00-0de0-7000-9300-%';
 DELETE FROM auth.user_roles    WHERE user_id::text LIKE '019f2b00-0de0-7000-9300-%';
 DELETE FROM auth.user_settings WHERE user_id::text LIKE '019f2b00-0de0-7000-9300-%';
 DELETE FROM auth.users         WHERE id::text      LIKE '019f2b00-0de0-7000-9300-%';
