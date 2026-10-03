@@ -133,11 +133,14 @@ migrations:
 workloads:
   # 1000m (was 200m): p99 174m of a 200m limit and 76% of CFS periods throttled over 7 days —
   # the only workload pinned at its ceiling in normal use. Next.js SSR is CPU-bound per request.
+  # 2000m (was 1000m), 3 Oct 2026: still 31-40% of CFS periods throttled at 1000m (cgroup
+  # cpu.stat, ~500s per pod) — Next.js renders on more than one thread, so a single SSR request can
+  # exceed one core inside a 100ms period. The probe moved off "/" in the same change.
   frontend:            # p95 121Mi / 25m
     replicas: 2
     cpu: 100m
     memory: 160Mi
-    cpuLimit: 1000m
+    cpuLimit: 2000m
     memoryLimit: 512Mi
     autoscaling: {enabled: true, min: 2, max: 3, cpu: 80}
 
@@ -321,7 +324,11 @@ workloads:
     cpu: 320m
     memory: 832Mi
     cpuLimit: 2000m
-    memoryLimit: 1536Mi
+    # 2Gi (was 1536Mi), 3 Oct 2026: headroom, not the fix. The pod was OOMKilled at 09:31 UTC mid
+    # meeting by a leak (unclosed AudioStreams, +300-500 MiB per meeting, fixed in warptalk-ai#243).
+    # A healthy pod idles near 200 MiB; one pod carries every room, so a crowded meeting must not
+    # be the thing that finds the ceiling. A limit is not a request: the node budget is unchanged.
+    memoryLimit: 2Gi
     # ONE POD, NO HPA (owner decision, 3 Oct 2026). CPU autoscaling cannot help this workload and
     # was hurting it: a single live room runs well above 75% of the request, so every meeting
     # scaled it 1 -> 3, new rooms landed on the fresh pods, and the scale-down minutes later

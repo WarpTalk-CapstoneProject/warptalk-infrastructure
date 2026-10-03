@@ -207,7 +207,11 @@ workloads:
     writableCachePath: /app/.next/cache
     replicas: 2
     port: 3000
-    healthPath: /
+    # /api/health, not /. Readiness every 5s and liveness every 20s on BOTH replicas were each a
+    # full server render of the landing page — on 3 Oct the two frontend pods had spent ~500s each
+    # throttled by their own CPU limit (31-40% of CFS periods, cgroup cpu.stat), with real traffic
+    # near zero. /api/health is a static JSON route the app already ships.
+    healthPath: /api/health
     cpu: 200m
     memory: 256Mi
     cpuLimit: "1"
