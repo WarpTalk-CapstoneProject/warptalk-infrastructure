@@ -950,7 +950,7 @@ Table subscription.plans {
   slug varchar(50) [not null, unique]
   tier varchar(20) [not null]
   price decimal(12,2) [not null]
-  currency char(3) [not null, default: 'VND']
+  currency char(3) [not null, default: 'USD']
   billing_cycle varchar(20) [not null, default: 'monthly', note: 'monthly | yearly']
   credits_per_cycle integer [not null]
   max_participants integer [not null, default: 2]
@@ -961,7 +961,7 @@ Table subscription.plans {
   glossary_enabled boolean [not null, default: false]
   dedicated_gpu boolean [not null, default: false]
   overage_cap_credits integer [not null, default: 0]
-  overage_price_per_credit numeric(12,4) [not null, default: 4.0]
+  overage_price_per_credit numeric(18,10) [not null, default: 0.0001520913, note: 'in the plan currency']
   low_balance_threshold_credits integer [not null, default: 0]
   rollover_cap_credits integer [not null, default: 0]
   invoice_terms_days integer [not null, default: 15]
@@ -993,9 +993,9 @@ Table subscription.subscriptions {
   trial_ends_at timestamptz
   entitlement_overrides jsonb
   credits_per_cycle_override integer
-  contract_price_vnd numeric(14,2)
+  contract_price_usd numeric(14,2) [note: 'USD, the accounting currency (was contract_price_vnd until 2026-10-02)']
   overage_cap_credits_override integer
-  overage_price_per_credit_override numeric(12,4)
+  overage_price_per_credit_override numeric(18,10) [note: 'USD per credit']
   low_balance_threshold_credits_override integer
   invoice_terms_days_override integer
   billing_contact_email varchar(255)
@@ -1024,7 +1024,7 @@ Table subscription.payments {
   amount decimal(12,2) [not null]
   tax_amount decimal(12,2) [not null]
   total_amount decimal(12,2) [not null]
-  currency char(3) [not null, default: 'VND']
+  currency char(3) [not null, default: 'USD']
   payment_method varchar(30) [not null]
   provider varchar(30) [not null, default: 'stripe']
   provider_transaction_id varchar(1024) [unique]
@@ -1049,7 +1049,7 @@ Table subscription.invoices {
   subtotal numeric(12,2) [not null]
   tax numeric(12,2) [not null, default: 0]
   total numeric(12,2) [not null]
-  currency char(3) [not null, default: 'VND']
+  currency char(3) [not null, default: 'USD']
   status varchar(20) [not null, default: 'issued']
   pdf_url varchar(500)
   invoice_pdf_url varchar(500)

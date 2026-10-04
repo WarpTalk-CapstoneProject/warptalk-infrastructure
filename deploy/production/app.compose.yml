@@ -170,6 +170,8 @@ services:
       Storage__S3__SecretKey: ${MINIO_ROOT_PASSWORD:?}
       Storage__S3__BucketName: ${MINIO_VOICE_SAMPLES_BUCKET:?}
       Storage__S3__EnsureBucketExists: "false"
+      # WT-888: transcribes the read-aloud voice-profile recording. Absent = no profile can be made.
+      OpenAI__ApiKey: ${OPENAI_API_KEY:?}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -219,6 +221,10 @@ services:
       AdminInbox__BillingUrl: http://billing-service:5107
       AdminInbox__AuthUrl: http://auth-service:5101
       AdminInbox__NotificationUrl: http://notification-service:5104
+      # Renders the PII-masked copy of a restricted PDF (masked text -> DOCX -> PDF). Unset, a
+      # PDF gets no masked copy and members cannot open it; Word, Excel and text files do not
+      # need the converter.
+      Gotenberg__Url: ${GOTENBERG_URL:-http://gotenberg:3000}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -250,6 +256,9 @@ services:
       # been delivered in production.
       GrpcSettings__NotificationServiceUrl: http://notification-service:50054
       GrpcSettings__TranscriptServiceUrl: http://transcript-service:50053
+      # Google Meet bridge: MeetConferenceEndWorker ends a bridge room when its Meet conference
+      # ends, reading Meet REST through assistant-service's internal gRPC (meet_conference.proto).
+      GrpcSettings__AssistantServiceUrl: http://assistant-service:50058
       LiveKit__Egress__S3__AccessKey: ${LIVEKIT_EGRESS_S3_ACCESS_KEY:?}
       LiveKit__Egress__S3__Secret: ${LIVEKIT_EGRESS_S3_SECRET:?}
       LiveKit__Egress__S3__Bucket: ${LIVEKIT_EGRESS_S3_BUCKET:?}
@@ -353,6 +362,9 @@ services:
       GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
       GrpcUrls__TranslationRoomServiceUrl: http://translation-room-service:50052
       GrpcUrls__BillingServiceUrl: http://billing-service:50057
+      # Google Meet bridge: the far-speaker relabel worker reads Meet's own transcript through
+      # assistant-service's internal gRPC (meet_conference.proto).
+      GrpcUrls__AssistantServiceUrl: http://assistant-service:50058
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -480,6 +492,9 @@ services:
       GrpcSettings__NotificationServiceUrl: http://notification-service:50054
       # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
       GrpcSettings__AuthServiceUrl: http://auth-service:50051
+      # Google Meet bridge roster: checks the caller is the bridge room's host or participant and
+      # finds its Meet link through translation-room's room/participant reads.
+      GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
       # Plugin OAuth callbacks land the browser here; the service refuses to start outside
       # Development when this is missing or points at localhost.
       AppBaseUrl: https://${APP_DOMAIN:?}
@@ -708,11 +723,21 @@ services:
       # in both directions, so a bad room can be moved back without a deploy.
       STT_STREAMING_ENABLED: "true"
       # WT-716 tier 1: the deterministic filler/stutter prepass that runs inside this worker
-      # and publishes clean_text alongside the raw text on stt:results. Same flag name as the
-      # one on transcript-clean-worker on purpose — they are two halves of one feature, and
-      # turning tier 2 off while leaving tier 1 on (or the reverse) is a half-clean transcript.
-      # original_text is never touched either way, so this is safe to flip back.
-      TRANSCRIPT_CLEAN_ENABLED: "true"
+      # and publishes clean_text alongside the raw text on stt:results. Its own switch, NOT the
+      # one on transcript-clean-worker: this one decides what gets translated and dubbed live,
+      # while TRANSCRIPT_CLEAN_ENABLED only decides whether a stored view is written. An
+      # operator must be able to stop touching the live path without losing the clean
+      # transcript. original_text is never touched either way, so this is safe to flip back.
+      STT_CLEAN_PREPASS_ENABLED: "true"
+      # 2026-10-01 — reverse far-side LEAK dedupe for the Google Meet bridge. Text-only bridge
+      # mode (PO-approved) has the host on their REAL mic and speakers: Meet's audio played by
+      # Chrome leaks into that mic, so the host's line repeats what the stand-in already carried.
+      # On, a named line whose text matches a stand-in line that started up to 150ms earlier /
+      # 1000ms later is dropped as the leak. Bridge rooms only (needs a stand-in line); no effect
+      # in native rooms. Known risk, see shared/config.py: chunk-granular timing can mis-drop a
+      # WarpTalk user's line as a leak. Thresholds are stricter than the forward dedupe (0.85
+      # ratio, >=12 chars). Flip to "false" to revert; nothing is persisted differently.
+      STT_FAR_SIDE_LEAK_DEDUPE_ENABLED: "true"
     healthcheck: *ai-healthcheck
     deploy:
       resources:
@@ -814,7 +839,7 @@ services:
     environment:
       <<: *ai-environment
       WORKER_HEALTH_NAME: transcript-clean
-      # The kill switch for the whole feature, also set on stt-worker for tier 1. Off means the
+      # The kill switch for tier 2 only (the live prepass has STT_CLEAN_PREPASS_ENABLED). Off means the
       # transcript is served raw, which is what every reader already falls back to when
       # clean_text is NULL.
       TRANSCRIPT_CLEAN_ENABLED: "true"
@@ -833,6 +858,10 @@ services:
       # The guardrail that keeps "cleaning" from becoming "summarising": a candidate that deletes
       # more than this fraction of the source is rejected and the raw text is kept instead.
       TRANSCRIPT_CLEAN_MAX_DELETE_RATIO: "0.4"
+      # A verified self-correction ("họp thứ hai, à không, thứ ba") legitimately deletes more
+      # than the ordinary cap allows, so it has its own ceiling. Lower it to make tier 2 give
+      # up on repairs sooner; the tier-1 wording then stands.
+      TRANSCRIPT_CLEAN_SELF_REPAIR_MAX_DELETE_RATIO: "0.7"
       # Pinned rather than left to the worker default, for the reason TRANSLATION_REALTIME_MODEL
       # spells out above: an unpinned model means a code default silently decides what production
       # runs. The same non-reasoning chat model translation-worker uses off the realtime socket —

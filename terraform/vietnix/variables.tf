@@ -118,7 +118,7 @@ variable "volume_type" {
 
 variable "app_boot_volume_size_gb" {
   type    = number
-  default = 60
+  default = 80
 }
 
 variable "data_boot_volume_size_gb" {
@@ -128,7 +128,7 @@ variable "data_boot_volume_size_gb" {
 
 variable "data_durable_volume_size_gb" {
   type    = number
-  default = 35
+  default = 15
 }
 
 variable "infra_boot_volume_size_gb" {

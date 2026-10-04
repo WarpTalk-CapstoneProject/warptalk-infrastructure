@@ -65,6 +65,10 @@ config:
   GrpcUrls__WorkspaceServiceUrl: http://workspace-service:50056
   GrpcUrls__NotificationServiceUrl: http://notification-service:50054
   GrpcUrls__TranscriptServiceUrl: http://transcript-service:50053
+  # Google Meet bridge (meet_conference.proto): transcript's far-speaker relabel and
+  # translation-room's conference-end worker read Meet REST through assistant-service.
+  GrpcUrls__AssistantServiceUrl: http://assistant-service:50058
+  GrpcSettings__AssistantServiceUrl: http://assistant-service:50058
   GrpcSettings__AuthServiceUrl: http://auth-service:50051
   GrpcSettings__TranslationRoomServiceUrl: http://translation-room-service:50052
   GrpcSettings__BillingServiceUrl: http://billing-service:50057
@@ -101,6 +105,9 @@ config:
   # model is 2.9x SLOWER on a closed chunk, so these two revert together or not at all.
   STT_MODEL: gpt-live-transcribe
   STT_STREAMING_ENABLED: "true"
+  # Reverse far-side leak dedupe for the Google Meet bridge (text-only mode: host on real mic +
+  # speakers). Kept in step with app.compose.yml, which carries the reasoning and the known risk.
+  STT_FAR_SIDE_LEAK_DEDUPE_ENABLED: "true"
   # Both off the mini tier — see app.compose.yml for the measurements. Short version:
   # the mini models receive the ASR-repair hint and ignore it (0/3), the full ones act
   # on it (3/3), and the full realtime model is not measurably slower on ordinary speech.
@@ -109,9 +116,12 @@ config:
   # translation model came from shared/config.py's default with nothing in either
   # deploy file recording it. Keep both files in step.
   TRANSLATION_REALTIME_MODEL: gpt-realtime-2.1
-  # WT-716 clean transcript. One flag for both tiers, kept in step with app.compose.yml: stt-worker
-  # reads it for the deterministic per-segment prepass (tier 1) and transcript-clean-worker for the
-  # sentence/LLM pass (tier 2). Off = the transcript is served raw; original_text is never touched.
+  # WT-716 clean transcript, kept in step with app.compose.yml. Two switches, one per tier:
+  # STT_CLEAN_PREPASS_ENABLED is read by stt-worker for the deterministic per-segment prepass
+  # (tier 1, which decides what gets translated and dubbed live); TRANSCRIPT_CLEAN_ENABLED is read
+  # by transcript-clean-worker for the sentence/LLM pass (tier 2, the stored clean view only).
+  # Either can be turned off without the other; original_text is never touched.
+  STT_CLEAN_PREPASS_ENABLED: "true"
   TRANSCRIPT_CLEAN_ENABLED: "true"
   TTS_MODEL: sonic-3.5
   # See app.compose.yml for the reasoning: Luna replaces gpt-4.1 (cheaper + stronger,
@@ -197,7 +207,11 @@ workloads:
     writableCachePath: /app/.next/cache
     replicas: 2
     port: 3000
-    healthPath: /
+    # /api/health, not /. Readiness every 5s and liveness every 20s on BOTH replicas were each a
+    # full server render of the landing page — on 3 Oct the two frontend pods had spent ~500s each
+    # throttled by their own CPU limit (31-40% of CFS periods, cgroup cpu.stat), with real traffic
+    # near zero. /api/health is a static JSON route the app already ships.
+    healthPath: /api/health
     cpu: 200m
     memory: 256Mi
     cpuLimit: "1"
@@ -251,6 +265,10 @@ workloads:
       Storage__S3__AccessKey: STORAGE_S3_ACCESS_KEY
       Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
       Storage__S3__BucketName: VOICE_SAMPLES_STORAGE_S3_BUCKET_NAME
+      # WT-888: a voice profile is accepted only from a live recording that reads a server-issued
+      # phrase, and the auth service checks that by transcribing the clip with OpenAI. Without the
+      # key every check answers 503 and NO voice profile can be created (fail closed, on purpose).
+      OpenAI__ApiKey: OPENAI_API_KEY
   translation-room-service:
     image: translation-room-service
     # Hosted background loops that must not run concurrently on two replicas. Rendered as the
@@ -277,12 +295,14 @@ workloads:
       LiveKit__Egress__S3__Bucket: LIVEKIT_EGRESS_S3_BUCKET
       LiveKit__Egress__S3__Region: LIVEKIT_EGRESS_S3_REGION
       LiveKit__Egress__S3__Endpoint: LIVEKIT_EGRESS_S3_ENDPOINT
-      Smtp__Host: SMTP_HOST
-      Smtp__Port: SMTP_PORT
-      Smtp__Username: SMTP_USERNAME
-      Smtp__Password: SMTP_PASSWORD
-      Smtp__FromEmail: SMTP_FROM_EMAIL
-      Smtp__FromName: SMTP_FROM_NAME
+      # Mail goes out through Resend's SMTP relay, the same provider and sender the auth,
+      # notification and workspace services use over its API. The relay authenticates with the
+      # Resend API key as the password; host, port and username are fixed (see env: below).
+      # These two services used to log in to Gmail SMTP with SMTP_PASSWORD, which Gmail rejected
+      # (535 5.7.8), so every meeting invitation email failed.
+      Smtp__Password: RESEND_API_KEY
+      Smtp__FromEmail: RESEND_FROM_EMAIL
+      Smtp__FromName: RESEND_FROM_NAME
     # On the workload rather than in the shared ConfigMap, for the same reason the assistant
     # plugin keys are: this is the only service that reads it. The backend treats an absent
     # Gotenberg:Url as a supported state — the minutes export still serves .docx and reports PDF
@@ -291,6 +311,9 @@ workloads:
     # chart did from the day the feature shipped. See templates/gotenberg.yaml for the converter.
     env:
       Gotenberg__Url: http://gotenberg:3000
+      Smtp__Host: smtp.resend.com
+      Smtp__Port: "587"
+      Smtp__Username: resend
   transcript-service:
     image: transcript-service
     replicas: 2
@@ -363,18 +386,25 @@ workloads:
       LiveKit__Egress__S3__Bucket: LIVEKIT_EGRESS_S3_BUCKET
       LiveKit__Egress__S3__Region: LIVEKIT_EGRESS_S3_REGION
       LiveKit__Egress__S3__Endpoint: LIVEKIT_EGRESS_S3_ENDPOINT
-      Smtp__Host: SMTP_HOST
-      Smtp__Port: SMTP_PORT
-      Smtp__Username: SMTP_USERNAME
-      Smtp__Password: SMTP_PASSWORD
-      Smtp__FromEmail: SMTP_FROM_EMAIL
-      Smtp__FromName: SMTP_FROM_NAME
+      # Mail goes out through Resend's SMTP relay, the same provider and sender the auth,
+      # notification and workspace services use over its API. The relay authenticates with the
+      # Resend API key as the password; host, port and username are fixed (see env: below).
+      # These two services used to log in to Gmail SMTP with SMTP_PASSWORD, which Gmail rejected
+      # (535 5.7.8), so every meeting invitation email failed.
+      Smtp__Password: RESEND_API_KEY
+      Smtp__FromEmail: RESEND_FROM_EMAIL
+      Smtp__FromName: RESEND_FROM_NAME
       OpenAI__ApiKey: OPENAI_API_KEY
       Storage__Provider: STORAGE_PROVIDER
       Storage__S3__ServiceUrl: STORAGE_S3_SERVICE_URL
       Storage__S3__AccessKey: STORAGE_S3_ACCESS_KEY
       Storage__S3__SecretKey: STORAGE_S3_SECRET_KEY
       Storage__S3__BucketName: MEETING_CHAT_STORAGE_S3_BUCKET_NAME
+    env:
+      Smtp__Host: smtp.resend.com
+      Smtp__Port: "587"
+      Smtp__Username: resend
+
   workspace-service:
     image: workspace-service
     replicas: 2
@@ -409,6 +439,9 @@ workloads:
       AdminInbox__BillingUrl: http://billing-service:5107
       AdminInbox__AuthUrl: http://auth-service:5101
       AdminInbox__NotificationUrl: http://notification-service:5104
+      # PII-masked copy of a restricted PDF is rendered through the converter (masked text ->
+      # DOCX -> PDF). See allow-gotenberg-from-translation-room in network-policy.yaml.
+      Gotenberg__Url: http://gotenberg:3000
   billing-service:
     image: billing-service
     # Hosted background loops that must not run concurrently on two replicas. Rendered as the
@@ -461,6 +494,7 @@ workloads:
     image: assistant-service
     replicas: 2
     port: 5108
+    grpcPort: 50058
     healthPath: /health/ready
     cpu: 150m
     memory: 192Mi
@@ -618,6 +652,9 @@ workloads:
       TRANSCRIPT_CLEAN_IDLE_FLUSH_MS: "4000"
       TRANSCRIPT_CLEAN_LLM_TIMEOUT_S: "8"
       TRANSCRIPT_CLEAN_MAX_DELETE_RATIO: "0.4"
+      # A verified self-correction legitimately deletes more than the ordinary cap allows, so it
+      # has its own ceiling (see app.compose.yml).
+      TRANSCRIPT_CLEAN_SELF_REPAIR_MAX_DELETE_RATIO: "0.7"
       TRANSCRIPT_CLEAN_MODEL: gpt-4.1
     secretEnv:
       REDIS_PASSWORD: REDIS_PASSWORD
@@ -757,7 +794,18 @@ workloads:
 # that took longer than the old 5s timeout, and the kubelet killed healthy workers into
 # CrashLoopBackOff. 15s is a realistic ceiling; startup allows 15s x 12 = 3 min; liveness needs
 # 3 misses 30s apart (~1.5 min) before a restart. scripts/check-k3s-deployment.sh pins the floors.
+#
+# The probe is now `sh` reading the age of the heartbeat file (see workloads.yaml), which costs
+# milliseconds; the Python module is only the fallback while that file does not exist yet. The
+# timeouts are left as they were because the fallback still runs on an old image.
 workerProbe:
+  script: >-
+    [ -n "$WORKER_HEALTH_NAME" ] || exit 1;
+    for n in $(echo "$WORKER_HEALTH_NAME" | tr ',' ' '); do
+    f="${WORKER_HEALTH_DIR:-/tmp}/warptalk-heartbeat-$n";
+    [ -f "$f" ] || exec python -m shared.health_probe;
+    [ $(( $(date +%s) - $(stat -c %Y "$f") )) -le "${WORKER_HEALTH_MAX_HEARTBEAT_AGE_SECONDS:-30}" ] || exit 1;
+    done
   timeoutSeconds: 15
   startup:
     periodSeconds: 15

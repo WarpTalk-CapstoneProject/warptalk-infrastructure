@@ -145,12 +145,12 @@ grep -Fq "contentSecurityPolicy:" "$RENDERED_FILE"
 grep -Fq "frame-ancestors 'none'" "$RENDERED_FILE"
 grep -Fq "stsSeconds: 31536000" "$RENDERED_FILE"
 grep -Fq "endpoint: 0.0.0.0:8889" "$RENDERED_FILE"
-for grpc_port in 50051 50052 50053 50054 50055 50056 50057; do
+for grpc_port in 50051 50052 50053 50054 50055 50056 50057 50058; do
   grep -Fq "port: $grpc_port" "$RENDERED_FILE"
   grep -Fq "containerPort: $grpc_port" "$RENDERED_FILE"
 done
-[[ "$(grep -Fc -- "- name: grpc" "$RENDERED_FILE")" -eq 14 ]] || {
-  echo "expected exactly seven gRPC container ports and seven gRPC service ports" >&2
+[[ "$(grep -Fc -- "- name: grpc" "$RENDERED_FILE")" -eq 16 ]] || {
+  echo "expected exactly eight gRPC container ports and eight gRPC service ports" >&2
   exit 1
 }
 required_runtime_config=(
@@ -163,6 +163,8 @@ required_runtime_config=(
   "GrpcSettings__TranslationRoomServiceUrl"
   "GrpcSettings__TranscriptServiceUrl"
   "GrpcSettings__NotificationServiceUrl"
+  "GrpcSettings__AssistantServiceUrl"
+  "GrpcUrls__AssistantServiceUrl"
   "GrpcUrls__BillingServiceUrl"
   "GrpcUrls__TranslationRoomService"
   "GrpcUrls__BillingService"

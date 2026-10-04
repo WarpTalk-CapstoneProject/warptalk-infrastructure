@@ -97,7 +97,11 @@ resource "openstack_compute_instance_v2" "app" {
   }
 
   lifecycle {
-    ignore_changes = [user_data]
+    # block_device is ForceNew: a new volume_size would REPLACE this VM. The boot volume is grown
+    # in place instead (Cinder os-extend on the in-use volume, then growpart + resize2fs online);
+    # the variable records the size it was grown to. 60 -> 80 GiB on 2026-10-01, taken from
+    # data_durable, which held < 1 GiB of its 35.
+    ignore_changes = [user_data, block_device]
   }
 
   depends_on = [openstack_networking_router_interface_v2.warptalk]
@@ -140,7 +144,10 @@ resource "openstack_compute_instance_v2" "data" {
   }
 
   lifecycle {
-    ignore_changes = [user_data]
+    # The durable volume was replaced out of band on 2026-10-01 (35 -> 15 GiB: detach, delete,
+    # create, attach, restore; same filesystem UUID and label, so fstab is unchanged) and
+    # re-imported into data_durable. A changed block_device uuid would otherwise REPLACE the VM.
+    ignore_changes = [user_data, block_device]
   }
 
   depends_on = [openstack_networking_router_interface_v2.warptalk]

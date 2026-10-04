@@ -57,7 +57,8 @@ spec:
   policyTypes: [Ingress]
 ---
 # Gotenberg is the only workload in this namespace carrying a browser and a document converter,
-# and translation-room-service is the only pod with any business calling it. Nothing routes to it
+# and translation-room-service (minutes PDF) and workspace-service (masked PDF documents) are the
+# only pods with any business calling it. Nothing routes to it
 # from outside: it has no Ingress path, and traefik reaches it only through the rule above.
 #
 # READ THE UNION, NOT THE NAME. NetworkPolicies are additive, and allow-warptalk-internal already
@@ -79,6 +80,10 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: translation-room-service
+        # Renders the PII-masked copy of a restricted PDF document.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: workspace-service
       ports:
         - protocol: TCP
           port: 3000

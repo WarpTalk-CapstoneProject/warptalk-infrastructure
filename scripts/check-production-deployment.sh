@@ -709,6 +709,12 @@ echo "$APP_JSON" | jq -e '
   (.services["translation-room-service"].environment["Gotenberg__Url"] // "")
   | test("^http://gotenberg:3000$")
 ' >/dev/null || fail "translation-room-service must point at the internal gotenberg converter, or every PDF export answers 503"
+# The same silence applies to workspace-service: without the converter a restricted PDF gets no
+# PII-masked copy, so ordinary members can never open it, and nothing reports why.
+echo "$APP_JSON" | jq -e '
+  (.services["workspace-service"].environment["Gotenberg__Url"] // "")
+  | test("^http://gotenberg:3000$")
+' >/dev/null || fail "workspace-service must point at the internal gotenberg converter, or restricted PDFs get no masked copy"
 
 echo "$APP_JSON" | jq -e '
   (.services.gotenberg.expose // []) as $exposed

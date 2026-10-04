@@ -142,3 +142,44 @@ resource "openstack_networking_secgroup_rule_v2" "infra_egress" {
   ethertype         = "IPv4"
   security_group_id = openstack_networking_secgroup_v2.infra.id
 }
+
+# Tailscale WireGuard between every pair of nodes, so each pair connects DIRECTLY over the private
+# network instead of through Tailscale's DERP relay.
+#
+# Kubernetes runs entirely over tailscale0 (node IPs are 100.x): API server <-> kubelet, Calico
+# VXLAN, CoreDNS lookups. The groups above were written for docker-compose, where Data and Infra
+# never spoke, so nothing let their Tailscale endpoints reach each other: on 30 Sep `tailscale ping`
+# between them reported "direct connection not established" and every packet went through DERP at
+# ~90ms. DNS from Data-node pods to CoreDNS (on Infra) took 0.5-1s per lookup, which kept the
+# Data-node Redis sentinel in TILT and restarting (47 restarts in 6 days) and rolled back a release.
+#
+# Only Tailscale's own port is opened: WireGuard authenticates and encrypts every packet, and the
+# tailnet ACL decides what may talk to what.
+locals {
+  tailscale_peer_pairs = {
+    app_from_data   = { group = "app", remote = "data" }
+    app_from_infra  = { group = "app", remote = "infra" }
+    data_from_app   = { group = "data", remote = "app" }
+    data_from_infra = { group = "data", remote = "infra" }
+    infra_from_app  = { group = "infra", remote = "app" }
+    infra_from_data = { group = "infra", remote = "data" }
+  }
+  warptalk_secgroup_ids = {
+    app   = openstack_networking_secgroup_v2.app.id
+    data  = openstack_networking_secgroup_v2.data.id
+    infra = openstack_networking_secgroup_v2.infra.id
+  }
+}
+
+resource "openstack_networking_secgroup_rule_v2" "tailscale_direct" {
+  for_each = local.tailscale_peer_pairs
+
+  description       = "Tailscale WireGuard (direct path) from the ${each.value.remote} node"
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "udp"
+  port_range_min    = 41641
+  port_range_max    = 41641
+  remote_group_id   = local.warptalk_secgroup_ids[each.value.remote]
+  security_group_id = local.warptalk_secgroup_ids[each.value.group]
+}

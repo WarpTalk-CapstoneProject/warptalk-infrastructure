@@ -57,16 +57,23 @@ sentinel:
     digest: sha256:ae75dd69c192a632bdeb21baa6721080be5b12347e52add922036398b47631da
   quorum: 2
   automateClusterRecovery: true
+  # 300m (was 100m), request unchanged. Sentinel enters TILT when its own timer loop stalls for
+  # more than 2s, and in TILT it refuses to act for 30s — a master lost in that window is not
+  # failed over. redis-node-0's sentinel entered TILT 88 times in 8 days (62 in late Sep, 26 on
+  # 1-3 Oct) at 15% of its CFS periods throttled: the stall was its own 100m ceiling, not the
+  # clock. The App node it shares runs at ~15% CPU.
   resources:
     requests: {cpu: 25m, memory: 64Mi}
-    limits: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 300m, memory: 128Mi}
 metrics:
   enabled: true
   image:
     digest: sha256:fb1dae6add1e1104989d086d9407f7d65f58968550aa5fddea20637a758c0773
   resources:
     requests: {cpu: 10m, memory: 32Mi}
-    limits: {cpu: 50m, memory: 64Mi}
+    # 150m (was 50m): throttled 73% of its periods over 7 days, which shows up as late or missing
+    # scrapes of the one exporter the stream-lag alerts read.
+    limits: {cpu: 150m, memory: 64Mi}
   serviceMonitor:
     enabled: true
     additionalLabels:

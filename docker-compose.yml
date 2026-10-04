@@ -257,6 +257,9 @@ services:
       Authentication__Google__ClientId: ${GOOGLE_CLIENT_ID}
       Grpc__InternalSecret: ${GRPC_INTERNAL_SECRET:?Set GRPC_INTERNAL_SECRET in .env}
       Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD}"
+      # WT-888: transcribes the read-aloud voice-profile recording. Empty = profile creation answers
+      # 503 ("couldn't check your recording"), which is the intended fail-closed state.
+      OpenAI__ApiKey: ${OPENAI_API_KEY:-}
       # WT-644: S3ArtifactUrlSigner reads these to mint the short-lived link the record page plays
       # a recording from. They were set for this service in deploy/production and in the helm
       # chart but NOT here, so on the local stack every recording download threw "S3 signing
@@ -330,6 +333,10 @@ services:
       AdminInbox__BillingUrl: "http://billing-service:5107"
       AdminInbox__AuthUrl: "http://auth-service:5101"
       AdminInbox__NotificationUrl: "http://notification-service:5104"
+      # Renders the PII-masked copy of a restricted PDF (masked text -> DOCX -> PDF). Optional:
+      # unset, a PDF simply gets no masked copy and the document page says the converter is
+      # unavailable. Word, Excel and text files are masked in-process and do not need it.
+      Gotenberg__Url: ${GOTENBERG_URL:-http://gotenberg:3000}
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -360,6 +367,9 @@ services:
       GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
       GrpcSettings__TranscriptServiceUrl: "http://transcript-service:50053"
       GrpcSettings__WorkspaceServiceUrl: "http://workspace-service:50056"
+      # Google Meet bridge: MeetConferenceEndWorker ends a bridge room when its Meet conference
+      # ends, reading Meet REST through assistant-service's internal gRPC (meet_conference.proto).
+      GrpcSettings__AssistantServiceUrl: "http://assistant-service:50058"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
@@ -428,6 +438,9 @@ services:
       GrpcUrls__WorkspaceServiceUrl: "http://workspace-service:50056"
       GrpcUrls__TranslationRoomServiceUrl: "http://translation-room-service:50052"
       GrpcUrls__BillingServiceUrl: "http://billing-service:50057"
+      # Google Meet bridge: the far-speaker relabel worker reads Meet's own transcript through
+      # assistant-service's internal gRPC (meet_conference.proto).
+      GrpcUrls__AssistantServiceUrl: "http://assistant-service:50058"
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER:-WarpTalk.AuthService}
       Jwt__Audience: ${JWT_AUDIENCE:-WarpTalk}
@@ -560,6 +573,9 @@ services:
       GrpcSettings__NotificationServiceUrl: "http://notification-service:50054"
       # G10: admin endpoints ask auth-service who is staff (UserService.GetStaffAccess).
       GrpcSettings__AuthServiceUrl: "http://auth-service:50051"
+      # Google Meet bridge roster: checks the caller is the bridge room's host or participant and
+      # finds its Meet link through translation-room's room/participant reads.
+      GrpcSettings__TranslationRoomServiceUrl: "http://translation-room-service:50052"
     depends_on:
       migrator:
         condition: service_completed_successfully

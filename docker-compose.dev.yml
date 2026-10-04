@@ -72,6 +72,7 @@ services:
   assistant-service:
     ports:
       - "5108:5108"
+      - "50058:50058"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
 
